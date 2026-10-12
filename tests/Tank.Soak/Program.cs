@@ -17,6 +17,8 @@ public static class Program
 
     private const int Bots = 8;
     private const double MatchSeconds = 60;
+    /// <summary>Tick timings from the first seconds are dominated by JIT/tiered compilation, not by the game.</summary>
+    private const double TimingWarmupSeconds = 2.5;
     private const double FrameDt = 1.0 / 144;
 
     public static int Main()
@@ -29,13 +31,16 @@ public static class Program
             new Scenario("co-op AI load, wired", new LinkConditions(0.5, 0.2, 0), GameMode.Coop, 30),
         };
 
+        // Untimed warm-up so the first real scenario does not pay for JIT compilation.
+        Run(scenarios[0] with { Name = "(warm-up)" }, seconds: 8, report: false);
+
         Console.WriteLine($"{"scenario",-26}{"mispred/min",12}{"extrap",8}{"snap/s",8}{"down KB/s",10}{"interp ms",10}{"tick p99 ms",12}{"drops",7}  result");
         bool ok = true;
         foreach (var s in scenarios) ok &= Run(s);
         return ok ? 0 : 1;
     }
 
-    private static bool Run(Scenario scenario)
+    private static bool Run(Scenario scenario, double seconds = MatchSeconds, bool report = true)
     {
         var net = new LoopbackNetwork(seed: 11);
         var server = new GameServer(net.CreateServer(), new ServerOptions { Seed = 5, Mode = scenario.Mode, EnemyTotal = scenario.Enemies });
@@ -46,7 +51,7 @@ public static class Program
         var tickTimes = new List<double>();
         double serverAccumulator = 0;
         bool started = false;
-        int frames = (int)((MatchSeconds + 1) / FrameDt);
+        int frames = (int)((seconds + 1) / FrameDt);
         for (int f = 0; f < frames; f++)
         {
             net.AdvanceTime(FrameDt);
@@ -55,7 +60,7 @@ public static class Program
             {
                 long t0 = Stopwatch.GetTimestamp();
                 server.Tick();
-                if (started) tickTimes.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+                if (started && net.Now > 0.5 + TimingWarmupSeconds) tickTimes.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
                 serverAccumulator -= 1.0 / 60;
             }
             for (int i = 0; i < clients.Count; i++) clients[i].Update(FrameDt, BotInput(i, net.Now, scenario.Fire));
@@ -77,8 +82,9 @@ public static class Program
         tickTimes.Sort();
         double p99 = tickTimes.Count == 0 ? 0 : tickTimes[(int)(tickTimes.Count * 0.99)];
         int dropped = clients.Count(c => c.Phase == ClientPhase.Disconnected);
-        double perMinute = mispredictions / (double)Bots / (MatchSeconds / 60);
+        double perMinute = mispredictions / (double)Bots / (seconds / 60);
 
+        if (!report) return true;
         bool pass = dropped == 0 && perMinute <= scenario.MaxMispredictionsPerMinute && down < 50 && p99 < 2;
         Console.WriteLine($"{scenario.Name,-26}{perMinute,12:F1}{extrapolations,8}{snaps,8:F0}{down,10:F1}{interp,10:F1}{p99,12:F3}{dropped,7}  {(pass ? "PASS" : "FAIL")}");
         return pass;
