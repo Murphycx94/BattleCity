@@ -19,6 +19,13 @@ public static class Program
     private const double MatchSeconds = 60;
     /// <summary>Tick timings from the first seconds are dominated by JIT/tiered compilation, not by the game.</summary>
     private const double TimingWarmupSeconds = 2.5;
+
+    /// <summary>
+    /// Server tick p99 budget (docs/03 §11: 2 ms on real hardware). Shared CI VMs add scheduler noise to
+    /// wall-clock timing, so CI raises it via SOAK_TICK_BUDGET_MS to only catch gross regressions.
+    /// </summary>
+    private static readonly double TickBudgetMs =
+        double.TryParse(Environment.GetEnvironmentVariable("SOAK_TICK_BUDGET_MS"), System.Globalization.CultureInfo.InvariantCulture, out double b) ? b : 2.0;
     private const double FrameDt = 1.0 / 144;
 
     public static int Main()
@@ -34,7 +41,8 @@ public static class Program
         // Untimed warm-up so the first real scenario does not pay for JIT compilation.
         Run(scenarios[0] with { Name = "(warm-up)" }, seconds: 8, report: false);
 
-        Console.WriteLine($"{"scenario",-26}{"mispred/min",12}{"extrap",8}{"snap/s",8}{"down KB/s",10}{"interp ms",10}{"tick p99 ms",12}{"drops",7}  result");
+        Console.WriteLine($"tick budget: p99 < {TickBudgetMs} ms");
+        Console.WriteLine($"{"scenario",-26}{"mispred/min",12}{"extrap",8}{"snap/s",8}{"down KB/s",10}{"interp ms",10}{"tick p50/p99 ms",17}{"drops",7}  result");
         bool ok = true;
         foreach (var s in scenarios) ok &= Run(s);
         return ok ? 0 : 1;
@@ -81,12 +89,13 @@ public static class Program
         double interp = clients.Average(c => c.Stats.InterpDelayMs);
         tickTimes.Sort();
         double p99 = tickTimes.Count == 0 ? 0 : tickTimes[(int)(tickTimes.Count * 0.99)];
+        double p50 = tickTimes.Count == 0 ? 0 : tickTimes[tickTimes.Count / 2];
         int dropped = clients.Count(c => c.Phase == ClientPhase.Disconnected);
         double perMinute = mispredictions / (double)Bots / (seconds / 60);
 
         if (!report) return true;
-        bool pass = dropped == 0 && perMinute <= scenario.MaxMispredictionsPerMinute && down < 50 && p99 < 2;
-        Console.WriteLine($"{scenario.Name,-26}{perMinute,12:F1}{extrapolations,8}{snaps,8:F0}{down,10:F1}{interp,10:F1}{p99,12:F3}{dropped,7}  {(pass ? "PASS" : "FAIL")}");
+        bool pass = dropped == 0 && perMinute <= scenario.MaxMispredictionsPerMinute && down < 50 && p99 < TickBudgetMs;
+        Console.WriteLine($"{scenario.Name,-26}{perMinute,12:F1}{extrapolations,8}{snaps,8:F0}{down,10:F1}{interp,10:F1}{$"{p50:F3}/{p99:F3}",17}{dropped,7}  {(pass ? "PASS" : "FAIL")}");
         return pass;
     }
 
