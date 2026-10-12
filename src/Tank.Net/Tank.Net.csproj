@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Tank.Core\Tank.Core.csproj" />
+    <PackageReference Include="LiteNetLib" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tank.Net.Tests" />
+  </ItemGroup>
+</Project>

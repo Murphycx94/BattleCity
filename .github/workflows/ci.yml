@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Unit + integration tests (with coverage)
+        run: |
+          dotnet test tests/Tank.Core.Tests --collect:"XPlat Code Coverage" --results-directory coverage/core
+          dotnet test tests/Tank.Net.Tests --collect:"XPlat Code Coverage" --results-directory coverage/net
+      - name: Network soak (acceptance metrics, docs/03 §11)
+        run: dotnet run --project tests/Tank.Soak -c Release
+      - name: Build dedicated server
+        run: dotnet build src/Tank.Server -c Release
+      - name: Build Godot client assemblies
+        run: dotnet build src/Tank.Client/Tank.Client.csproj -c Release

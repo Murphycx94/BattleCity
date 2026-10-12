@@ -1,0 +1,12 @@
+bin/
+obj/
+.godot/
+.import/
+*.user
+.vs/
+.idea/
+TestResults/
+coverage/
+export/
+*.tankrec
+.DS_Store
