@@ -10,8 +10,8 @@ namespace Tank.Client.World;
 public partial class TerrainMesh : Node3D
 {
     private const int ChunkCells = 32;
-    private const float RockBelowUp = 0.82f;  // steeper than ~35°
-    private const float DirtBelowUp = 0.94f;  // steeper than ~20°
+    private const float RockBelowUp = 0.81f;  // steeper than ~36°
+    private const float DirtBelowUp = 0.91f;  // steeper than ~24°
     private const float DryAtHeight = 30f;
 
     private static readonly Color Grass = new(0.36f, 0.47f, 0.24f);
@@ -34,6 +34,13 @@ public partial class TerrainMesh : Node3D
             var chunk = BuildChunk(field, x0, z0, Math.Min(ChunkCells, cellsX - x0), Math.Min(ChunkCells, cellsZ - z0));
             AddChild(new MeshInstance3D { Mesh = chunk, MaterialOverride = material });
         }
+        // Skirt: grass-coloured ground far beyond the map so the horizon never shows the grey void where the terrain ends.
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(4000f, 4000f) },
+            Position = new Vector3(field.SizeX / 2f, -0.3f, field.SizeZ / 2f),
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = Grass, Roughness = 1f },
+        });
     }
 
     private static ArrayMesh BuildChunk(HeightField field, int x0, int z0, int width, int depth)
@@ -76,7 +83,7 @@ public partial class TerrainMesh : Node3D
     {
         if (up < RockBelowUp) return Rock;
         if (up < DirtBelowUp) return Dirt;
-        float dryness = Hash(i, j) * 0.4f + Mathf.Clamp(height / DryAtHeight, 0f, 0.6f);
+        float dryness = Hash(i, j) * 0.12f + Mathf.Clamp(height / DryAtHeight, 0f, 0.6f);
         return Grass.Lerp(DryGrass, dryness);
     }
 

@@ -12,7 +12,7 @@ public partial class OrbitCamera : Node3D
     private const float MinDistance = 8f;
     private const float MaxDistance = 30f;
     private const float DistanceStep = 2f;
-    private const float FocusHeight = 1.6f;
+    private const float FocusHeight = 4.5f;
     private const float GroundClearance = 1.2f;
     private const float MinPitch = -0.6f;
     private const float MaxPitch = 1.1f;
