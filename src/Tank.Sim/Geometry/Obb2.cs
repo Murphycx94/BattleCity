@@ -15,8 +15,10 @@ public readonly record struct Obb2(Vector2 Center, Vector2 HalfExtents, float Ya
     public Obb2 WithCenter(Vector2 center) => this with { Center = center };
 
     /// <summary>Half the box's extent projected onto unit <paramref name="axis"/>.</summary>
-    public float Radius(Vector2 axis) =>
-        HalfExtents.X * MathF.Abs(Vector2.Dot(AxisRight, axis)) + HalfExtents.Y * MathF.Abs(Vector2.Dot(AxisForward, axis));
+    public float Radius(Vector2 axis) => ProjectedRadius(HalfExtents, AxisRight, AxisForward, axis);
+
+    private static float ProjectedRadius(Vector2 half, Vector2 right, Vector2 forward, Vector2 axis) =>
+        half.X * MathF.Abs(Vector2.Dot(right, axis)) + half.Y * MathF.Abs(Vector2.Dot(forward, axis));
 
     public bool Contains(Vector2 point)
     {
@@ -30,11 +32,12 @@ public readonly record struct Obb2(Vector2 Center, Vector2 HalfExtents, float Ya
         push = Vector2.Zero;
         float best = float.MaxValue;
         Vector2 d = a.Center - b.Center;
-        Span<Vector2> axes = stackalloc Vector2[4] { a.AxisRight, a.AxisForward, b.AxisRight, b.AxisForward };
+        Vector2 aRight = a.AxisRight, aForward = a.AxisForward, bRight = b.AxisRight, bForward = b.AxisForward;
+        Span<Vector2> axes = stackalloc Vector2[4] { aRight, aForward, bRight, bForward };
         foreach (Vector2 axis in axes)
         {
             float distance = Vector2.Dot(d, axis);
-            float overlap = a.Radius(axis) + b.Radius(axis) - MathF.Abs(distance);
+            float overlap = ProjectedRadius(a.HalfExtents, aRight, aForward, axis) + ProjectedRadius(b.HalfExtents, bRight, bForward, axis) - MathF.Abs(distance);
             if (overlap <= 0)
             {
                 push = Vector2.Zero;

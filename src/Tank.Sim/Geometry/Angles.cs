@@ -44,11 +44,17 @@ public static class Angles
         return new Vector3(-MathF.Sin(yaw) * c, MathF.Sin(pitch), -MathF.Cos(yaw) * c);
     }
 
-    /// <summary>Inverse of <see cref="Direction"/>; <paramref name="direction"/> need not be normalized.</summary>
-    public static (float Yaw, float Pitch) AimAngles(Vector3 direction)
+    /// <summary>
+    /// Inverse of <see cref="Direction"/>; <paramref name="direction"/> need not be normalized. When the direction has no
+    /// horizontal component (straight up/down, or zero) the yaw is undefined and <paramref name="fallbackYaw"/> is returned.
+    /// </summary>
+    public static (float Yaw, float Pitch) AimAngles(Vector3 direction, float fallbackYaw = 0f)
     {
         float length = direction.Length();
-        if (length < 1e-6f) return (0, 0);
-        return (MathF.Atan2(-direction.X, -direction.Z), MathF.Asin(System.Math.Clamp(direction.Y / length, -1f, 1f)));
+        if (length < 1e-6f) return (fallbackYaw, 0);
+        float horizontal = MathF.Sqrt(direction.X * direction.X + direction.Z * direction.Z);
+        // `+ 0f` turns -0 into +0 so that straight back (+Z) yields +π instead of -π.
+        float yaw = horizontal < 1e-6f * length ? fallbackYaw : Wrap(MathF.Atan2(-direction.X + 0f, -direction.Z));
+        return (yaw, MathF.Asin(System.Math.Clamp(direction.Y / length, -1f, 1f)));
     }
 }

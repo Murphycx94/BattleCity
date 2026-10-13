@@ -59,4 +59,44 @@ public sealed class GeometryTests
         Assert.True(Intersect.SegmentPrism(Square(0, 0), 0, 2, new Vector3(0, 1, 0), new Vector3(5, 1, 0), out float t));
         Assert.Equal(0f, t);
     }
+
+    [Fact]
+    public void Penetration_OnlyOtherBoxAxisSeparates_ReturnsFalse() =>
+        Assert.False(Obb2.TryGetPenetration(Square(0, 0), Square(2.1f, 2.1f, MathF.PI / 4), out _));
+
+    [Fact]
+    public void Penetration_PushPointsTowardAsSide()
+    {
+        Assert.True(Obb2.TryGetPenetration(Square(0, 1.5f), Square(0, 0), out var push));
+        Assert.Equal(0f, push.X, 1e-5f);
+        Assert.Equal(0.5f, push.Y, 1e-5f);
+    }
+
+    [Fact]
+    public void Penetration_AfterApplyingPush_BoxesAreSeparated()
+    {
+        var a = Square(0.4f, 0.9f, 0.3f);
+        var b = Square(0, 0, 0.8f);
+        Assert.True(Obb2.TryGetPenetration(a, b, out var push));
+        Assert.False(Obb2.TryGetPenetration(a.WithCenter(a.Center + push * 1.0001f), b, out _));
+    }
+
+    [Fact]
+    public void SegmentPrism_StoppingShortOfTheBox_Misses() =>
+        Assert.False(Intersect.SegmentPrism(Square(0, 0), 0, 2, new Vector3(-5, 1, 0), new Vector3(-2, 1, 0), out _));
+
+    [Fact]
+    public void SegmentPrism_StartingPastTheBox_Misses() =>
+        Assert.False(Intersect.SegmentPrism(Square(0, 0), 0, 2, new Vector3(3, 1, 0), new Vector3(8, 1, 0), out _));
+
+    [Fact]
+    public void SegmentPrism_DescendingOntoTop_HitsAtTheTopPlane()
+    {
+        Assert.True(Intersect.SegmentPrism(Square(0, 0), 0, 2, new Vector3(0, 5, 0), new Vector3(0, -1, 0), out float t));
+        Assert.Equal(0.5f, t, 1e-5f);
+    }
+
+    [Fact]
+    public void SegmentPrism_ParallelOutsideTheBox_Misses() =>
+        Assert.False(Intersect.SegmentPrism(Square(0, 0), 0, 2, new Vector3(-5, 1, 3), new Vector3(5, 1, 3), out _));
 }

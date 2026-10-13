@@ -52,4 +52,46 @@ public sealed class AnglesTests
         Assert.Equal(1.1f, yaw, 1e-5f);
         Assert.Equal(-0.2f, pitch, 1e-5f);
     }
+
+    [Fact]
+    public void AimAngles_ZeroVector_ReturnsFallbackYaw()
+    {
+        var (yaw, pitch) = Angles.AimAngles(Vector3.Zero, 0.7f);
+        Assert.Equal(0.7f, yaw);
+        Assert.Equal(0f, pitch);
+    }
+
+    [Fact]
+    public void AimAngles_StraightUp_UsesFallbackYaw()
+    {
+        var (yaw, pitch) = Angles.AimAngles(new Vector3(0, 1, 0), 0.4f);
+        Assert.Equal(0.4f, yaw);
+        Assert.Equal(MathF.PI / 2, pitch, 1e-5f);
+    }
+
+    [Fact]
+    public void AimAngles_StraightBack_YawIsPlusPi()
+    {
+        var (yaw, _) = Angles.AimAngles(new Vector3(0, 0, 1));
+        Assert.True(yaw > 0);
+        Assert.Equal(MathF.PI, yaw, 1e-5f);
+    }
+
+    [Fact]
+    public void MoveTowards_CrossingMinusPi_WrapsToTheOtherSide() =>
+        Assert.Equal(Angles.Deg(-175), Angles.MoveTowards(Angles.Deg(175), Angles.Deg(-170), Angles.Deg(10)), 1e-4f);
+
+    [Fact]
+    public void Wrap_Pi_StaysPi() => Assert.Equal(MathF.PI, Angles.Wrap(MathF.PI));
+
+    [Fact]
+    public void Right_HasTheSameHandednessAtAnyYaw()
+    {
+        static float Cross(float yaw)
+        {
+            Vector2 f = Angles.Forward(yaw), r = Angles.Right(yaw);
+            return f.X * r.Y - f.Y * r.X;
+        }
+        Assert.Equal(MathF.Sign(Cross(0)), MathF.Sign(Cross(0.7f)));
+    }
 }
