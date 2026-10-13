@@ -26,6 +26,16 @@ internal static class TestWorld
         return new HeightField(Samples, Samples, Cell, heights);
     }
 
+    /// <summary>Flat south of <paramref name="edgeZ"/>, rising toward -Z at <paramref name="grade"/> beyond it.</summary>
+    public static HeightField CliffNorth(float edgeZ, float grade)
+    {
+        var heights = new float[Samples * Samples];
+        for (int j = 0; j < Samples; j++)
+        for (int i = 0; i < Samples; i++)
+            heights[j * Samples + i] = MathF.Max(0f, (edgeZ - j * Cell) * grade);
+        return new HeightField(Samples, Samples, Cell, heights);
+    }
+
     public static Battlefield Field(HeightField terrain, params Prop[] props) => new(terrain, props, Border);
 
     public static Battlefield FlatField(params Prop[] props) => Field(Flat(), props);

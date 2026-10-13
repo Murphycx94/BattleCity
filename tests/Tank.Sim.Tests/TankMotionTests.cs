@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Tests;
@@ -129,5 +130,70 @@ public sealed class TankMotionTests
         var t = TestWorld.Tank(100, 10);
         TestWorld.Drive(ref t, TestWorld.FlatField(), TestWorld.Cmd(throttle: 1), 300);
         Assert.Equal(TestWorld.Border, t.Position.Y, 1e-3f);
+    }
+
+    [Fact]
+    public void CliffApproachedAtFullSpeed_IsNotClimbed()
+    {
+        HeightField terrain = TestWorld.CliffNorth(100, 1f);
+        Battlefield field = TestWorld.Field(terrain);
+        var t = TestWorld.Tank(100, 190);
+        InputCmd cmd = TestWorld.Cmd(throttle: 1);
+        for (int i = 0; i < 300; i++)
+        {
+            TankMotion.Drive(ref t, cmd, field, ReadOnlySpan<Obb2>.Empty);
+            Assert.True(terrain.HeightAt(t.Position.X, t.Position.Y) <= 1.0f, $"tick {i}: height {terrain.HeightAt(t.Position.X, t.Position.Y)}");
+        }
+    }
+
+    [Fact]
+    public void SteepSlope_CannotBeClimbedDiagonally()
+    {
+        HeightField terrain = TestWorld.RampNorth(0.84f);
+        var t = TestWorld.Tank(150, 150, yaw: Angles.Deg(50));
+        float h0 = terrain.HeightAt(t.Position.X, t.Position.Y);
+        TestWorld.Drive(ref t, TestWorld.Field(terrain), TestWorld.Cmd(throttle: 1), 300);
+        Assert.True(terrain.HeightAt(t.Position.X, t.Position.Y) - h0 < 1f);
+    }
+
+    [Fact]
+    public void SteepSlope_CannotBeTraversedSideways()
+    {
+        var t = TestWorld.Tank(60, 100, yaw: -MathF.PI / 2);
+        TestWorld.Drive(ref t, TestWorld.Field(TestWorld.RampNorth(0.84f)), TestWorld.Cmd(throttle: 1), 120);
+        Assert.True(MathF.Abs(t.Position.X - 60) < 1f, $"x was {t.Position.X}");
+    }
+
+    [Fact]
+    public void SteepSlope_CanBeDescendedDiagonally()
+    {
+        var t = TestWorld.Tank(100, 100, yaw: MathF.PI - Angles.Deg(40));
+        TestWorld.Drive(ref t, TestWorld.Field(TestWorld.RampNorth(0.84f)), TestWorld.Cmd(throttle: 1), 60);
+        Assert.True(t.Position.Y > 103, $"z was {t.Position.Y}");
+    }
+
+    [Fact]
+    public void ReversingUpATooSteepSlope_IsBlocked()
+    {
+        var t = TestWorld.Tank(100, 150, yaw: MathF.PI);
+        TestWorld.Drive(ref t, TestWorld.Field(TestWorld.RampNorth(0.84f)), TestWorld.Cmd(throttle: -1), 120);
+        Assert.True(MathF.Abs(t.Position.Y - 150) < 1f, $"z was {t.Position.Y}");
+    }
+
+    [Fact]
+    public void Pivot_BetweenCloseRocks_NeverOverlaps()
+    {
+        var left = new Prop(1, PropKind.Rock, new Obb2(new Vector2(97.1f, 100), new Vector2(1, 4), 0), -1, 4);
+        var right = new Prop(2, PropKind.Rock, new Obb2(new Vector2(102.9f, 100), new Vector2(1, 4), 0), -1, 4);
+        Battlefield field = TestWorld.FlatField(left, right);
+        var t = TestWorld.Tank(100, 100);
+        InputCmd cmd = TestWorld.Cmd(steer: 1);
+        for (int i = 0; i < 90; i++)
+        {
+            TankMotion.Drive(ref t, cmd, field, ReadOnlySpan<Obb2>.Empty);
+            Obb2 box = TankMotion.Footprint(Spec, t.Position, t.Yaw);
+            Assert.False(Obb2.TryGetPenetration(box, left.Footprint, out _), $"tick {i} overlaps left rock");
+            Assert.False(Obb2.TryGetPenetration(box, right.Footprint, out _), $"tick {i} overlaps right rock");
+        }
     }
 }

@@ -12,6 +12,8 @@ public static class TankMotion
     private const float MovingThreshold = 0.5f;
     private const float MovingTurnFactor = 0.75f;
     private const int CollisionIterations = 3;
+    /// <summary>Minimum drop per metre travelled for a step to count as clearly downhill (an absolute margin would block the first, tiny steps from rest).</summary>
+    private const float DescentGrade = 0.05f;
 
     /// <summary>If collisions leave less than this fraction of the intended step, the hull was blocked head-on and stalls.</summary>
     private const float StallRatio = 0.25f;
@@ -25,6 +27,7 @@ public static class TankMotion
         TankSpec spec = t.Spec;
         const float dt = SimConstants.Dt;
 
+        float oldYaw = t.Yaw;
         float turnRate = spec.HullTraverse * (MathF.Abs(t.Speed) > MovingThreshold ? MovingTurnFactor : 1f);
         t.Yaw = Angles.Wrap(t.Yaw - System.Math.Sign(input.Steer) * turnRate * dt);
 
@@ -34,8 +37,9 @@ public static class TankMotion
 
         Vector2 start = t.Position;
         Vector2 intended = Angles.Forward(t.Yaw) * (t.Speed * dt);
-        Vector2 moved = Resolve(Footprint(spec, start + intended, t.Yaw), field, obstacles);
-        t.Position = field.ClampToPlayable(moved);
+        Vector2 dest = field.ClampToPlayable(Resolve(Footprint(spec, start + intended, t.Yaw), field, obstacles));
+        if (IsTooSteepToEnter(spec, field.Terrain, start, dest)) dest = start;
+        (t.Position, t.Yaw) = SettleWithoutOverlap(spec, dest, t.Yaw, oldYaw, start, field, obstacles);
 
         // Pushed almost straight back (head-on into a rock, a tank or the map edge): stall.
         // A glancing contact keeps its speed so the hull slides along the obstacle.
@@ -48,7 +52,7 @@ public static class TankMotion
     {
         TankSpec spec = t.Spec;
         TankPose pose = TankPose.Compute(t, terrain);
-        var (wantYaw, wantPitch) = pose.ToHullAngles(Angles.Direction(input.AimYaw, input.AimPitch));
+        var (wantYaw, wantPitch) = pose.ToHullAngles(Angles.Direction(input.AimYaw, input.AimPitch), t.TurretYaw);
         t.TurretYaw = Angles.MoveTowards(t.TurretYaw, wantYaw, spec.TurretTraverse * SimConstants.Dt);
         float pitch = System.Math.Clamp(wantPitch, -spec.GunDepression, spec.GunElevation);
         t.GunPitch = Scalar.MoveTowards(t.GunPitch, pitch, spec.GunPitchSpeed * SimConstants.Dt);
@@ -72,6 +76,32 @@ public static class TankMotion
         if (uphill >= spec.MaxClimb) return 0f;
         float c = MathF.Cos(uphill);
         return target * c * c;
+    }
+
+    /// <summary>A step is refused when the destination slope exceeds the climb limit and the step is not clearly downhill.</summary>
+    private static bool IsTooSteepToEnter(TankSpec spec, HeightField terrain, Vector2 start, Vector2 dest)
+    {
+        float slope = MathF.Acos(System.Math.Clamp(terrain.NormalAt(dest.X, dest.Y).Y, -1f, 1f));
+        return slope > spec.MaxClimb && terrain.HeightAt(dest.X, dest.Y) > terrain.HeightAt(start.X, start.Y) - DescentGrade * Vector2.Distance(start, dest);
+    }
+
+    /// <summary>Keeps the turned heading only if the hull ends clear of every prop and obstacle; otherwise falls back to the old heading, then the old pose.</summary>
+    private static (Vector2 Position, float Yaw) SettleWithoutOverlap(
+        TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+    {
+        if (!Overlaps(Footprint(spec, dest, yaw), field, obstacles)) return (dest, yaw);
+        if (!Overlaps(Footprint(spec, dest, oldYaw), field, obstacles)) return (dest, oldYaw);
+        return (oldPosition, oldYaw);
+    }
+
+    private static bool Overlaps(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+    {
+        IReadOnlyList<Prop> props = field.Props;
+        for (int i = 0; i < props.Count; i++)
+            if (Obb2.TryGetPenetration(box, props[i].Footprint, out _)) return true;
+        foreach (Obb2 other in obstacles)
+            if (Obb2.TryGetPenetration(box, other, out _)) return true;
+        return false;
     }
 
     private static Vector2 Resolve(Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)

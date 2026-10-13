@@ -41,8 +41,8 @@ public readonly record struct TankPose(Vector3 Position, Quaternion Rotation)
         Trunnion(spec) + GunDirection(turretYaw, gunPitch) * spec.GunLength;
 
     /// <summary>Turret yaw and gun pitch (hull-relative) that point the barrel along world <paramref name="direction"/>.</summary>
-    public (float TurretYaw, float GunPitch) ToHullAngles(Vector3 direction) =>
-        Angles.AimAngles(Vector3.Transform(direction, Quaternion.Inverse(Rotation)));
+    public (float TurretYaw, float GunPitch) ToHullAngles(Vector3 direction, float fallbackYaw = 0f) =>
+        Angles.AimAngles(Vector3.Transform(direction, Quaternion.Inverse(Rotation)), fallbackYaw);
 
     private static float Height(HeightField terrain, Vector2 p) => terrain.HeightAt(p.X, p.Y);
 }
