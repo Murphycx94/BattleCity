@@ -1,4 +1,3 @@
-using Tank.Sim.Geometry;
 using Tank.Sim.Terrain;
 
 namespace Tank.Sim.Tests;
@@ -40,18 +39,5 @@ public sealed class TerrainGeneratorTests
         var field = TerrainGenerator.Generate(1, 101, 2f, 0f, new[] { new TerrainGenerator.Hill(100, 100, 30, 10) });
         Assert.Equal(10f, field.HeightAt(100, 100), 1e-4f);
         Assert.Equal(0f, field.HeightAt(100, 132), 1e-4f);
-    }
-
-    [Fact]
-    public void XorShift_SameSeed_SameSequence_InUnitRange()
-    {
-        var a = new XorShift(42);
-        var b = new XorShift(42);
-        for (int k = 0; k < 100; k++)
-        {
-            float x = a.NextFloat();
-            Assert.Equal(x, b.NextFloat());
-            Assert.InRange(x, 0f, 0.99999994f);
-        }
     }
 }

@@ -41,4 +41,19 @@ public sealed class BattlefieldTests
     [Fact]
     public void Ctor_RejectsBorderWiderThanHalfTheMap() =>
         Assert.Throws<ArgumentOutOfRangeException>(() => new Battlefield(TestWorld.Flat(), Array.Empty<Prop>(), 120));
+
+    private static Prop PropWith(int id, float height = 5) =>
+        new(id, PropKind.Rock, new Obb2(new Vector2(60, 100), new Vector2(1, 1), 0), 0, height);
+
+    [Fact]
+    public void Ctor_RejectsPropWithTerrainId() =>
+        Assert.Throws<ArgumentException>(() => new Battlefield(TestWorld.Flat(), new[] { PropWith(RayHit.TerrainId) }, TestWorld.Border));
+
+    [Fact]
+    public void Ctor_RejectsDuplicatePropIds() =>
+        Assert.Throws<ArgumentException>(() => new Battlefield(TestWorld.Flat(), new[] { PropWith(3), PropWith(3) }, TestWorld.Border));
+
+    [Fact]
+    public void Ctor_RejectsNonPositiveHeight() =>
+        Assert.Throws<ArgumentException>(() => new Battlefield(TestWorld.Flat(), new[] { PropWith(2, 0) }, TestWorld.Border));
 }

@@ -6,7 +6,7 @@ public static class TerrainGenerator
     private const float NoiseScale = 60f;
     private const int Octaves = 4;
 
-    /// <summary>A cosine-shaped bump: full <see cref="Height"/> at the centre, zero at <see cref="Radius"/>.</summary>
+    /// <summary>Smooth bump: full <see cref="Height"/> at the centre, zero at <see cref="Radius"/>.</summary>
     public readonly record struct Hill(float X, float Z, float Radius, float Height);
 
     public static HeightField Generate(int seed, int samples, float cellSize, float roughness, IReadOnlyList<Hill> hills)
@@ -27,7 +27,9 @@ public static class TerrainGenerator
     {
         float dx = x - hill.X, dz = z - hill.Z;
         float d = MathF.Sqrt(dx * dx + dz * dz) / hill.Radius;
-        return d >= 1 ? 0 : hill.Height * 0.5f * (1 + MathF.Cos(d * MathF.PI));
+        if (d >= 1) return 0;
+        float s = 1 - d * d;
+        return hill.Height * s * s;
     }
 
     private static float Fractal(int seed, float x, float z)

@@ -9,6 +9,7 @@ namespace Tank.Sim.Terrain;
 public sealed class HeightField
 {
     private const int RefineSteps = 12;
+    private const int MaxSteps = 4096;
     private readonly float[] _heights;
 
     public HeightField(int samplesX, int samplesZ, float cellSize, float[] heights)
@@ -20,7 +21,7 @@ public sealed class HeightField
         SamplesX = samplesX;
         SamplesZ = samplesZ;
         CellSize = cellSize;
-        _heights = heights;
+        _heights = (float[])heights.Clone();
     }
 
     public int SamplesX { get; }
@@ -52,12 +53,19 @@ public sealed class HeightField
         return Vector3.Normalize(new Vector3(-dx, 2 * e, -dz));
     }
 
-    /// <summary>First point where segment <paramref name="from"/>→<paramref name="to"/> goes below ground, as t in [0, 1].</summary>
+    /// <summary>
+    /// First point where segment <paramref name="from"/>→<paramref name="to"/> goes below ground, as t in [0, 1].
+    /// Marches in half-cell steps; a ridge sharper than the step can be tunnelled by up to ~slopeChange·step/4.
+    /// Fine for generated terrain; switch to an exact cell walk before hand-authored sharp ridges.
+    /// Returns false if either endpoint is not finite.
+    /// </summary>
     public bool Raycast(Vector3 from, Vector3 to, out float t)
     {
         t = 0;
+        if (!IsFinite(from) || !IsFinite(to)) return false;
         if (Below(from)) return true;
-        int steps = System.Math.Max(1, (int)MathF.Ceiling(Vector3.Distance(from, to) / (CellSize * 0.5f)));
+        float wanted = MathF.Ceiling(Vector3.Distance(from, to) / (CellSize * 0.5f));
+        int steps = (int)System.Math.Clamp(wanted, 1f, MaxSteps);
         float previous = 0;
         for (int s = 1; s <= steps; s++)
         {
@@ -71,6 +79,8 @@ public sealed class HeightField
         }
         return false;
     }
+
+    private static bool IsFinite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
 
     private bool Below(Vector3 p) => p.Y < HeightAt(p.X, p.Z);
 

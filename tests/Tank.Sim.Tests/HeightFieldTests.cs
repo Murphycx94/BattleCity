@@ -57,4 +57,40 @@ public sealed class HeightFieldTests
     [Fact]
     public void Ctor_RejectsWrongHeightCount() =>
         Assert.Throws<ArgumentException>(() => new HeightField(3, 3, 1f, new float[8]));
+
+    [Fact]
+    public void Raycast_NonFiniteEndpoint_ReturnsFalse()
+    {
+        var field = TestWorld.Flat();
+        Assert.False(field.Raycast(new Vector3(float.NaN, 5, 0), new Vector3(10, 5, 10), out float t));
+        Assert.Equal(0f, t);
+        Assert.False(field.Raycast(new Vector3(0, 5, 0), new Vector3(10, float.PositiveInfinity, 10), out _));
+    }
+
+    [Fact]
+    public void Raycast_HugeSegment_ReturnsPromptly() =>
+        Assert.False(TestWorld.Flat().Raycast(new Vector3(0, 5, 0), new Vector3(3e9f, 5, 0), out _));
+
+    [Fact]
+    public void Raycast_HorizontalIntoRamp_HitsWhereGroundRises()
+    {
+        Assert.True(TestWorld.RampNorth(0.5f).Raycast(new Vector3(100, 60, 150), new Vector3(100, 60, 50), out float t));
+        Assert.Equal(0.7f, t, 1e-3f);
+    }
+
+    [Fact]
+    public void Raycast_StartingBelowGround_HitsAtZero()
+    {
+        Assert.True(TestWorld.Flat().Raycast(new Vector3(10, -1, 10), new Vector3(20, 5, 20), out float t));
+        Assert.Equal(0f, t);
+    }
+
+    [Fact]
+    public void Ctor_CopiesHeights()
+    {
+        var source = new float[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+        var field = new HeightField(3, 3, 10f, source);
+        source[4] = 100;
+        Assert.Equal(4f, field.HeightAt(10, 10), 1e-5f);
+    }
 }

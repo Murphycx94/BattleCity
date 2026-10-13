@@ -21,6 +21,16 @@ public sealed class Battlefield
             throw new ArgumentOutOfRangeException(nameof(border), $"Border {border}m leaves no playable area.");
         Terrain = terrain;
         _props = props.ToArray();
+        var seen = new HashSet<int>();
+        foreach (var prop in _props)
+        {
+            if (prop.Id == RayHit.TerrainId)
+                throw new ArgumentException($"Prop id {prop.Id} is reserved for terrain.", nameof(props));
+            if (!seen.Add(prop.Id))
+                throw new ArgumentException($"Duplicate prop id {prop.Id}.", nameof(props));
+            if (prop.Height <= 0)
+                throw new ArgumentException($"Prop {prop.Id} must have positive height, got {prop.Height}.", nameof(props));
+        }
         Border = border;
     }
 
