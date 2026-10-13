@@ -68,8 +68,9 @@ public sealed class SimulationTests
     public void Reload_GatesTheNextShot()
     {
         var sim = NewSim(out _);
-        Run(sim, TestWorld.Cmd(fire: true), (int)(Spec.ReloadTime * SimConstants.TickRate) + 15);
-        Assert.Equal(2, sim.Tanks[0].ShotCount);
+        var events = Run(sim, TestWorld.Cmd(fire: true), 200);
+        var fireTicks = events.Where(e => e.Type == GameEventType.ShellFired).Select(e => e.Tick).ToArray();
+        Assert.Equal(new[] { 1, 1 + (int)MathF.Round(Spec.ReloadTime * SimConstants.TickRate) }, fireTicks);
     }
 
     [Fact]
@@ -128,5 +129,35 @@ public sealed class SimulationTests
         Assert.Equal(0f, boom.Position.Y, 0.05f);
         Assert.InRange(boom.Position.Z, 60f, 95f);
         Assert.Equal(0, sim.ShellCount);
+    }
+
+    [Fact]
+    public void ShellFlyingOffTheMap_IsRetiredWithoutAnExplosion()
+    {
+        var sim = new Simulation(TestWorld.FlatField());
+        sim.AddTank(Spec, new Vector2(100, TestWorld.Size - TestWorld.Border), 0f);
+        float south = MathF.PI;
+        Run(sim, TestWorld.Cmd(aimYaw: south), 120); // swing the turret round to face the map edge
+        var events = Run(sim, TestWorld.Cmd(aimYaw: south, fire: true), 1);
+        events.AddRange(Run(sim, TestWorld.Cmd(aimYaw: south), 5));
+
+        Assert.Single(events, e => e.Type == GameEventType.ShellFired);
+        Assert.DoesNotContain(events, e => e.Type == GameEventType.ShellExploded);
+        Assert.Equal(0, sim.ShellCount);
+    }
+
+    [Fact]
+    public void Reticle_PredictsTheExactImpactOfTheNextShot()
+    {
+        var sim = NewSim(out _);
+        var aim = TestWorld.Cmd(aimPitch: -0.05f);
+        Run(sim, aim, 30);
+        var launch = Tank.Sim.Combat.Ballistics.Aim(sim.Tanks[0], sim.Field);
+        Assert.False(launch.Blocked);
+        Assert.True(Tank.Sim.Combat.Ballistics.PredictImpact(launch.Origin, launch.Velocity, sim.Field, out Vector3 predicted));
+
+        var events = Run(sim, TestWorld.Cmd(aimPitch: -0.05f, fire: true), 90);
+        GameEvent boom = Assert.Single(events, e => e.Type == GameEventType.ShellExploded);
+        Assert.Equal(predicted, boom.Position);
     }
 }

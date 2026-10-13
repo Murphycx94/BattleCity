@@ -1,3 +1,4 @@
+using System.Numerics;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Vehicles;
@@ -38,5 +39,32 @@ public sealed class SandboxMapTests
         Battlefield field = SandboxMap.Create();
         Assert.All(field.Props, p =>
             Assert.True(p.Top > field.Terrain.HeightAt(p.Footprint.Center.X, p.Footprint.Center.Y) + 1f, $"rock {p.Id} is buried"));
+    }
+
+    [Fact]
+    public void DrivingStraightFromSpawn_ClimbsTheBigHill()
+    {
+        var sim = new Simulation(SandboxMap.Create());
+        sim.AddTank(TankCatalog.Medium, SandboxMap.Spawn, SandboxMap.SpawnYaw);
+        var input = new[] { TestWorld.Cmd(throttle: 1) };
+        float highest = 0f;
+        for (int i = 0; i < 20 * SimConstants.TickRate; i++)
+        {
+            sim.Step(input);
+            Vector2 p = sim.Tanks[0].Position;
+            highest = MathF.Max(highest, sim.Field.Terrain.HeightAt(p.X, p.Y));
+        }
+        Assert.True(highest > 18f, $"only reached {highest}m");
+    }
+
+    [Fact]
+    public void Terrain_HasSlopesSteeperThanTheClimbLimit()
+    {
+        var terrain = SandboxMap.Create().Terrain;
+        float steepest = 0f;
+        for (float z = 0; z <= terrain.SizeZ; z += 2f)
+        for (float x = 0; x <= terrain.SizeX; x += 2f)
+            steepest = MathF.Max(steepest, MathF.Acos(terrain.NormalAt(x, z).Y));
+        Assert.True(steepest > TankCatalog.Medium.MaxClimb, $"steepest {steepest} rad");
     }
 }

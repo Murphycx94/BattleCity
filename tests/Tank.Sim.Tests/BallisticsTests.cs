@@ -14,7 +14,7 @@ public sealed class BallisticsTests
     {
         var shell = new Shell { Position = Origin, Velocity = Velocity };
         while (shell.Age < Ballistics.MaxLifetime)
-            if (Ballistics.Step(ref shell, field, out var hit)) return hit;
+            if (Ballistics.Step(ref shell, field, out var hit) == ShellStep.Hit) return hit;
         throw new Xunit.Sdk.XunitException("Shell never landed.");
     }
 
@@ -47,4 +47,20 @@ public sealed class BallisticsTests
     [Fact]
     public void PredictImpact_ShotStraightUp_ExpiresWithoutHit() =>
         Assert.False(Ballistics.PredictImpact(new Vector3(100, 1, 100), new Vector3(0, 30, 0), TestWorld.FlatField(), out _));
+
+    [Fact]
+    public void LevelShotTowardMapEdge_IsGoneWithinAFewTicks_WithoutHit()
+    {
+        var field = TestWorld.FlatField();
+        var shell = new Shell { Position = new Vector3(100, 5, 190), Velocity = new Vector3(0, 0, 800) };
+        ShellStep result = ShellStep.Flying;
+        int ticks = 0;
+        while (result == ShellStep.Flying && ticks < 10) { result = Ballistics.Step(ref shell, field, out _); ticks++; }
+        Assert.Equal(ShellStep.Gone, result);
+        Assert.True(ticks <= 3, $"took {ticks} ticks");
+    }
+
+    [Fact]
+    public void PredictImpact_ShotOffTheMap_ReturnsFalse() =>
+        Assert.False(Ballistics.PredictImpact(new Vector3(100, 5, 190), new Vector3(0, 0, 800), TestWorld.FlatField(), out _));
 }

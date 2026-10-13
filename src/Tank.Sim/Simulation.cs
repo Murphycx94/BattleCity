@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
@@ -20,6 +21,8 @@ public sealed class Simulation
     private readonly Obb2[] _footprints = new Obb2[MaxTanks];
     private readonly Obb2[] _others = new Obb2[MaxTanks];
     private readonly List<GameEvent> _events = new(16);
+    /// <summary>Float drift in the countdown must not cost an extra tick of reload.</summary>
+    private const float ReloadEpsilon = 1e-4f;
     private int _nextId = 1;
 
     public Simulation(Battlefield field) => Field = field;
@@ -32,7 +35,7 @@ public sealed class Simulation
     public ReadOnlySpan<Shell> Shells => _shells.AsSpan(0, ShellCount);
 
     /// <summary>Events produced by the most recent <see cref="Step"/>.</summary>
-    public IReadOnlyList<GameEvent> Events => _events;
+    public ReadOnlySpan<GameEvent> Events => CollectionsMarshal.AsSpan(_events);
 
     /// <returns>The new tank's id. It occupies the next slot in <see cref="Tanks"/>.</returns>
     public int AddTank(TankSpec spec, Vector2 position, float yaw)
@@ -97,25 +100,25 @@ public sealed class Simulation
     private void TryFire(ref TankState tank, in InputCmd input)
     {
         tank.Reload = MathF.Max(0, tank.Reload - SimConstants.Dt);
+        if (tank.Reload < ReloadEpsilon) tank.Reload = 0f;
         if (!input.Fire || tank.Reload > 0 || ShellCount == MaxShells) return;
 
-        TankPose pose = TankPose.Compute(tank, Field.Terrain);
-        Vector3 trunnion = pose.Trunnion(tank.Spec);
+        Ballistics.Launch launch = Ballistics.Aim(tank, Field);
         var shell = new Shell
         {
             Id = _nextId++,
             OwnerTankId = tank.Id,
-            Position = pose.Muzzle(tank.Spec, tank.TurretYaw, tank.GunPitch),
-            Velocity = pose.GunDirection(tank.TurretYaw, tank.GunPitch) * tank.Spec.ShellSpeed,
+            Position = launch.Origin,
+            Velocity = launch.Velocity,
         };
         tank.Reload = tank.Spec.ReloadTime;
         tank.ShotCount++;
         _events.Add(new GameEvent(GameEventType.ShellFired, Tick, tank.Id, shell.Id, shell.Position, shell.Velocity));
 
         // Barrel pushed into a rock or the ground: the shell bursts where the barrel meets it instead of spawning inside.
-        if (Field.Raycast(trunnion, shell.Position, out RayHit blocked))
+        if (launch.Blocked)
         {
-            _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, tank.Id, shell.Id, blocked.Point, Vector3.Zero));
+            _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, tank.Id, shell.Id, launch.BlockPoint, Vector3.Zero));
             return;
         }
         _shells[ShellCount++] = shell;
@@ -126,9 +129,9 @@ public sealed class Simulation
         for (int i = ShellCount - 1; i >= 0; i--)
         {
             ref Shell shell = ref _shells[i];
-            bool hit = Ballistics.Step(ref shell, Field, out RayHit rayHit);
-            if (!hit && shell.Age < Ballistics.MaxLifetime) continue;
-            if (hit)
+            ShellStep step = Ballistics.Step(ref shell, Field, out RayHit rayHit);
+            if (step == ShellStep.Flying) continue;
+            if (step == ShellStep.Hit)
                 _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, shell.OwnerTankId, shell.Id, rayHit.Point, Vector3.Zero));
             _shells[i] = _shells[--ShellCount];
         }
