@@ -47,7 +47,7 @@ public sealed class LiteNetServerTransport : IServerTransport
     public void Start()
     {
         if (!_manager.Start(IPAddress.Any, IPAddress.IPv6Any, _port))
-            throw new InvalidOperationException($"Could not bind UDP port {_port}. Is another server already running?");
+            throw new InvalidOperationException($"无法占用 UDP 端口 {_port}，可能已有另一个房间在运行。");
     }
 
     public void Poll(ITransportHandler handler)

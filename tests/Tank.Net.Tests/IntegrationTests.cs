@@ -224,7 +224,7 @@ public sealed class IntegrationTests
         h.Run(0.5);
 
         Assert.Equal(ClientPhase.Disconnected, b.Phase);
-        Assert.Contains("full", b.DisconnectReason);
+        Assert.Contains("已满", b.DisconnectReason);
     }
 
     [Fact]

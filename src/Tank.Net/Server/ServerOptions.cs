@@ -5,7 +5,7 @@ namespace Tank.Net.Server;
 
 public sealed record ServerOptions
 {
-    public string RoomName { get; init; } = "Tank 3D";
+    public string RoomName { get; init; } = "坦克 3D";
     public int Port { get; init; } = ProtocolInfo.DefaultPort;
     public int MaxPlayers { get; init; } = GameState.MaxPlayers;
     public GameMode Mode { get; init; } = GameMode.Coop;

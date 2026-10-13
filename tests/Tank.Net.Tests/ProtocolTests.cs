@@ -39,6 +39,16 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public void WriteString_TruncatesOnCharacterBoundary()
+    {
+        var w = new BitWriter();
+        w.WriteString("坦克坦克坦克坦克坦克", 25); // 30 bytes of UTF-8; a 25-byte cut lands inside the 9th character
+
+        var r = new BitReader(w.Data);
+        Assert.Equal("坦克坦克坦克坦克", r.ReadString(25));
+    }
+
+    [Fact]
     public void BitReader_RejectsOversizedStrings()
     {
         var w = new BitWriter();

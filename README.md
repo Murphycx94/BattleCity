@@ -42,7 +42,7 @@ godot-mono --editor --path src/Tank.Client
 godot-mono --path src/Tank.Client
 ```
 
-**开房**：选择模式 → *HOST GAME*。**加入**：在 *ROOMS ON THIS NETWORK* 里选房间，或直接输入房主 IP。
+**开房**：选择模式 → *开设房间*。**加入**：在 *局域网内的房间* 里选房间，或直接输入房主 IP。
 
 操作：WASD / 方向键移动 · J / 空格开火 · C 切换俯视/跟随镜头 · F3 网络面板 · Tab 计分板 · Esc 离开。
 

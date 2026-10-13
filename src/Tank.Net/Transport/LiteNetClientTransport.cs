@@ -32,7 +32,7 @@ public sealed class LiteNetClientTransport : IClientTransport
         };
         _listener.NetworkReceiveEvent += (_, reader, _, _) => _handler?.OnData(0, reader.GetRemainingBytesSpan());
 
-        if (!_manager.Start()) throw new InvalidOperationException("Could not open a UDP socket.");
+        if (!_manager.Start()) throw new InvalidOperationException("无法打开 UDP 套接字。");
         _manager.Connect(host, port, ProtocolInfo.ConnectKey);
     }
 

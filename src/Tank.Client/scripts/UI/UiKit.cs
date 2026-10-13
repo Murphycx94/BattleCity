@@ -3,7 +3,7 @@ using Tank.Client.View;
 
 namespace Tank.Client.UI;
 
-/// <summary>Shared look for all screens: monospace arcade type, amber accent, hard-edged panels.</summary>
+/// <summary>Shared look for all screens: monospace arcade type (CJK fallback), amber accent, hard-edged panels.</summary>
 public static class UiKit
 {
     private static Theme? _theme;
@@ -81,12 +81,36 @@ public static class UiKit
 
     public static Control Gap(int px) => new Control { CustomMinimumSize = new Vector2(px, px) };
 
+    /// <summary>
+    /// Right-pads text to a column width for the monospace tables (room list, scoreboard). CJK and full-width
+    /// characters occupy two columns, so string.PadRight alone would misalign rows that mix them with ASCII.
+    /// </summary>
+    public static string Pad(string text, int columns)
+    {
+        int width = text.Sum(c => IsWide(c) ? 2 : 1);
+        return width >= columns ? text : text + new string(' ', columns - width);
+    }
+
+    private static bool IsWide(char c) =>
+        c is >= '\u1100' and <= '\u115F' or >= '\u2E80' and <= '\uA4CF' or >= '\uAC00' and <= '\uD7A3'
+            or >= '\uF900' and <= '\uFAFF' or >= '\uFE30' and <= '\uFE4F' or >= '\uFF00' and <= '\uFF60' or >= '\uFFE0' and <= '\uFFE6';
+
     private static Theme BuildTheme()
     {
         var font = new SystemFont
         {
             FontNames = new[] { "JetBrains Mono", "SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", "monospace" },
             FontWeight = 600,
+            // The monospace faces have no Chinese glyphs; name a Simplified Chinese face per platform. Not "PingFang SC":
+            // Godot opens the PingFang HK face of that collection, which lacks simplified-only characters such as 敌 / 迟.
+            Fallbacks = new Godot.Collections.Array<Font>
+            {
+                new SystemFont
+                {
+                    FontNames = new[] { "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "sans-serif" },
+                    FontWeight = 600,
+                },
+            },
         };
         var theme = new Theme { DefaultFont = font, DefaultFontSize = 18 };
         var normal = Box(new Color(0.13f, 0.14f, 0.19f), 10, new Color(1, 1, 1, 0.1f));

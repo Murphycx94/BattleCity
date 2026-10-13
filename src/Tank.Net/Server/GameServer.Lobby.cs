@@ -14,7 +14,7 @@ public sealed partial class GameServer
         _awaitingHello.Remove(peerId);
         if (hello.ProtocolVersion != ProtocolInfo.Version)
         {
-            Reject(peerId, $"Version mismatch: server v{ProtocolInfo.Version}, client v{hello.ProtocolVersion}.");
+            Reject(peerId, $"版本不一致：房主 v{ProtocolInfo.Version}，你的客户端 v{hello.ProtocolVersion}。");
             return;
         }
 
@@ -22,7 +22,7 @@ public sealed partial class GameServer
         var conn = FindReconnect(hello.SessionToken) ?? AllocateSlot(isOwner ? hello.SessionToken : null);
         if (conn is null)
         {
-            Reject(peerId, "Room is full.");
+            Reject(peerId, "房间已满。");
             return;
         }
 

@@ -33,6 +33,7 @@ public partial class Main : Node
     {
         _options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
         _netGraph = _options.NetGraph;
+        GetWindow().Title = "坦克 3D";
         _menu = new MenuScreen();
         _menu.HostRequested += (name, mode) => Host(name, mode);
         _menu.JoinRequested += (name, host, port) => Join(name, host, port);
@@ -40,7 +41,7 @@ public partial class Main : Node
         _menu.PlayerName = _options.Name ?? System.Environment.UserName;
 
         _lobby = new LobbyScreen { Visible = false, LocalAddresses = string.Join(", ", LocalIPv4()) };
-        _lobby.LeaveRequested += () => LeaveToMenu("Left the room.");
+        _lobby.LeaveRequested += () => LeaveToMenu("已离开房间。");
         AddChild(_lobby);
 
         if (_options.Host) Host(_menu.PlayerName, _options.Mode);
@@ -53,7 +54,7 @@ public partial class Main : Node
     {
         if (e.IsActionPressed("toggle_netgraph")) _netGraph = !_netGraph;
         if (e.IsActionPressed("toggle_camera")) _game?.Rig.Toggle();
-        if (e.IsActionPressed("ui_cancel") && _session.Client is not null) LeaveToMenu("Left the room.");
+        if (e.IsActionPressed("ui_cancel") && _session.Client is not null) LeaveToMenu("已离开房间。");
     }
 
     public override void _Process(double delta)
@@ -102,7 +103,7 @@ public partial class Main : Node
                 if (_options.NetGraph && _time >= _nextStatsLog) LogStats(client);
                 break;
             case ClientPhase.Disconnected:
-                LeaveToMenu(client.DisconnectReason is { } r ? $"Disconnected: {r}" : "Disconnected.", error: true);
+                LeaveToMenu(client.DisconnectReason is { } r ? $"连接已断开：{DescribeDisconnect(r)}" : "连接已断开。", error: true);
                 break;
         }
     }
@@ -111,16 +112,16 @@ public partial class Main : Node
     {
         try
         {
-            _session.Host(name, $"{name}'s room", _options.Port, mode);
+            _session.Host(name, $"{name}的房间", _options.Port, mode);
             var runner = _session.Runner!;
             _serverStats = new ServerStatsSource(() => (runner.AverageTickMs, runner.MaxTickMs));
             StopDiscovery();
             for (int i = 0; i < _options.Bots; i++)
             {
-                var bot = new GameClient(new LiteNetClientTransport("127.0.0.1", _options.Port), $"Bot {i + 1}", () => _session.Now);
+                var bot = new GameClient(new LiteNetClientTransport("127.0.0.1", _options.Port), $"机器人 {i + 1}", () => _session.Now);
                 _bots.Add((bot, i));
             }
-            _menu.SetStatus("Starting server…");
+            _menu.SetStatus("正在启动服务器…");
         }
         catch (InvalidOperationException ex)
         {
@@ -145,7 +146,7 @@ public partial class Main : Node
     {
         StopDiscovery();
         _session.Join(host, port, name);
-        _menu.SetStatus($"Connecting to {host}:{port}…");
+        _menu.SetStatus($"正在连接 {host}:{port}…");
     }
 
     private void LeaveToMenu(string message, bool error = false)
@@ -213,7 +214,7 @@ public partial class Main : Node
         }
         catch (Exception ex) when (ex is InvalidOperationException or SocketException)
         {
-            _menu.SetStatus($"LAN discovery unavailable ({ex.Message}). You can still join by address.", error: true);
+            _menu.SetStatus($"局域网搜索不可用（{ex.Message}），仍可通过地址加入。", error: true);
             _discovery?.Dispose();
             _discovery = null;
         }
@@ -245,6 +246,19 @@ public partial class Main : Node
                  $"slack={s.InputSlackTicks:F2} rate={s.ClockRate:F3} snaps={s.SnapshotsPerSecond} corr={s.Mispredictions} " +
                  $"extrap={s.Extrapolations} down={s.BytesInPerSecond / 1024:F1}KB/s");
     }
+
+    /// <summary>Turns a transport disconnect code into player-facing text; server reject reasons pass through as-is.</summary>
+    private static string DescribeDisconnect(string reason) => reason switch
+    {
+        "ConnectionFailed" => "无法连接到房主。",
+        "Timeout" => "连接超时。",
+        "HostUnreachable" or "NetworkUnreachable" or "UnknownHost" => "找不到房主，请检查地址和网络。",
+        "RemoteConnectionClose" => "房主关闭了房间。",
+        "DisconnectPeerCalled" => "已断开。",
+        "ConnectionRejected" => "房主拒绝了连接。",
+        "InvalidProtocol" => "协议不兼容。",
+        _ => reason,
+    };
 
     private static IEnumerable<string> LocalIPv4()
     {

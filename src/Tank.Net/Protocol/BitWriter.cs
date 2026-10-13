@@ -50,6 +50,9 @@ public sealed class BitWriter
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(value ?? string.Empty);
         int len = System.Math.Min(bytes.Length, maxBytes);
+        // Back off continuation bytes (10xxxxxx) so a multi-byte character (e.g. Chinese) is never cut in half.
+        if (len < bytes.Length)
+            while (len > 0 && (bytes[len] & 0xC0) == 0x80) len--;
         WriteVarUInt((uint)len);
         for (int i = 0; i < len; i++) WriteByte(bytes[i]);
     }

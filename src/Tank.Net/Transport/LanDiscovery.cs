@@ -30,7 +30,7 @@ public sealed class LanDiscovery : IDisposable
         _port = port;
         _manager = new NetManager(_listener) { UnconnectedMessagesEnabled = true, BroadcastReceiveEnabled = true };
         _listener.NetworkReceiveUnconnectedEvent += OnReply;
-        if (!_manager.Start()) throw new InvalidOperationException("Could not open a UDP socket for LAN discovery.");
+        if (!_manager.Start()) throw new InvalidOperationException("无法打开用于局域网搜索的 UDP 套接字。");
 
         var w = new BitWriter(16);
         Messages.WriteDiscover(w);
