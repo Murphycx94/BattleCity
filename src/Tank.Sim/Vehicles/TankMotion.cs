@@ -43,6 +43,17 @@ public static class TankMotion
         if (intendedLength > 0 && Vector2.Distance(t.Position, start) < intendedLength * StallRatio) t.Speed = 0f;
     }
 
+    /// <summary>Turns turret and gun toward the input's world aim direction at their rated speeds, within gun limits.</summary>
+    public static void AimGun(ref TankState t, in InputCmd input, HeightField terrain)
+    {
+        TankSpec spec = t.Spec;
+        TankPose pose = TankPose.Compute(t, terrain);
+        var (wantYaw, wantPitch) = pose.ToHullAngles(Angles.Direction(input.AimYaw, input.AimPitch));
+        t.TurretYaw = Angles.MoveTowards(t.TurretYaw, wantYaw, spec.TurretTraverse * SimConstants.Dt);
+        float pitch = System.Math.Clamp(wantPitch, -spec.GunDepression, spec.GunElevation);
+        t.GunPitch = Scalar.MoveTowards(t.GunPitch, pitch, spec.GunPitchSpeed * SimConstants.Dt);
+    }
+
     /// <summary>Hull pitch along its facing: positive when the nose points uphill.</summary>
     public static float ForwardSlope(in TankState t, HeightField terrain)
     {
