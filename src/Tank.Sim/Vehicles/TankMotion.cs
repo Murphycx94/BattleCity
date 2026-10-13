@@ -12,13 +12,13 @@ public static class TankMotion
     private const float MovingThreshold = 0.5f;
     private const float MovingTurnFactor = 0.75f;
     private const int CollisionIterations = 3;
-    /// <summary>Minimum drop per metre travelled for a step to count as clearly downhill (an absolute margin would block the first, tiny steps from rest).</summary>
     /// <summary>Extra clearance added to every push-out so float error never leaves a hull touching.</summary>
     private const float Skin = 1e-3f;
     /// <summary>Fraction of a slope's grade a step must descend to count as heading downhill (about 60 degrees off the fall line).</summary>
     private const float DescentAlongFallLine = 0.5f;
     /// <summary>Penetration differences below this count as equal when ranking wedged poses, so push-out noise cannot freeze the hull.</summary>
     private const float TieDepth = 0.01f;
+    /// <summary>Minimum drop per metre travelled for a step to count as clearly downhill (an absolute margin would block the first, tiny steps from rest).</summary>
     private const float DescentGrade = 0.05f;
 
     /// <summary>If collisions leave less than this fraction of the intended step, the hull was blocked head-on and stalls.</summary>
