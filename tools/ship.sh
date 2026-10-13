@@ -333,7 +333,9 @@ PY
 	ok "清单已签名"
 
 	# 线上清单：拒绝回退版本；同一版且内容相同就只补缺的部分
-	local live; live="$(gh api "repos/$UPDATES_REPO/contents/$FEED_DIR/manifest.json" -H "Accept: application/vnd.github.raw" 2>/dev/null || true)"
+	# 读不到（第一次发布、还没有清单）时 gh 会把错误 JSON 打到输出里：按退出码判断，别把它当成清单
+	local live=""
+	live="$(gh api "repos/$UPDATES_REPO/contents/$FEED_DIR/manifest.json" -H "Accept: application/vnd.github.raw" 2>/dev/null)" || live=""
 	local same_manifest=no
 	if [ -n "$live" ]; then
 		local live_version; live_version="$(printf '%s' "$live" | json_field version -)"
