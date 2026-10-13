@@ -1,5 +1,5 @@
 {
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"prerelease": true,
-	"notes": "首个版本：三种模式、局域网联机、CS 式预测与插值"
+	"notes": "重新打包：内容与 v0.1.0 相同"
 }
