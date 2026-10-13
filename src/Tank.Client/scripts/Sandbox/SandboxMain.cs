@@ -23,6 +23,7 @@ public partial class SandboxMain : Node3D
     private const double MaxCatchUp = 0.25;
     private const float AimRange = 900f;
     private const float SniperEyeAboveTrunnion = 0.45f;
+    private const float MinAimDistance = 8f;
 
     private readonly SandboxInput _input = new();
     private readonly InputCmd[] _commands = new InputCmd[1];
@@ -80,7 +81,15 @@ public partial class SandboxMain : Node3D
 
     public override void _Input(InputEvent e)
     {
-        if (Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
+        // Releases always pass so a held fire can end; presses only count while captured (the capturing click must not shoot).
+        if (e.IsActionReleased("fire_gun") || Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
+    }
+
+    public override void _Notification(int what)
+    {
+        if (what != NotificationApplicationFocusOut) return;
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        _input.ReleaseAll();
     }
 
     public override void _UnhandledInput(InputEvent e)
@@ -89,13 +98,14 @@ public partial class SandboxMain : Node3D
         switch (e)
         {
             case InputEventMouseMotion motion when captured:
-                _camera.Look(motion.Relative);
+                _camera.Look(motion.ScreenRelative);
                 break;
             case InputEventMouseButton { Pressed: true } wheel when captured && wheel.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown:
                 _camera.Scroll(wheel.ButtonIndex == MouseButton.WheelUp ? 1 : -1);
                 break;
             case InputEventMouseButton { Pressed: true } when !captured:
                 Input.MouseMode = Input.MouseModeEnum.Captured;
+                GetViewport().SetInputAsHandled();
                 break;
         }
         if (e.IsActionPressed("sniper_toggle")) _camera.ToggleSniper();
@@ -149,7 +159,16 @@ public partial class SandboxMain : Node3D
         SN.Vector3 origin = cam.GlobalPosition.ToSim() + look * (_camera.Sniper ? 0f : _camera.Distance);
         SN.Vector3 end = origin + look * AimRange;
         SN.Vector3 target = _sim.Field.Raycast(origin, end, out RayHit hit) ? hit.Point : end;
-        (_aimYaw, _aimPitch) = Angles.AimAngles(target - pose.Trunnion(spec), _aimYaw);
+        SN.Vector3 trunnion = pose.Trunnion(spec);
+        // Looking steeply down puts the target almost under the turret, where yaw swings wildly; keep it at least MinAimDistance out.
+        SN.Vector2 flat = new(target.X - trunnion.X, target.Z - trunnion.Z);
+        if (flat.Length() < MinAimDistance)
+        {
+            SN.Vector2 dir = new(look.X, look.Z);
+            dir = dir.LengthSquared() > 1e-6f ? SN.Vector2.Normalize(dir) : new SN.Vector2(MathF.Sin(_aimYaw), -MathF.Cos(_aimYaw));
+            target = new SN.Vector3(trunnion.X + dir.X * MinAimDistance, target.Y, trunnion.Z + dir.Y * MinAimDistance);
+        }
+        (_aimYaw, _aimPitch) = Angles.AimAngles(target - trunnion, _aimYaw);
     }
 
     private void UpdateReticle(in TankState tank)
@@ -157,10 +176,10 @@ public partial class SandboxMain : Node3D
         // Same launch maths the sim fires with, so the ring shows where the shot really goes (including a blocked barrel).
         Ballistics.Launch launch = Ballistics.Aim(tank, _sim.Field);
         SN.Vector3 impact = launch.BlockPoint;
-        if (!launch.Blocked) Ballistics.PredictImpact(launch.Origin, launch.Velocity, _sim.Field, out impact);
+        bool hasImpact = launch.Blocked || Ballistics.PredictImpact(launch.Origin, launch.Velocity, _sim.Field, out impact);
         Camera3D cam = _camera.Camera;
         Vector3 point = impact.ToGodot();
-        Vector2? screen = cam.IsPositionBehind(point) ? null : cam.UnprojectPosition(point);
+        Vector2? screen = !hasImpact || cam.IsPositionBehind(point) ? null : cam.UnprojectPosition(point);
         string reload = tank.Reload > 0 ? $"{tank.Reload:0.0} 秒" : "就绪";
         string zoom = _camera.Sniper ? $"   狙击 {_camera.Zoom:0}×" : "";
         _reticle.UpdateState(screen, 1f - tank.Reload / tank.Spec.ReloadTime,

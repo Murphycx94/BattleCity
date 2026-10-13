@@ -167,6 +167,7 @@ v1 不做地图编辑器。新建 `tools/MapGen`（C# 控制台程序）：
   3. 坦克：线段对车体和炮塔的 OBB，射手自己除外。
   4. 草丛：线段对圆柱。不会挡住炮弹，但草丛会被摧毁。
 - 炮弹打中地形或不可破坏物：HE 爆炸，AP 直接消失。
+- 炮弹水平飞出地图边界即消失，不产生爆炸事件（客户端与服务器使用同一规则）。
 
 ### 5.3 击穿判定（AP）
 
@@ -257,6 +258,8 @@ src/Tank.Client/scripts/
   Combat/     ShellFx、ExplosionFx、DebrisFx（Godot 刚体碎片，纯表现）
   Overlay/    准星和散布圈、装填条、弹种、血量、伤害提示、点亮灯、小地图（阶段 5）
 ```
+
+阶段 1 实际文件名：Cameras/OrbitCamera（内含狙击模式，瞄准射线在 SandboxMain 中求解）、Vehicles/TankModel、Combat/ShellViews 与 BattleFx、World/PropMeshes；地形分块为 32×32；镜头碰到地形时上抬而不是拉近。
 
 HUD 目录不叫 `Hud`，因为旧代码有 `Tank.Client.UI.Hud` 类，同名命名空间会遮蔽它。
 

@@ -9,6 +9,7 @@ namespace Tank.Client.Sandbox;
 public sealed class SandboxInput
 {
     private bool _fireLatched;
+    private bool _fireHeld;
 
     public static void RegisterActions()
     {
@@ -25,14 +26,22 @@ public sealed class SandboxInput
 
     public void OnInputEvent(InputEvent e)
     {
-        if (e.IsActionPressed("fire_gun")) _fireLatched = true;
+        if (e.IsActionPressed("fire_gun")) _fireLatched = _fireHeld = true;
+        else if (e.IsActionReleased("fire_gun")) _fireHeld = false;
+    }
+
+    /// <summary>Drops any pending or held fire (focus lost, so a release may never arrive).</summary>
+    public void ReleaseAll()
+    {
+        _fireLatched = false;
+        _fireHeld = false;
     }
 
     public (sbyte Throttle, sbyte Steer, bool Fire) Sample()
     {
         sbyte throttle = (sbyte)(Held("drive_forward") - Held("drive_back"));
         sbyte steer = (sbyte)(Held("drive_right") - Held("drive_left"));
-        bool fire = _fireLatched || Input.IsActionPressed("fire_gun");
+        bool fire = _fireLatched || _fireHeld;
         _fireLatched = false;
         return (throttle, steer, fire);
     }
