@@ -1,0 +1,125 @@
+# main 上 build.json 的 version 变了（远端还没有 tag v<version>）就自动发布：
+#   plan    → 判断要不要发
+#   build   → macOS runner 上跑测试、导出三平台客户端、发布四平台专用服务器（tools/ship.sh build）
+#   publish → 建 tag 和 GitHub Release、上传附件（tools/ship.sh github）
+# 打包与本机发布走同一套脚本：本机可以先 tools/ship.sh build 试跑。
+# 发新版：tools/ship.sh bump 0.2.0 "一句话说明" && git push
+# 发布说明默认按模板生成；要自己写就放 docs/releases/v<version>.md。
+# 中途失败：修好后在 Actions 页面点 Re-run failed jobs（publish 会认出已建好的 Release，只补缺的附件）。
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [build.json]
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 一句话版本说明（不填就用 build.json 的 notes）
+        required: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.7.2   # 必须与 src/Tank.Client/Tank.Client.csproj 的 Godot.NET.Sdk 版本一致
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      notes: ${{ steps.plan.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: plan
+        env:
+          NOTES_OVERRIDE: ${{ inputs.notes }}
+        run: bash tools/ci_release.sh plan
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: macos-15   # macOS 安装包需要在 macOS 上做 ad-hoc 签名
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # ship.sh 要核对提交在 origin/main 上、tag 有没有被占用
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Godot path
+        run: echo "GODOT=$HOME/godot/Godot_mono.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/godot
+            ~/Library/Application Support/Godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-stable-mono-macos-templates-v1
+
+      - name: Install Godot (.NET) and export templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable"
+          dl="$RUNNER_TEMP/godot-dl"
+          mkdir -p "$dl" "$HOME/godot"
+          curl -fsSL --retry 3 -o "$dl/editor.zip" "$base/Godot_v${GODOT_VERSION}-stable_mono_macos.universal.zip"
+          ditto -x -k "$dl/editor.zip" "$HOME/godot"
+          curl -fsSL --retry 3 -o "$dl/templates.tpz" "$base/Godot_v${GODOT_VERSION}-stable_mono_export_templates.tpz"
+          # 只留导出 macOS / Windows x86_64 / Linux x86_64 用得到的模板（整包 1.1 GB）
+          unzip -q "$dl/templates.tpz" 'templates/macos.zip' 'templates/windows_*_x86_64*' \
+            'templates/linux_*.x86_64' 'templates/version.txt' 'templates/icudt_godot.dat' -d "$dl"
+          dest="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable.mono"
+          mkdir -p "$dest"
+          mv "$dl"/templates/* "$dest/"
+          rm -rf "$dl"
+
+      - name: Check Godot
+        run: |
+          "$GODOT" --version
+          ls "$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable.mono"
+
+      - name: Test and package
+        env:
+          # 共享 runner 的墙钟计时噪声大；2 ms 的 tick 预算针对真实硬件（见 ci.yml）
+          SOAK_TICK_BUDGET_MS: "10"
+        run: bash tools/ship.sh build
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-v${{ needs.plan.outputs.version }}
+          path: build/release
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # 建 tag 与 Release
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-v${{ needs.plan.outputs.version }}
+          path: build/release
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ship.sh github

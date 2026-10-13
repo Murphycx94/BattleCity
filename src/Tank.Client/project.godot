@@ -5,6 +5,7 @@ config_version=5
 
 config/name="Tank 3D"
 config/description="3D Battle City-style tank game with LAN multiplayer"
+config/version="0.1.0"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 run/max_fps=0

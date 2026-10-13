@@ -10,3 +10,4 @@ coverage/
 export/
 *.tankrec
 .DS_Store
+build/
