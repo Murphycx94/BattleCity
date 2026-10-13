@@ -72,3 +72,27 @@ dotnet test tests/Tank.Core.Tests
 dotnet test tests/Tank.Net.Tests
 dotnet run --project tests/Tank.Soak -c Release   # 输出网络手感验收表
 ```
+
+## 发布
+
+版本号和一句话说明只写在 [`build.json`](build.json)。推到 `main` 时如果远端还没有 `v<version>` 这个 tag，
+[Release 工作流](.github/workflows/release.yml) 会自动跑测试、打包并建 GitHub Release：
+
+```bash
+tools/ship.sh bump 0.2.0 "新增：……"   # 改 build.json 并提交
+git push                               # CI 自动打包、发布
+```
+
+附件：三平台客户端（macOS 通用版、Windows x64、Linux x64）、四平台专用服务器（自带运行时）、`SHA256SUMS.txt`。
+发布说明默认按模板生成；想自己写就放在 `docs/releases/v<version>.md`。
+
+本机也能走同一套流程（需要 Godot 4.7.2 .NET 版和同版本导出模板）：
+
+```bash
+tools/ship.sh check                  # 发布前检查
+tools/ship.sh build                  # 在当前提交的干净 worktree 里测试并打包到 build/release
+DRY_RUN=1 tools/ship.sh github       # 只核对、打印将要发布的内容
+tools/ship.sh github                 # 建 tag 和 Release（可重复运行；REPAIR=1 覆盖对不上的附件）
+```
+
+`build` 会检查每个包里都有 C# 程序集，并在 macOS 上把导出的游戏真正启动一次（开房、机器人加入、开局）才算成功。
