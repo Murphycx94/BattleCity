@@ -1,3 +1,6 @@
+using System.Numerics;
+using Tank.Sim.Geometry;
+using Tank.Sim.Maps;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Tests;
@@ -86,5 +89,45 @@ public sealed class TankMotionTests
         var t = TestWorld.Tank(100, 100, yaw: MathF.PI); // facing +Z, downhill
         TestWorld.Drive(ref t, TestWorld.Field(TestWorld.RampNorth(0.84f)), TestWorld.Cmd(throttle: 1), 60);
         Assert.True(t.Position.Y > 105, $"z was {t.Position.Y}");
+    }
+
+    [Fact]
+    public void Rock_BlocksTheHull_AndStallsSpeed()
+    {
+        // 10m-wide, 2m-thick wall whose near face is at z = 81.
+        var wall = new Prop(1, PropKind.Rock, new Obb2(new Vector2(100, 80), new Vector2(5, 1), 0), -1, 4);
+        var t = TestWorld.Tank(100, 100);
+        TestWorld.Drive(ref t, TestWorld.FlatField(wall), TestWorld.Cmd(throttle: 1), 300);
+        float stopZ = 81 + Spec.HullLength / 2;
+        Assert.InRange(t.Position.Y, stopZ - 0.01f, stopZ + 0.5f);
+        Assert.True(t.Speed < 0.5f, $"speed was {t.Speed}");
+    }
+
+    [Fact]
+    public void Rock_HitAtAnAngle_LetsTheHullSlideAlong()
+    {
+        // 160m-long wall so the tank is still alongside it after 10 s of sliding west.
+        var wall = new Prop(1, PropKind.Rock, new Obb2(new Vector2(100, 80), new Vector2(80, 1), 0), -1, 4);
+        var t = TestWorld.Tank(100, 100, yaw: Angles.Deg(30)); // heading north-west into the wall
+        TestWorld.Drive(ref t, TestWorld.FlatField(wall), TestWorld.Cmd(throttle: 1), 300);
+        Assert.True(t.Position.X < 90, $"x was {t.Position.X}");
+        Assert.True(t.Position.Y > 81, $"z was {t.Position.Y}");
+    }
+
+    [Fact]
+    public void OtherTank_BlocksLikeAnObstacle()
+    {
+        Obb2 parked = TankMotion.Footprint(Spec, new Vector2(100, 90), 0);
+        var t = TestWorld.Tank(100, 100);
+        TestWorld.Drive(ref t, TestWorld.FlatField(), TestWorld.Cmd(throttle: 1), 120, parked);
+        Assert.True(t.Position.Y >= 90 + Spec.HullLength - 0.01f, $"z was {t.Position.Y}");
+    }
+
+    [Fact]
+    public void Tank_CannotLeaveThePlayableArea()
+    {
+        var t = TestWorld.Tank(100, 10);
+        TestWorld.Drive(ref t, TestWorld.FlatField(), TestWorld.Cmd(throttle: 1), 300);
+        Assert.Equal(TestWorld.Border, t.Position.Y, 1e-3f);
     }
 }
