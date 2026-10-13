@@ -122,6 +122,26 @@ sub(f"{root}/export_presets.cfg", [
 PY
 }
 
+has_assemblies() {  # has_assemblies <预设> <导出产物>
+	case "$1" in
+		macOS) unzip -l "$2" | grep -q "/Tank.Client.dll$" ;;
+		*) ls "$(dirname "$2")"/data_Tank.Client_*/Tank.Client.dll >/dev/null 2>&1 ;;
+	esac
+}
+
+# 在 macOS 上把导出的安装包真正启动一次：开房、加一个机器人、开局，确认能玩再发
+smoke_test_macos() {
+	[ "$(uname -s)" = Darwin ] || { echo "! 不是 macOS，跳过安装包启动测试"; return 0; }
+	local dir; dir="$(mktemp -d "${TMPDIR:-/tmp}/tank_smoke.XXXXXX")"
+	ditto -x -k "$1" "$dir"
+	local exe; exe="$(find "$dir" -path "*.app/Contents/MacOS/*" -type f | head -1)"
+	local log="$dir/smoke.log"
+	"$exe" --headless -- --host --port 27091 --bots 1 --autostart --quit-after 4 >"$log" 2>&1 || true
+	grep -q "match started" "$log" || { tail -20 "$log" >&2; rm -rf "$dir"; die "macOS 安装包启动测试失败：没能开局"; }
+	rm -rf "$dir"
+	ok "macOS 安装包启动测试：开房、机器人加入、开局正常"
+}
+
 # —— build：check + test + 打包 ——
 cmd_build() {
 	cmd_check yes
@@ -144,8 +164,11 @@ cmd_build() {
 		esac
 		"$GODOT" --headless --path "$WT/src/Tank.Client" --export-release "$preset" "$target" >"$WT/build/export-$preset.log" 2>&1 || true
 		[ -s "$target" ] || { tail -30 "$WT/build/export-$preset.log" >&2; die "导出 $preset 失败"; }
+		# Godot 在 C# 部分出错时仍会产出引擎和 pck，但游戏打不开：必须确认程序集进了包
+		has_assemblies "$preset" "$target" || { grep -m5 "ERROR" "$WT/build/export-$preset.log" >&2 || true; die "导出 $preset 的包里没有 C# 程序集"; }
 		ok "$preset"
 	done
+	smoke_test_macos "$WT/build/client/macos/$APP.zip"
 	cp "$WT/build/client/macos/$APP.zip" "$stage/$APP-v$VERSION-macos-universal.zip"
 	(cd "$WT/build/client/windows" && rm -f ./*.log && zip -qr "$stage/$APP-v$VERSION-windows-x64.zip" .)
 	(cd "$WT/build/client/linux" && chmod +x "$APP.x86_64" && tar -czf "$stage/$APP-v$VERSION-linux-x64.tar.gz" .)
