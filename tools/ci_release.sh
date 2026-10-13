@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # GitHub Actions 自动发布（.github/workflows/release.yml）的辅助步骤；打包和发布本身由 tools/ship.sh 完成。
 #   plan  决定这次 push 要不要发布：build.json 的 version 在远端还没有 tag v<version> 就发布，
-#         结果写进 $GITHUB_OUTPUT（release / version / notes）
+#         结果写进 ${GITHUB_OUTPUT}（release / version / notes）
 # 用法：tools/ci_release.sh plan
 set -euo pipefail
 
@@ -17,13 +17,13 @@ plan() {
 	[ -n "$version" ] || die "build.json 缺少 version"
 	output version "$version"
 	if git -C "$ROOT" ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
-		echo "远端已经有 tag v$version：版本号没变，不发布"
+		echo "远端已经有 tag v${version}：版本号没变，不发布"
 		output release false
 		return 0
 	fi
 	[ -n "$notes" ] || die "build.json 缺少 notes（一句话版本说明）"
 	case "$notes" in *$'\n'*) die "notes 只能有一行" ;; esac
-	echo "发布 v$version：$notes"
+	echo "发布 v${version}：$notes"
 	output release true
 	output notes "$notes"
 }

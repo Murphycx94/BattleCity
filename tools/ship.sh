@@ -59,21 +59,21 @@ templates_dir() {
 # —— check：只读检查 ——
 cmd_check() {
 	local need_godot="${1:-yes}"
-	step "检查 $TAG（提交 ${REF_SHA:0:7}）"
-	[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "build.json 的 version「$VERSION」不是 X.Y.Z 或 X.Y.Z-后缀"
+	step "检查 ${TAG}（提交 ${REF_SHA:0:7}）"
+	[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "build.json 的 version「${VERSION}」不是 X.Y.Z 或 X.Y.Z-后缀"
 	[ -n "$NOTES" ] || die "build.json 缺少 notes（一句话版本说明）"
 	case "$NOTES" in *$'\n'*) die "notes 只能有一行" ;; esac
 	local chars; chars="$(python3 -c 'import sys; print(len(sys.argv[1]))' "$NOTES")"
-	[ "$chars" -le "$MAX_NOTES_CHARS" ] || die "notes $chars 字，太长（≤ $MAX_NOTES_CHARS）"
+	[ "$chars" -le "$MAX_NOTES_CHARS" ] || die "notes $chars 字，太长（≤ ${MAX_NOTES_CHARS}）"
 	ok "版本 $VERSION$([ "$PRERELEASE" = true ] && echo "（预发布）")：$NOTES"
 
 	command -v dotnet >/dev/null || die "找不到 dotnet（.NET 8 SDK）"
 	if [ "$need_godot" = yes ]; then
 		command -v "$GODOT" >/dev/null || [ -x "$GODOT" ] || die "找不到 Godot .NET 版：设置 GODOT=<路径>"
 		local gv; gv="$("$GODOT" --version 2>/dev/null | head -1)"
-		[[ "$gv" == "$GODOT_VERSION.stable.mono"* ]] || die "Godot 版本是「$gv」，工程需要 $GODOT_VERSION.stable.mono"
+		[[ "$gv" == "$GODOT_VERSION.stable.mono"* ]] || die "Godot 版本是「${gv}」，工程需要 $GODOT_VERSION.stable.mono"
 		[ -f "$(templates_dir)/macos.zip" ] || die "缺少导出模板：$(templates_dir)"
-		ok "Godot $gv，导出模板就绪"
+		ok "Godot ${gv}，导出模板就绪"
 	fi
 
 	git -C "$ROOT" fetch -q "$REMOTE" main --tags 2>/dev/null || echo "! 拉取 $REMOTE 失败，按本地记录检查"
@@ -84,7 +84,7 @@ cmd_check() {
 	fi
 	local tagged; tagged="$(git -C "$ROOT" ls-remote --tags "$REMOTE" "refs/tags/$TAG^{}" "refs/tags/$TAG" 2>/dev/null | tail -1 | cut -f1)"
 	if [ -n "$tagged" ] && [ "$tagged" != "$REF_SHA" ]; then
-		die "远端已有 $TAG，指向另一个提交 ${tagged:0:7}：发新版请先改 build.json 的 version"
+		die "远端已有 ${TAG}，指向另一个提交 ${tagged:0:7}：发新版请先改 build.json 的 version"
 	fi
 	[ -z "$tagged" ] || ok "远端已有 $TAG 且指向这个提交（重跑）"
 }
@@ -153,7 +153,7 @@ cmd_build() {
 	rm -rf "$stage" "$WT/build"
 	mkdir -p "$stage" "$WT/build/client/macos" "$WT/build/client/windows" "$WT/build/client/linux"
 
-	step "导出客户端（Godot $GODOT_VERSION）"
+	step "导出客户端（Godot ${GODOT_VERSION}）"
 	# 首次导入编辑器在退出时可能崩溃，不影响导入结果；后面的导出会校验产物
 	"$GODOT" --headless --path "$WT/src/Tank.Client" --import >/dev/null 2>&1 || true
 	local preset target
@@ -234,7 +234,7 @@ cmd_github() {
 	local built_version built_commit
 	built_version="$(json_field version "$rel/RELEASE.json")"
 	built_commit="$(json_field commit "$rel/RELEASE.json")"
-	[ "$built_version" = "$VERSION" ] || die "$rel 里是 v$built_version，build.json 是 v$VERSION：重新 build"
+	[ "$built_version" = "$VERSION" ] || die "$rel 里是 v${built_version}，build.json 是 v${VERSION}：重新 build"
 	(cd "$rel" && sha256 -c --quiet SHA256SUMS.txt) || die "产物和 SHA256SUMS.txt 对不上"
 	git -C "$ROOT" fetch -q "$REMOTE" main --tags 2>/dev/null || true
 	git -C "$ROOT" merge-base --is-ancestor "$built_commit" "$REMOTE/main" \
@@ -262,14 +262,14 @@ cmd_github() {
 		return 0
 	fi
 
-	step "发布 $TAG → $repo（提交 ${built_commit:0:7}）"
+	step "发布 $TAG → ${repo}（提交 ${built_commit:0:7}）"
 	printf '附件：\n'; printf '  %s\n' "${assets[@]##*/}"
 	printf '说明：\n'; sed 's/^/  | /' "$notes_file"
 	if [ "${DRY_RUN:-0}" = 1 ]; then echo "DRY_RUN：不创建"; return 0; fi
 	gh release create "$TAG" -R "$repo" "${assets[@]}" --target "$built_commit" \
-		--title "Tank 3D $TAG" --notes-file "$notes_file" "${pre_flag[@]}"
+		--title "Tank 3D $TAG" --notes-file "$notes_file" ${pre_flag[@]+"${pre_flag[@]}"}
 	local missing; missing="$(missing_assets "$repo")"
-	[ -z "$missing" ] || die "Release 已建但缺少附件：$missing（用 REPAIR=1 重跑补上）"
+	[ -z "$missing" ] || die "Release 已建但缺少附件：${missing}（用 REPAIR=1 重跑补上）"
 	ok "https://github.com/$repo/releases/tag/$TAG"
 }
 
@@ -286,7 +286,7 @@ missing_assets() {  # 本地有、线上 Release 没有（或大小不同）的�
 # —— bump：改版本并提交 ——
 cmd_bump() {
 	local version="${1:?用法：ship.sh bump <版本> \"<一句话说明>\"}" notes="${2:?缺少一句话说明}"
-	[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "版本「$version」不是 X.Y.Z 或 X.Y.Z-后缀"
+	[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || die "版本「${version}」不是 X.Y.Z 或 X.Y.Z-后缀"
 	[ -z "$(git -C "$ROOT" status --porcelain build.json)" ] || die "build.json 有未提交的改动"
 	git -C "$ROOT" ls-remote --exit-code --tags "$REMOTE" "refs/tags/v$version" >/dev/null 2>&1 && die "远端已有 tag v$version"
 	python3 - "$ROOT/build.json" "$version" "$notes" <<'PY'
@@ -298,8 +298,8 @@ data["prerelease"] = version.startswith("0.") or "-" in version
 open(path, "w", encoding="utf-8").write(json.dumps(data, ensure_ascii=False, indent="\t") + "\n")
 PY
 	git -C "$ROOT" add build.json
-	git -C "$ROOT" commit -q -m "chore: 发布 v$version：$notes"
-	ok "已提交 v$version。git push 到 main 后，Release 工作流会自动打包并发布"
+	git -C "$ROOT" commit -q -m "chore: 发布 v${version}：$notes"
+	ok "已提交 v${version}。git push 到 main 后，Release 工作流会自动打包并发布"
 }
 
 case "${1:-}" in
