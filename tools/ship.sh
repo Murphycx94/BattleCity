@@ -124,7 +124,8 @@ PY
 
 has_assemblies() {  # has_assemblies <预设> <导出产物>
 	case "$1" in
-		macOS) unzip -l "$2" | grep -q "/Tank.Client.dll$" ;;
+		# 先取完整列表再匹配：pipefail 下 `unzip | grep -q` 会因 SIGPIPE 误判失败
+		macOS) [[ "$(unzip -Z1 "$2")" == *"/Tank.Client.dll"* ]] ;;
 		*) ls "$(dirname "$2")"/data_Tank.Client_*/Tank.Client.dll >/dev/null 2>&1 ;;
 	esac
 }
