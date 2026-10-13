@@ -11,5 +11,6 @@
     <ProjectReference Include="..\Tank.Core\Tank.Core.csproj" />
     <ProjectReference Include="..\Tank.Net\Tank.Net.csproj" />
     <ProjectReference Include="..\Tank.Update\Tank.Update.csproj" />
+    <ProjectReference Include="..\Tank.Sim\Tank.Sim.csproj" />
   </ItemGroup>
 </Project>
