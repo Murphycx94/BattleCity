@@ -165,7 +165,7 @@ public partial class SandboxMain : Node3D
         if (flat.Length() < MinAimDistance)
         {
             SN.Vector2 dir = new(look.X, look.Z);
-            dir = dir.LengthSquared() > 1e-6f ? SN.Vector2.Normalize(dir) : new SN.Vector2(MathF.Sin(_aimYaw), -MathF.Cos(_aimYaw));
+            dir = dir.LengthSquared() > 1e-6f ? SN.Vector2.Normalize(dir) : Angles.Forward(_aimYaw);
             target = new SN.Vector3(trunnion.X + dir.X * MinAimDistance, target.Y, trunnion.Z + dir.Y * MinAimDistance);
         }
         (_aimYaw, _aimPitch) = Angles.AimAngles(target - trunnion, _aimYaw);
