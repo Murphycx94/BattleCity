@@ -1,0 +1,54 @@
+using System.Numerics;
+
+namespace Tank.Sim.Geometry;
+
+/// <summary>
+/// Angle helpers. Yaw 0 faces -Z and positive yaw turns left (counter-clockwise seen from above), same as Godot's
+/// Rotation.Y. Pitch is positive upward. Ground vectors are (x, z) packed into <see cref="Vector2"/>.
+/// </summary>
+public static class Angles
+{
+    public const float Pi = MathF.PI;
+    public const float TwoPi = MathF.PI * 2;
+
+    public static float Deg(float degrees) => degrees * (Pi / 180f);
+
+    /// <summary>Wraps to (-π, π].</summary>
+    public static float Wrap(float a)
+    {
+        a %= TwoPi;
+        if (a <= -Pi) a += TwoPi;
+        else if (a > Pi) a -= TwoPi;
+        return a;
+    }
+
+    /// <summary>Turns <paramref name="current"/> toward <paramref name="target"/> along the shorter arc by at most <paramref name="maxStep"/>.</summary>
+    public static float MoveTowards(float current, float target, float maxStep)
+    {
+        float diff = Wrap(target - current);
+        if (MathF.Abs(diff) <= maxStep) return Wrap(target);
+        return Wrap(current + MathF.CopySign(maxStep, diff));
+    }
+
+    /// <summary>Interpolates along the shorter arc.</summary>
+    public static float Lerp(float a, float b, float t) => Wrap(a + Wrap(b - a) * t);
+
+    public static Vector2 Forward(float yaw) => new(-MathF.Sin(yaw), -MathF.Cos(yaw));
+
+    public static Vector2 Right(float yaw) => new(MathF.Cos(yaw), -MathF.Sin(yaw));
+
+    /// <summary>Unit 3D direction for a yaw and pitch.</summary>
+    public static Vector3 Direction(float yaw, float pitch)
+    {
+        float c = MathF.Cos(pitch);
+        return new Vector3(-MathF.Sin(yaw) * c, MathF.Sin(pitch), -MathF.Cos(yaw) * c);
+    }
+
+    /// <summary>Inverse of <see cref="Direction"/>; <paramref name="direction"/> need not be normalized.</summary>
+    public static (float Yaw, float Pitch) AimAngles(Vector3 direction)
+    {
+        float length = direction.Length();
+        if (length < 1e-6f) return (0, 0);
+        return (MathF.Atan2(-direction.X, -direction.Z), MathF.Asin(System.Math.Clamp(direction.Y / length, -1f, 1f)));
+    }
+}

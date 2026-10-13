@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Third-person tank simulation. Must not reference Godot, networking or wall-clock time. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tank.Sim.Tests" />
+  </ItemGroup>
+</Project>
