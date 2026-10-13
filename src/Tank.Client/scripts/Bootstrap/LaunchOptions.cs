@@ -7,7 +7,7 @@ namespace Tank.Client.Bootstrap;
 /// Command-line switches (pass after "--"), used for quick testing and automated screenshots:
 /// --name N  --host  --join IP[:PORT]  --mode coop|basebattle|deathmatch  --bots N  --autostart
 /// --camera chase  --netgraph  --screenshot FILE  --screenshot-at SECONDS  --quit-after SECONDS
-/// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）
+/// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场：自动驾驶并开火，用于截图）
 /// </summary>
 public sealed record LaunchOptions
 {
@@ -25,6 +25,7 @@ public sealed record LaunchOptions
     public double QuitAfter { get; init; }
     public bool NoUpdate { get; init; }
     public bool UpdateNow { get; init; }
+    public bool AutoDrive { get; init; }
 
     public static LaunchOptions Parse(IReadOnlyList<string> args)
     {
@@ -45,6 +46,7 @@ public sealed record LaunchOptions
                 "--netgraph" => o with { NetGraph = true },
                 "--no-update" => o with { NoUpdate = true },
                 "--update-now" => o with { UpdateNow = true },
+                "--autodrive" => o with { AutoDrive = true },
                 "--screenshot" => o with { ScreenshotPath = Next() },
                 "--screenshot-at" => o with { ScreenshotAt = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double s) ? s : o.ScreenshotAt },
                 "--quit-after" => o with { QuitAfter = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double q) ? q : 0 },
