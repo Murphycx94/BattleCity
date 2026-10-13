@@ -13,6 +13,12 @@ public static class TankMotion
     private const float MovingTurnFactor = 0.75f;
     private const int CollisionIterations = 3;
     /// <summary>Minimum drop per metre travelled for a step to count as clearly downhill (an absolute margin would block the first, tiny steps from rest).</summary>
+    /// <summary>Extra clearance added to every push-out so float error never leaves a hull touching.</summary>
+    private const float Skin = 1e-3f;
+    /// <summary>Fraction of a slope's grade a step must descend to count as heading downhill (about 60 degrees off the fall line).</summary>
+    private const float DescentAlongFallLine = 0.5f;
+    /// <summary>Penetration differences below this count as equal when ranking wedged poses, so push-out noise cannot freeze the hull.</summary>
+    private const float TieDepth = 0.01f;
     private const float DescentGrade = 0.05f;
 
     /// <summary>If collisions leave less than this fraction of the intended step, the hull was blocked head-on and stalls.</summary>
@@ -78,30 +84,47 @@ public static class TankMotion
         return target * c * c;
     }
 
-    /// <summary>A step is refused when the destination slope exceeds the climb limit and the step is not clearly downhill.</summary>
+    /// <summary>
+    /// A step is refused when the destination slope exceeds the climb limit and the step does not descend clearly:
+    /// the drop must be at least <see cref="DescentGrade"/> per metre and <see cref="DescentAlongFallLine"/> of the slope's own grade.
+    /// </summary>
     private static bool IsTooSteepToEnter(TankSpec spec, HeightField terrain, Vector2 start, Vector2 dest)
     {
         float slope = MathF.Acos(System.Math.Clamp(terrain.NormalAt(dest.X, dest.Y).Y, -1f, 1f));
-        return slope > spec.MaxClimb && terrain.HeightAt(dest.X, dest.Y) > terrain.HeightAt(start.X, start.Y) - DescentGrade * Vector2.Distance(start, dest);
+        if (slope <= spec.MaxClimb) return false;
+        float requiredDrop = MathF.Max(DescentGrade, DescentAlongFallLine * MathF.Tan(slope)) * Vector2.Distance(start, dest);
+        return terrain.HeightAt(dest.X, dest.Y) > terrain.HeightAt(start.X, start.Y) - requiredDrop;
     }
 
-    /// <summary>Keeps the turned heading only if the hull ends clear of every prop and obstacle; otherwise falls back to the old heading, then the old pose.</summary>
+    /// <summary>
+    /// Picks the first pose that is clear of every prop and obstacle: new heading at the resolved position, old heading there,
+    /// then the old pose. If none is clear (a wedged hull) the least-penetrating one wins, so the tank can still drive out (ties go to the earlier candidate).
+    /// </summary>
     private static (Vector2 Position, float Yaw) SettleWithoutOverlap(
         TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, Battlefield field, ReadOnlySpan<Obb2> obstacles)
     {
-        if (!Overlaps(Footprint(spec, dest, yaw), field, obstacles)) return (dest, yaw);
-        if (!Overlaps(Footprint(spec, dest, oldYaw), field, obstacles)) return (dest, oldYaw);
-        return (oldPosition, oldYaw);
+        Span<(Vector2 Position, float Yaw)> candidates = stackalloc (Vector2, float)[3] { (dest, yaw), (dest, oldYaw), (oldPosition, oldYaw) };
+        var best = candidates[0];
+        float bestDepth = float.MaxValue;
+        foreach (var candidate in candidates)
+        {
+            float depth = PenetrationDepth(Footprint(spec, candidate.Position, candidate.Yaw), field, obstacles);
+            if (depth <= Skin * 0.5f) return candidate;
+            if (depth < bestDepth - TieDepth) (best, bestDepth) = (candidate, depth);
+        }
+        return best;
     }
 
-    private static bool Overlaps(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+    /// <summary>Deepest overlap of <paramref name="box"/> with any prop or obstacle; 0 when clear.</summary>
+    private static float PenetrationDepth(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
     {
+        float deepest = 0f;
         IReadOnlyList<Prop> props = field.Props;
         for (int i = 0; i < props.Count; i++)
-            if (Obb2.TryGetPenetration(box, props[i].Footprint, out _)) return true;
+            if (Obb2.TryGetPenetration(box, props[i].Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         foreach (Obb2 other in obstacles)
-            if (Obb2.TryGetPenetration(box, other, out _)) return true;
-        return false;
+            if (Obb2.TryGetPenetration(box, other, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
+        return deepest;
     }
 
     private static Vector2 Resolve(Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
@@ -122,7 +145,7 @@ public static class TankMotion
         float reach = box.HalfExtents.Length() + obstacle.HalfExtents.Length();
         if (Vector2.DistanceSquared(box.Center, obstacle.Center) > reach * reach) return false;
         if (!Obb2.TryGetPenetration(box, obstacle, out Vector2 push)) return false;
-        box = box.WithCenter(box.Center + push);
+        box = box.WithCenter(box.Center + push + Vector2.Normalize(push) * Skin);
         return true;
     }
 }

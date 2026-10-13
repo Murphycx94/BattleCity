@@ -196,4 +196,43 @@ public sealed class TankMotionTests
             Assert.False(Obb2.TryGetPenetration(box, right.Footprint, out _), $"tick {i} overlaps right rock");
         }
     }
+
+    [Theory]
+    [InlineData(50f)]
+    [InlineData(65f)]
+    public void GlancingIntoARotatedWall_KeepsSliding(float headingDegrees)
+    {
+        var wall = new Prop(1, PropKind.Rock, new Obb2(new Vector2(100, 80), new Vector2(60, 1), Angles.Deg(17)), -1, 4);
+        Battlefield field = TestWorld.FlatField(wall);
+        var t = TestWorld.Tank(100, 100, yaw: Angles.Deg(17) + Angles.Deg(headingDegrees));
+        InputCmd cmd = TestWorld.Cmd(throttle: 1);
+        float xAt150 = 0;
+        for (int i = 1; i <= 300; i++)
+        {
+            TankMotion.Drive(ref t, cmd, field, ReadOnlySpan<Obb2>.Empty);
+            if (i == 150) xAt150 = t.Position.X;
+            if (Obb2.TryGetPenetration(TankMotion.Footprint(Spec, t.Position, t.Yaw), wall.Footprint, out Vector2 push))
+                Assert.True(push.Length() <= 0.01f, $"tick {i}: penetration {push.Length()}");
+        }
+        Assert.True(xAt150 - t.Position.X > 10f, $"x went from {xAt150} to {t.Position.X}");
+    }
+
+    [Fact]
+    public void WedgedHull_CanDriveOut()
+    {
+        var rock = new Prop(1, PropKind.Rock, new Obb2(new Vector2(100 - 1.6f - 1f, 100), new Vector2(1, 5), 0), -1, 4);
+        Obb2 parked = TankMotion.Footprint(Spec, new Vector2(100 + 3.2f - 0.6f, 100), 0);
+        var t = TestWorld.Tank(100, 100);
+        TestWorld.Drive(ref t, TestWorld.FlatField(rock), TestWorld.Cmd(throttle: 1), 60, parked);
+        Assert.True(t.Position.Y < 97, $"z was {t.Position.Y}");
+    }
+
+    [Fact]
+    public void SteepSlope_CannotBeSkimmedJustBelowTheContour()
+    {
+        var t = TestWorld.Tank(60, 100, yaw: -MathF.PI / 2 - Angles.Deg(3));
+        Assert.True(Angles.Forward(t.Yaw).Y > 0, "heading must point slightly downhill");
+        TestWorld.Drive(ref t, TestWorld.Field(TestWorld.RampNorth(2.75f)), TestWorld.Cmd(throttle: 1), 120);
+        Assert.True(MathF.Abs(t.Position.X - 60) < 2f, $"x was {t.Position.X}");
+    }
 }
