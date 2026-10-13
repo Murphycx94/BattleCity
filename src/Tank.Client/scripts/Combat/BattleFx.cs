@@ -14,9 +14,6 @@ public partial class BattleFx : Node3D
         var material = new StandardMaterial3D
         {
             AlbedoColor = color,
-            EmissionEnabled = true,
-            Emission = color,
-            EmissionEnergyMultiplier = 3f,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         };

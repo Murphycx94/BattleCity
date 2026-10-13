@@ -27,6 +27,7 @@ public static class Scenery
             FogEnabled = true,
             FogLightColor = new Color(0.72f, 0.78f, 0.84f),
             FogDensity = 0.0018f,
+            FogSkyAffect = 0.25f,
         };
         return new WorldEnvironment { Environment = environment };
     }

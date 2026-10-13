@@ -14,13 +14,20 @@ public partial class Reticle : Control
     private static readonly Color Dot = new(1f, 1f, 1f, 0.7f);
     private static readonly Color ReloadColor = new(1f, 0.72f, 0.18f);
 
+    // The default fallback font has no CJK glyphs; same Simplified Chinese chain the old UI theme uses.
+    private static readonly Lazy<Font> StatusFont = new(() => new SystemFont
+    {
+        FontNames = new[] { "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "sans-serif" },
+        FontWeight = 600,
+    });
+
     private Vector2? _impact;
     private float _reload = 1f;
     private string _status = "";
 
     public override void _Ready()
     {
-        SetAnchorsPreset(LayoutPreset.FullRect);
+        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
     }
 
@@ -43,6 +50,6 @@ public partial class Reticle : Control
             if (_reload < 1f)
                 DrawArc(p, ReloadRadius, -Mathf.Pi / 2, -Mathf.Pi / 2 + Mathf.Tau * _reload, 40, ReloadColor, 3f, true);
         }
-        DrawString(ThemeDB.FallbackFont, new Vector2(24, Size.Y - 28), _status, HorizontalAlignment.Left, -1, 18, Colors.White);
+        DrawString(StatusFont.Value, new Vector2(24, Size.Y - 28), _status, HorizontalAlignment.Left, -1, 18, Colors.White);
     }
 }

@@ -24,8 +24,8 @@ public partial class TerrainMesh : Node3D
         var material = new StandardMaterial3D
         {
             VertexColorUseAsAlbedo = true,
+            VertexColorIsSrgb = true,
             Roughness = 1f,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
         int cellsX = field.SamplesX - 1, cellsZ = field.SamplesZ - 1;
         for (int z0 = 0; z0 < cellsZ; z0 += ChunkCells)

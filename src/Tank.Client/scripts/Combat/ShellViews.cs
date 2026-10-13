@@ -9,14 +9,9 @@ namespace Tank.Client.Combat;
 public partial class ShellViews : Node3D
 {
     private readonly List<MeshInstance3D> _pool = new();
-    private StandardMaterial3D _material = null!;
-
-    public override void _Ready() => _material = new StandardMaterial3D
+    private readonly StandardMaterial3D _material = new()
     {
-        AlbedoColor = new Color(1f, 0.85f, 0.45f),
-        EmissionEnabled = true,
-        Emission = new Color(1f, 0.7f, 0.3f),
-        EmissionEnergyMultiplier = 4f,
+        AlbedoColor = new Color(1f, 0.9f, 0.55f),
         ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
     };
 
@@ -25,7 +20,7 @@ public partial class ShellViews : Node3D
     {
         while (_pool.Count < shells.Length)
         {
-            var tracer = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(0.12f, 0.12f, 3f) }, MaterialOverride = _material };
+            var tracer = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(0.3f, 0.3f, 4f) }, MaterialOverride = _material };
             AddChild(tracer);
             _pool.Add(tracer);
         }
