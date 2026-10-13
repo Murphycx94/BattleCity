@@ -63,4 +63,12 @@ public sealed class BallisticsTests
     [Fact]
     public void PredictImpact_ShotOffTheMap_ReturnsFalse() =>
         Assert.False(Ballistics.PredictImpact(new Vector3(100, 5, 190), new Vector3(0, 0, 800), TestWorld.FlatField(), out _));
+
+    [Fact]
+    public void GroundCrossingOutsideTheMap_IsGoneNotHit()
+    {
+        // Falls 1m in the first tick, so it reaches the ground ~12m past the south edge (z = 200) while still flying south.
+        var shell = new Shell { Position = new Vector3(100, 0.5f, 199), Velocity = new Vector3(0, -30, 800) };
+        Assert.Equal(ShellStep.Gone, Ballistics.Step(ref shell, TestWorld.FlatField(), out _));
+    }
 }

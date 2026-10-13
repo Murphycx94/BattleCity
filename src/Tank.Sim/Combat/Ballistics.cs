@@ -4,12 +4,13 @@ using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Combat;
 
+/// <summary>Outcome of one shell tick.</summary>
+public enum ShellStep : byte { Flying, Hit, Gone }
+
 /// <summary>
 /// Exact constant-gravity kinematics per tick, then a segment test between the old and new positions.
 /// The client's aim prediction runs this same code, so the reticle shows where the shell really lands.
 /// </summary>
-public enum ShellStep : byte { Flying, Hit, Gone }
-
 public static class Ballistics
 {
     public const float MaxLifetime = 4f;
@@ -42,10 +43,12 @@ public static class Ballistics
         shell.Velocity += GravityStep;
         shell.Position = to;
         shell.Age += SimConstants.Dt;
-        if (field.Raycast(from, to, out hit)) return ShellStep.Hit;
-        bool offMap = to.X < 0 || to.X > field.Terrain.SizeX || to.Z < 0 || to.Z > field.Terrain.SizeZ;
-        return offMap || shell.Age >= MaxLifetime ? ShellStep.Gone : ShellStep.Flying;
+        if (field.Raycast(from, to, out hit)) return IsOnMap(hit.Point, field) ? ShellStep.Hit : ShellStep.Gone;
+        return !IsOnMap(to, field) || shell.Age >= MaxLifetime ? ShellStep.Gone : ShellStep.Flying;
     }
+
+    private static bool IsOnMap(Vector3 p, Battlefield field) =>
+        p.X >= 0 && p.X <= field.Terrain.SizeX && p.Z >= 0 && p.Z <= field.Terrain.SizeZ;
 
     /// <summary>Where a shell fired now would land. False if it leaves the map or is still flying after <see cref="MaxLifetime"/>.</summary>
     public static bool PredictImpact(Vector3 origin, Vector3 velocity, Battlefield field, out Vector3 point)
