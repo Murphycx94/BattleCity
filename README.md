@@ -96,3 +96,16 @@ tools/ship.sh github                 # 建 tag 和 Release（可重复运行；R
 ```
 
 `build` 会检查每个包里都有 C# 程序集，并在 macOS 上把导出的游戏真正启动一次（开房、机器人加入、开局）才算成功。
+
+## 在线升级
+
+正式包启动后会在后台检查 [公开更新源](https://github.com/Murphycx94/BattleCity-updates)，有新版本就下载对应平台的完整安装包，
+主菜单出现「重启并更新」；点了之后由一个小脚本等游戏退出、替换安装目录里的游戏文件（macOS 是整个 .app），再重新启动。
+
+- **安全**：清单用 ECDSA P-256 签名，公钥嵌在游戏里（`src/Tank.Update/UpdateDefaults.cs`）；签名不对、包的 SHA-256 或大小不对、版本不比当前新，一律不装。
+- **出错可退**：替换失败会把旧版本放回去并照常启动；装在不能写的位置（如需要管理员权限的目录）时只提示下载新版。
+- **开发时不更新**：编辑器和源码运行不检查；正式包可加 `--no-update` 跳过。
+- **本地测试更新源**：`TANK_UPDATE_FEED=http://127.0.0.1:8765/stable/` 指向自己起的静态服务器（回环地址允许 http，签名照样校验）。
+
+发布时 `tools/ship.sh feed`（CI 里自动执行）把三平台客户端发到更新仓库的 Release，生成并签名 `stable/manifest.json`。
+签名私钥在 `~/.config/tank3d/update_signing_key.pem`，**不进仓库**；丢了就只能换公钥，老版本玩家需要手动装一次新版。

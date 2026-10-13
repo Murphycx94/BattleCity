@@ -9,10 +9,12 @@
 #       ship.sh check                      发布前检查（不改任何东西）
 #       ship.sh build                      check + test + 打包到 <OUT>/release
 #       ship.sh github [发布说明.md]        用 <OUT>/release 建 tag v<version> 和 GitHub Release
-#       ship.sh all [发布说明.md]           build + github
+#       ship.sh feed                       把 <OUT>/release 的客户端发到公开更新仓库，签名清单，推更新源（游戏内在线升级）
+#       ship.sh all [发布说明.md]           build + github + feed
 #       ship.sh bump <版本> "<一句话说明>"   改 build.json 并提交（不推送；推到 main 后 CI 自动发布）
 # 环境变量：REF（默认 HEAD）、GODOT（默认 godot-mono）、SHIP_OUT（默认 build/）、
-#       SHIP_SKIP_TESTS=1（build 时不跑测试）、DRY_RUN=1（github 只核对、打印）、REPAIR=1
+#       SHIP_SKIP_TESTS=1（build 时不跑测试）、DRY_RUN=1（github / feed 只核对、打印）、REPAIR=1、
+#       UPDATES_REPO（默认 Murphycx94/BattleCity-updates）、TANK_UPDATE_KEY（签名私钥，默认 ~/.config/tank3d/update_signing_key.pem）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,6 +24,11 @@ REMOTE="origin"
 APP="Tank3D"
 MAX_NOTES_CHARS=80
 SERVER_RIDS=(osx-arm64 osx-x64 win-x64 linux-x64)
+UPDATES_REPO="${UPDATES_REPO:-Murphycx94/BattleCity-updates}"
+UPDATE_KEY="${TANK_UPDATE_KEY:-$HOME/.config/tank3d/update_signing_key.pem}"
+FEED_DIR="stable"
+FEED_WAIT_TRIES=12      # raw.githubusercontent.com 缓存最多约 5 分钟：每 30 秒查一次
+FEED_WAIT_SECONDS=30
 REF_SHA="$(git -C "$ROOT" rev-parse --verify "${REF:-HEAD}^{commit}")"
 WT=""
 
@@ -95,6 +102,7 @@ cmd_test() {
 	step "单元与集成测试"
 	dotnet test "$WT/tests/Tank.Core.Tests" -c Release --nologo -v q
 	dotnet test "$WT/tests/Tank.Net.Tests" -c Release --nologo -v q
+	dotnet test "$WT/tests/Tank.Update.Tests" -c Release --nologo -v q
 	step "网络压测（docs/03 §11）"
 	dotnet run --project "$WT/tests/Tank.Soak" -c Release
 }
@@ -283,6 +291,118 @@ missing_assets() {  # 本地有、线上 Release 没有（或大小不同）的�
 	rm -f "${TMPDIR:-/tmp}/tank_assets.$$"
 }
 
+# —— feed：在线升级的更新源 ——
+# 布局：<UPDATES_REPO> 的 Release v<version> 放三平台客户端；main 分支的 stable/ 放 manifest.json 与 manifest.sig。
+# manifest.sig 是签名私钥对 manifest.json 原文的 ECDSA P-256 / SHA-256 签名（base64），公钥在 src/Tank.Update/UpdateDefaults.cs。
+check_update_key() {
+	[ -f "$UPDATE_KEY" ] || die "缺少签名私钥 ${UPDATE_KEY}（CI 里是 secret TANK_UPDATE_SIGNING_KEY）"
+	local derived wanted
+	derived="$(openssl pkey -in "$UPDATE_KEY" -pubout 2>/dev/null | grep -v -- ----- | tr -d '\n')" || die "$UPDATE_KEY 不是能读的私钥"
+	wanted="$(at_ref src/Tank.Update/UpdateDefaults.cs | sed -n '/BEGIN PUBLIC KEY/,/END PUBLIC KEY/p' | grep -v -- ----- | tr -d ' \n')"
+	[ -n "$derived" ] && [ "$derived" = "$wanted" ] || die "签名私钥和游戏里的公钥不是一对：签出来的更新所有已安装的游戏都不会认"
+	ok "签名私钥与游戏内公钥匹配"
+}
+
+cmd_feed() {
+	local rel="$OUT/release"
+	command -v gh >/dev/null || die "需要 GitHub CLI（gh）"
+	[ -f "$rel/RELEASE.json" ] || die "缺少 $rel/RELEASE.json：先运行 ship.sh build"
+	[ "$(json_field version "$rel/RELEASE.json")" = "$VERSION" ] || die "$rel 不是 v${VERSION}：重新 build"
+	(cd "$rel" && sha256 -c --quiet SHA256SUMS.txt) || die "产物和 SHA256SUMS.txt 对不上"
+	check_update_key
+	step "更新源 ${UPDATES_REPO}：v$VERSION"
+
+	local mac="$APP-v$VERSION-macos-universal.zip" win="$APP-v$VERSION-windows-x64.zip" linux="$APP-v$VERSION-linux-x64.tar.gz"
+	local base="https://github.com/$UPDATES_REPO/releases/download/$TAG"
+	local stage; stage="$(mktemp -d "${TMPDIR:-/tmp}/tank_feed.XXXXXX")"
+	python3 - "$rel" "$VERSION" "$NOTES" "$base" "$mac" "$win" "$linux" > "$stage/manifest.json" <<'PY'
+import hashlib, json, os, sys
+rel, version, notes, base, mac, win, linux = sys.argv[1:8]
+built = json.load(open(os.path.join(rel, "RELEASE.json"), encoding="utf-8"))["built_at"]
+def pkg(name):
+    path = os.path.join(rel, name)
+    return {"url": f"{base}/{name}", "sha256": hashlib.sha256(open(path, "rb").read()).hexdigest(), "size": os.path.getsize(path)}
+manifest = {"version": version, "notes": notes, "published_at": built,
+            "platforms": {"macos": pkg(mac), "windows": pkg(win), "linux": pkg(linux)}}
+print(json.dumps(manifest, ensure_ascii=False, indent=2))
+PY
+	openssl dgst -sha256 -sign "$UPDATE_KEY" -out "$stage/manifest.der" "$stage/manifest.json"
+	openssl pkey -in "$UPDATE_KEY" -pubout > "$stage/pub.pem"
+	openssl dgst -sha256 -verify "$stage/pub.pem" -signature "$stage/manifest.der" "$stage/manifest.json" >/dev/null || die "签名自检失败"
+	base64 < "$stage/manifest.der" | tr -d '\n' > "$stage/manifest.sig"; echo >> "$stage/manifest.sig"
+	ok "清单已签名"
+
+	# 线上清单：拒绝回退版本；同一版且内容相同就只补缺的部分
+	local live; live="$(gh api "repos/$UPDATES_REPO/contents/$FEED_DIR/manifest.json" -H "Accept: application/vnd.github.raw" 2>/dev/null || true)"
+	local same_manifest=no
+	if [ -n "$live" ]; then
+		local live_version; live_version="$(printf '%s' "$live" | json_field version -)"
+		python3 -c 'import sys
+def key(v):
+    core, _, pre = v.partition("-")
+    return tuple(int(x) for x in core.split(".")), (pre == "", pre)
+sys.exit(0 if key(sys.argv[1]) <= key(sys.argv[2]) else 1)' "$live_version" "$VERSION" 			|| die "线上更新源已经是更新的 v${live_version}，不能退回 v$VERSION"
+		[ "$live" = "$(cat "$stage/manifest.json")" ] && same_manifest=yes
+	fi
+
+	if [ "${DRY_RUN:-0}" = 1 ]; then
+		echo "DRY_RUN：会发布 Release $UPDATES_REPO@${TAG}（${mac}、${win}、${linux}），并推送 $FEED_DIR/manifest.json："
+		sed 's/^/  | /' "$stage/manifest.json"
+		rm -rf "$stage"
+		return 0
+	fi
+
+	local assets=("$rel/$mac" "$rel/$win" "$rel/$linux")
+	if gh release view "$TAG" -R "$UPDATES_REPO" >/dev/null 2>&1; then
+		gh release upload "$TAG" -R "$UPDATES_REPO" "${assets[@]}" --clobber
+		ok "Release $TAG 已存在：附件已更新"
+	else
+		gh release create "$TAG" -R "$UPDATES_REPO" "${assets[@]}" --title "坦克 3D $TAG" \
+			--notes "$NOTES"$'\n\n'"游戏内在线升级用的安装包；完整发布说明与专用服务器见主仓库。"
+		ok "Release $TAG 已建"
+	fi
+	local missing; missing="$(OUT_REPO="$UPDATES_REPO" missing_feed_assets "${assets[@]}")"
+	[ -z "$missing" ] || die "更新源 Release 缺少附件：$missing"
+
+	if [ "$same_manifest" = yes ]; then
+		ok "线上清单已经是这一版，不再推送"
+	else
+		local clone="$stage/repo"
+		[ -z "${GH_TOKEN:-}" ] || gh auth setup-git >/dev/null 2>&1 || true
+		gh repo clone "$UPDATES_REPO" "$clone" -- --depth 1 -q
+		mkdir -p "$clone/$FEED_DIR"
+		cp "$stage/manifest.json" "$stage/manifest.sig" "$clone/$FEED_DIR/"
+		git -C "$clone" add "$FEED_DIR"
+		git -C "$clone" -c user.name="${GIT_AUTHOR_NAME:-tank3d-release}" -c user.email="${GIT_AUTHOR_EMAIL:-tank3d-release@users.noreply.github.com}" \
+			commit -q -m "feed: v$VERSION"
+		git -C "$clone" push -q origin HEAD:main
+		ok "已推送 $FEED_DIR/manifest.json"
+	fi
+	wait_for_feed "$stage/manifest.json"
+	rm -rf "$stage"
+}
+
+missing_feed_assets() {  # 线上缺少或大小不同的附件名
+	local names; names="$(gh release view "$TAG" -R "$OUT_REPO" --json assets --jq '.assets[] | "\(.name) \(.size)"')"
+	local f name size
+	for f in "$@"; do
+		name="${f##*/}"; size="$(wc -c < "$f" | tr -d ' ')"
+		grep -qx "$name $size" <<<"$names" || printf '%s ' "$name"
+	done
+}
+
+wait_for_feed() {  # 等公开地址读到新清单（CDN 缓存），读不到只警告：玩家迟几分钟收到而已
+	local url="https://raw.githubusercontent.com/$UPDATES_REPO/main/$FEED_DIR/manifest.json" i
+	for ((i = 1; i <= FEED_WAIT_TRIES; i++)); do
+		if curl -fsSL -m 20 "$url?t=$(date +%s)" 2>/dev/null | cmp -s - "$1"; then
+			ok "玩家已能读到 v${VERSION}：$url"
+			return 0
+		fi
+		sleep "$FEED_WAIT_SECONDS"
+	done
+	echo "! 公开地址暂时还是旧清单（CDN 缓存），几分钟后会自动生效：$url"
+}
+
 # —— bump：改版本并提交 ——
 cmd_bump() {
 	local version="${1:?用法：ship.sh bump <版本> \"<一句话说明>\"}" notes="${2:?缺少一句话说明}"
@@ -307,7 +427,8 @@ case "${1:-}" in
 	test) cmd_test ;;
 	build) cmd_build ;;
 	github) cmd_github "${2:-}" ;;
-	all) cmd_build; cmd_github "${2:-}" ;;
+	feed) cmd_feed ;;
+	all) cmd_build; cmd_github "${2:-}"; cmd_feed ;;
 	bump) shift; cmd_bump "$@" ;;
-	*) sed -n '2,15p' "$0"; exit 2 ;;
+	*) sed -n '2,19p' "$0"; exit 2 ;;
 esac

@@ -15,6 +15,11 @@ public partial class MenuScreen : Control
     private readonly ItemList _rooms = new() { CustomMinimumSize = new Vector2(0, 260), SizeFlagsVertical = SizeFlags.ExpandFill };
     private readonly Label _status = UiKit.Label("", 16, Palette.UiDim);
     private readonly List<DiscoveredRoom> _roomList = new();
+    private readonly Label _version = UiKit.Label("", 13, Palette.UiDim);
+    private readonly PanelContainer _updateBanner = UiKit.Panel(new Color(Palette.UiAccent, 0.12f), 14, new Color(Palette.UiAccent, 0.6f));
+    private readonly Label _updateText = UiKit.Label("", 15, Palette.UiText);
+    private readonly Button _updateButton = new() { CustomMinimumSize = new Vector2(0, 40) };
+    private Action? _updateAction;
 
     public event Action<string, GameMode>? HostRequested;
     public event Action<string, string, int>? JoinRequested;
@@ -76,7 +81,9 @@ public partial class MenuScreen : Control
         col.AddChild(UiKit.Label("坦克", 112, Palette.UiAccent));
         col.AddChild(UiKit.Label("3D  ·  局域网对战", 30, Palette.UiText));
         col.AddChild(UiKit.Label("守住老鹰，打穿砖墙，叫上朋友。", 16, Palette.UiDim));
-        col.AddChild(UiKit.Gap(28));
+        col.AddChild(_version);
+        col.AddChild(BuildUpdateBanner());
+        col.AddChild(UiKit.Gap(20));
 
         col.AddChild(UiKit.Label("呼号", 14, Palette.UiDim));
         col.AddChild(_name);
@@ -93,6 +100,33 @@ public partial class MenuScreen : Control
         col.AddChild(spacer);
         col.AddChild(UiKit.Label("WASD / 方向键 移动 · J / 空格 开火 · C 切换镜头 · F3 网络面板 · Tab 计分板 · Esc 离开", 13, Palette.UiDim));
         return col;
+    }
+
+    public void SetVersion(string version) => _version.Text = $"v{version}";
+
+    /// <summary>Shows the update banner; a null <paramref name="text"/> hides it.</summary>
+    public void SetUpdate(string? text, string? buttonText = null, Action? onPressed = null)
+    {
+        _updateBanner.Visible = text is not null;
+        _updateText.Text = text ?? string.Empty;
+        _updateAction = onPressed;
+        _updateButton.Visible = buttonText is not null;
+        _updateButton.Text = buttonText ?? string.Empty;
+    }
+
+    private Control BuildUpdateBanner()
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 14);
+        _updateText.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _updateText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _updateText.VerticalAlignment = VerticalAlignment.Center;
+        row.AddChild(_updateText);
+        _updateButton.Pressed += () => _updateAction?.Invoke();
+        row.AddChild(_updateButton);
+        _updateBanner.AddChild(row);
+        _updateBanner.Visible = false;
+        return _updateBanner;
     }
 
     private Control BuildRight()

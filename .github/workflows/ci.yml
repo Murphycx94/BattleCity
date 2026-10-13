@@ -17,6 +17,7 @@ jobs:
         run: |
           dotnet test tests/Tank.Core.Tests --collect:"XPlat Code Coverage" --results-directory coverage/core
           dotnet test tests/Tank.Net.Tests --collect:"XPlat Code Coverage" --results-directory coverage/net
+          dotnet test tests/Tank.Update.Tests --collect:"XPlat Code Coverage" --results-directory coverage/update
       - name: Network soak (acceptance metrics, docs/03 §11)
         # Shared runners add scheduler noise to wall-clock tick timing; the 2 ms budget applies to real hardware.
         env:

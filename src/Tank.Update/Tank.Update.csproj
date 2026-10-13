@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Online update: signed manifest, verified download, staging and the platform swap script.
+       No Godot dependency so it can be tested on its own. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tank.Update.Tests" />
+  </ItemGroup>
+</Project>

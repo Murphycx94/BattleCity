@@ -46,6 +46,7 @@ public partial class Main : Node
 
         if (_options.Host) Host(_menu.PlayerName, _options.Mode);
         else if (_options.JoinAddress is { } address) JoinAddress(address);
+        InitUpdates();
     }
 
     public override void _Input(InputEvent e) => _input.OnInputEvent(e);
@@ -64,6 +65,7 @@ public partial class Main : Node
         if (client is null)
         {
             PollDiscovery();
+            PollUpdates();
         }
         else
         {
@@ -79,6 +81,7 @@ public partial class Main : Node
     {
         foreach (var (bot, _) in _bots) bot.Dispose();
         _discovery?.Dispose();
+        _update?.Dispose();
         _session.Dispose();
     }
 

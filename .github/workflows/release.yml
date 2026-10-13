@@ -1,7 +1,11 @@
 # main 上 build.json 的 version 变了（远端还没有 tag v<version>）就自动发布：
 #   plan    → 判断要不要发
 #   build   → macOS runner 上跑测试、导出三平台客户端、发布四平台专用服务器（tools/ship.sh build）
-#   publish → 建 tag 和 GitHub Release、上传附件（tools/ship.sh github）
+#   publish → 建 tag 和 GitHub Release、上传附件（tools/ship.sh github），
+#             再把客户端发到公开仓库 Murphycx94/BattleCity-updates 并推送签名清单（tools/ship.sh feed，游戏内在线升级用）
+# 在线升级需要两个仓库 secret（没配就跳过这一步，并给出警告）：
+#   TANK_UPDATE_SIGNING_KEY  ~/.config/tank3d/update_signing_key.pem 的全文（与 src/Tank.Update/UpdateDefaults.cs 的公钥一对）
+#   UPDATES_TOKEN            对 BattleCity-updates 有 Contents 读写权限的 fine-grained token
 # 打包与本机发布走同一套脚本：本机可以先 tools/ship.sh build 试跑。
 # 发新版：tools/ship.sh bump 0.2.0 "一句话说明" && git push
 # 发布说明默认按模板生成；要自己写就放 docs/releases/v<version>.md。
@@ -123,3 +127,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash tools/ship.sh github
+
+      - name: Update feed (online update)
+        env:
+          GH_TOKEN: ${{ secrets.UPDATES_TOKEN }}
+          TANK_UPDATE_SIGNING_KEY: ${{ secrets.TANK_UPDATE_SIGNING_KEY }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [ -z "$GH_TOKEN" ] || [ -z "$TANK_UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::没配 UPDATES_TOKEN / TANK_UPDATE_SIGNING_KEY：跳过更新源，玩家收不到在线升级（可在本机运行 tools/ship.sh feed 补发）"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/update_signing_key.pem"
+          (umask 077 && printf '%s\n' "$TANK_UPDATE_SIGNING_KEY" > "$key")
+          trap 'rm -f "$key"' EXIT
+          TANK_UPDATE_KEY="$key" bash tools/ship.sh feed
