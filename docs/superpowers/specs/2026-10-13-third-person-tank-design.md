@@ -44,7 +44,7 @@
 阶段 1～3 期间，新旧代码并存：
 
 - `src/Tank.Sim`、`tests/Tank.Sim.Tests` 是新建项目，旧的 `Tank.Core` 不动。
-- 客户端新增 `scenes/Sandbox.tscn` 试驾场，用启动参数 `--sandbox` 进入。旧的主菜单和对局继续可用。
+- 客户端新增 `scenes/Sandbox.tscn` 试驾场，用 `godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn` 直接启动，不改动旧的主菜单。菜单入口在阶段 4 重写菜单时再加。
 - 阶段 4 把 `Tank.Net` 切到 `Tank.Sim`，然后删除 `Tank.Core`、旧地图、旧视图、`tools/genmaps.py`，并重写 `docs/01～04`。
 
 这样每个阶段结束时仓库都能编译、能玩、测试是绿的。
@@ -254,8 +254,10 @@ src/Tank.Client/scripts/
   Vehicles/   TankView（车体、炮塔、炮管节点分离；履带 UV 滚动；悬挂抖动）
   Camera/     OrbitCamera（第三人称，避开地形）、SniperCamera（2×/4×/8×）、AimSolver（屏幕射线 → 世界瞄准点）
   Combat/     ShellFx、ExplosionFx、DebrisFx（Godot 刚体碎片，纯表现）
-  Hud/        准星和散布圈、装填条、弹种、血量、伤害提示、点亮灯、小地图（阶段 5）
+  Overlay/    准星和散布圈、装填条、弹种、血量、伤害提示、点亮灯、小地图（阶段 5）
 ```
+
+HUD 目录不叫 `Hud`，因为旧代码有 `Tank.Client.UI.Hud` 类，同名命名空间会遮蔽它。
 
 操作：
 
@@ -279,7 +281,7 @@ src/Tank.Client/scripts/
 
 ```
 src/Tank.Sim/
-  Math/        Obb2、Segment、Ray、XorShift、角度工具
+  Geometry/    Obb2、Intersect、XorShift、Angles（不叫 Math，避免遮蔽 System.Math）
   Terrain/     HeightField（双线性采样、法线、线段求交）
   Maps/        MapData、MapLoader、Props（物件状态表）
   Vehicles/    TankSpec、TankCatalog、TankState、TankMotion、Collision
@@ -305,7 +307,7 @@ tools/MapGen/
 
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
-| **1 单机试驾场** | `Tank.Sim` 骨架；高度图和程序生成的试驾地形；中坦的运动、爬坡、贴地姿态；炮塔和炮管跟随瞄准；弹道射击打地形和岩石；客户端试驾场场景、地形网格、程序化坦克模型、第三人称和狙击镜头、准星；`--sandbox` 启动 | 能在起伏地形上开坦克上下坡，镜头跟随，鼠标瞄准开炮，炮弹沿抛物线落地爆炸；Sim 测试是绿的 |
+| **1 单机试驾场** | `Tank.Sim` 骨架；高度图和程序生成的试驾地形；中坦的运动、爬坡、贴地姿态；炮塔和炮管跟随瞄准；弹道射击打地形和岩石；客户端试驾场场景、地形网格、程序化坦克模型、第三人称和狙击镜头、准星；场景路径启动 | 能在起伏地形上开坦克上下坡，镜头跟随，鼠标瞄准开炮，炮弹沿抛物线落地爆炸；Sim 测试是绿的 |
 | **2 战斗** | 4 种车型；装甲盒、击穿、跳弹、HE；散布和缩圈；墙段、栅栏、草丛的破坏和瓦砾；试驾场里放静止靶车和墙 | 打靶车能看到击穿、跳弹、未击穿的提示和伤害数字；能轰开墙；重坦能撞倒砖墙 |
 | **3 点亮** | 点亮计算、草丛加成、开火惩罚、视线遮挡；试驾场里放一个会动的 AI 靶车，用于观察 | 靶车躲进草丛后会在规定距离消失，开火后会暴露 |
 | **4 联网** | `Tank.Net` 切到 `Tank.Sim`；新的输入和快照编码；预测和对账；可见性裁剪；物件同步；大厅沿用；删除旧玩法和旧文档 | 两台机器局域网对战，F3 面板显示对账误差小；抓包确认看不到未点亮的敌人 |
