@@ -27,7 +27,7 @@ public static class TankMotion
     public static Obb2 Footprint(TankSpec spec, Vector2 center, float yaw) =>
         new(center, new Vector2(spec.HullWidth / 2, spec.HullLength / 2), yaw);
 
-    /// <summary>Applies throttle and steering, then moves the hull and pushes it out of props and <paramref name="obstacles"/>.</summary>
+    /// <summary>Applies throttle and steering, then moves the hull and pushes it out of solid props and <paramref name="obstacles"/>.</summary>
     public static void Drive(ref TankState t, in InputCmd input, Battlefield field, ReadOnlySpan<Obb2> obstacles)
     {
         TankSpec spec = t.Spec;
@@ -115,13 +115,13 @@ public static class TankMotion
         return best;
     }
 
-    /// <summary>Deepest overlap of <paramref name="box"/> with any prop or obstacle; 0 when clear.</summary>
+    /// <summary>Deepest overlap of <paramref name="box"/> with any solid prop or obstacle; 0 when clear.</summary>
     private static float PenetrationDepth(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
     {
         float deepest = 0f;
         IReadOnlyList<Prop> props = field.Props;
         for (int i = 0; i < props.Count; i++)
-            if (Obb2.TryGetPenetration(box, props[i].Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
+            if (props[i].IsSolid && Obb2.TryGetPenetration(box, props[i].Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         foreach (Obb2 other in obstacles)
             if (Obb2.TryGetPenetration(box, other, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         return deepest;
@@ -133,7 +133,8 @@ public static class TankMotion
         for (int iteration = 0; iteration < CollisionIterations; iteration++)
         {
             bool pushed = false;
-            for (int i = 0; i < props.Count; i++) pushed |= PushOut(ref box, props[i].Footprint);
+            for (int i = 0; i < props.Count; i++)
+                if (props[i].IsSolid) pushed |= PushOut(ref box, props[i].Footprint);   // bushes don't block
             foreach (Obb2 other in obstacles) pushed |= PushOut(ref box, other);
             if (!pushed) break;
         }

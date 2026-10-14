@@ -26,6 +26,18 @@ public readonly record struct Obb2(Vector2 Center, Vector2 HalfExtents, float Ya
         return MathF.Abs(Vector2.Dot(d, AxisRight)) <= HalfExtents.X && MathF.Abs(Vector2.Dot(d, AxisForward)) <= HalfExtents.Y;
     }
 
+    /// <summary>Distance from <paramref name="point"/> to the rectangle (0 inside).</summary>
+    public float DistanceToPoint(Vector2 point)
+    {
+        Vector2 d = point - Center;
+        float across = MathF.Max(MathF.Abs(Vector2.Dot(d, AxisRight)) - HalfExtents.X, 0f);
+        float along = MathF.Max(MathF.Abs(Vector2.Dot(d, AxisForward)) - HalfExtents.Y, 0f);
+        return MathF.Sqrt(across * across + along * along);
+    }
+
+    /// <summary>True when the rectangle and the disc (<paramref name="center"/>, <paramref name="radius"/>) overlap or touch.</summary>
+    public bool IntersectsCircle(Vector2 center, float radius) => DistanceToPoint(center) <= radius;
+
     /// <summary>Separating-axis test. On overlap, <paramref name="push"/> is the shortest move that takes <paramref name="a"/> out of <paramref name="b"/>.</summary>
     public static bool TryGetPenetration(in Obb2 a, in Obb2 b, out Vector2 push)
     {

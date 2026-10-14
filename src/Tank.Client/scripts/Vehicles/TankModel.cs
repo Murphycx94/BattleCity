@@ -1,49 +1,76 @@
 using Godot;
+using Tank.Client.Art;
+using Tank.Client.Art.Meshes;
 using Tank.Client.World;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Client.Vehicles;
 
 /// <summary>
-/// Low-poly tank built from boxes. Node layout mirrors the sim: hull origin on the ground, "Turret" at the ring
-/// (yaw), "Gun" at the trunnion (pitch), barrel pointing -Z. A glTF model can replace it later if node names match.
+/// Procedural cartoon tank built from its <see cref="TankLook"/>, painted with tank_toon.gdshader. Node layout keeps the stage-1 contract: the root sits at the
+/// hull origin on the ground, "Turret" yaws, "Gun" pitches, the barrel points −Z. Below that:
+/// Body (visual nod) → Hull; Turret (a sibling of Body, so nod never tilts the gun) → Gun → Mantlet, Barrel (recoil: tube and bulb), Muzzle; Running gear → Wheels, Tracks.
 /// </summary>
 public partial class TankModel : Node3D
 {
-    private const float HullBottom = 0.4f;
-    private const float HullTop = 1.3f;
+    private const float RimStrength = 0.25f;
+    private const int PaintMode = 0, WheelMode = 1, TrackMode = 2;   // tank_toon.gdshader "mode"
 
-    private static readonly Color HullColor = new(0.34f, 0.39f, 0.23f);
-    private static readonly Color TurretColor = new(0.38f, 0.43f, 0.26f);
-    private static readonly Color TrackColor = new(0.13f, 0.13f, 0.12f);
-    private static readonly Color GunColor = new(0.27f, 0.30f, 0.19f);
-
+    private readonly Node3D _body = new() { Name = "Body" };
     private readonly Node3D _turret = new() { Name = "Turret" };
     private readonly Node3D _gun = new() { Name = "Gun" };
+    private readonly Node3D _barrel = new() { Name = "Barrel" };
+    private readonly Marker3D _muzzle = new() { Name = "Muzzle" };
+    private readonly Node3D _wheels = new() { Name = "Wheels" };
+    private readonly MultiMeshInstance3D _tracks = new() { Name = "Tracks" };
+    private readonly List<WheelNode> _wheelNodes = new();
+    private readonly record struct WheelNode(Node3D Node, float Radius, bool Left, float Phase);
+    private MultiMesh _linkMesh = null!;
+    private float[] _linkBuffer = Array.Empty<float>();
+    private float _placedLeft = float.NaN;
+    private float _placedRight = float.NaN;
+    private TankLook _look = null!;
+    private BeltPath _belt = null!;
+    private int _linksPerSide;
+    private Vector3 _nodPivot;
+    private Vector3 _turretBase;
+
+    public TankAnimator Animator { get; private set; } = null!;
+
+    /// <summary>Barrel tip in world space, for muzzle effects.</summary>
+    public Transform3D MuzzleTransform => _muzzle.GlobalTransform;
 
     public void Build(TankSpec spec)
     {
-        float w = spec.HullWidth, l = spec.HullLength;
-        AddBox(this, new Vector3(w * 0.78f, HullTop - HullBottom, l * 0.96f), new Vector3(0, (HullTop + HullBottom) / 2, 0), HullColor);
-        float trackX = w / 2 - w * 0.11f;
-        foreach (float side in new[] { -1f, 1f })
-            AddBox(this, new Vector3(w * 0.22f, 0.9f, l), new Vector3(side * trackX, 0.45f, 0), TrackColor);
+        _look = TankLooks.For(spec.Id);
+        Animator = new TankAnimator(_look.TrackX);
+        _nodPivot = new Vector3(0, _look.RoadWheelY, 0);
+        ShaderMaterial paint = ToonMaterial(_look, PaintMode);
+        // Same paint on the gun; its origin is the trunnion, so lift it by that height for the bottom-to-top shading.
+        ShaderMaterial gunPaint = ToonMaterial(_look, PaintMode).With("height_offset", spec.TrunnionHeight);
 
-        _turret.Position = new Vector3(0, 0, -spec.TurretOffset);
-        AddChild(_turret);
-        float turretTop = spec.TrunnionHeight + 0.35f;
-        AddBox(_turret, new Vector3(w * 0.62f, turretTop - HullTop, l * 0.42f), new Vector3(0, (turretTop + HullTop) / 2, 0.4f), TurretColor);
+        AddChild(_body);
+        _body.AddChild(new MeshInstance3D { Name = "Hull", Mesh = TankParts.Hull(_look).ToArrayMesh(), MaterialOverride = paint });
 
-        _gun.Position = new Vector3(0, spec.TrunnionHeight, 0);
+        _turretBase = new Vector3(0, 0, -spec.TurretOffset);
+        _turret.Position = _turretBase;
+        AddChild(_turret); // sibling of Body: the hull nods under it, but the gun line stays exactly the sim's
+        _turret.AddChild(new MeshInstance3D { Name = "TurretShell", Mesh = TankParts.Turret(_look).ToArrayMesh(), MaterialOverride = paint });
+
+        _gun.Position = new Vector3(0, spec.TrunnionHeight, _look.GunPivotZ);
         _turret.AddChild(_gun);
-        AddBox(_gun, new Vector3(0.7f, 0.5f, 0.5f), new Vector3(0, 0, -0.1f), TurretColor); // mantlet
-        _gun.AddChild(new MeshInstance3D
-        {
-            Mesh = new CylinderMesh { TopRadius = 0.11f, BottomRadius = 0.13f, Height = spec.GunLength, RadialSegments = 8 },
-            MaterialOverride = Flat(GunColor),
-            Position = new Vector3(0, 0, -spec.GunLength / 2),
-            RotationDegrees = new Vector3(-90, 0, 0),
-        });
+        _gun.AddChild(new MeshInstance3D { Name = "Mantlet", Mesh = TankParts.Mantlet(_look).ToArrayMesh(), MaterialOverride = gunPaint });
+        _gun.AddChild(_barrel);
+        float barrelLength = spec.GunLength + _look.GunPivotZ;
+        _barrel.AddChild(new MeshInstance3D { Mesh = TankParts.Barrel(_look, barrelLength).ToArrayMesh(), MaterialOverride = gunPaint });
+        _barrel.AddChild(new MeshInstance3D { Name = "MuzzleBulb", Mesh = TankParts.Muzzle(_look, barrelLength).ToArrayMesh(), MaterialOverride = ToonMaterial(_look, TrackMode) });
+        _muzzle.Position = new Vector3(0, 0, -barrelLength);
+        _gun.AddChild(_muzzle);
+
+        AddChild(_wheels);
+        BuildWheels();
+        AddChild(_tracks);
+        BuildTracks(ToonMaterial(_look, TrackMode));
     }
 
     public void Apply(TankPose pose, float turretYaw, float gunPitch)
@@ -53,8 +80,137 @@ public partial class TankModel : Node3D
         _gun.Rotation = new Vector3(gunPitch, 0, 0);
     }
 
-    private static void AddBox(Node3D parent, Vector3 size, Vector3 position, Color color) =>
-        parent.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = Flat(color), Position = position });
+    /// <summary>Kicks the barrel back; it returns over <see cref="TankAnimator.RecoilReturnTime"/>.</summary>
+    public void Fire(float turretYaw) => Animator.Fire(turretYaw);
 
-    private static StandardMaterial3D Flat(Color color) => new() { AlbedoColor = color, Roughness = 0.85f };
+    /// <summary>Rolls wheels and tracks, nods the hull and runs recoil. Call once per frame after <see cref="Apply"/>.</summary>
+    public void Animate(float speed, float yawRate, float delta)
+    {
+        Animator.Step(speed, yawRate, delta);
+        // The odometer grows without bound; wrap the wheel angle (2π) and the belt offset (belt length) separately, each on its own period.
+        foreach (WheelNode wheel in _wheelNodes)
+        {
+            float rolled = wheel.Left ? Animator.LeftDistance : Animator.RightDistance;
+            wheel.Node.Rotation = new Vector3(wheel.Phase - Mathf.PosMod(rolled / wheel.Radius, Mathf.Tau), 0, 0);
+        }
+        if (IsVisibleInTree()) PlaceLinks(Mathf.PosMod(Animator.LeftDistance, _belt.Length), Mathf.PosMod(Animator.RightDistance, _belt.Length));
+        var nod = new Basis(Vector3.Right, Animator.Nod);
+        _body.Transform = new Transform3D(nod, _nodPivot - nod * _nodPivot);
+        // Anchor at ring height (where the turret sits on the hull) so the nod moves it as the ring moves; only the position follows, orientation stays level.
+        var ring = Vector3.Up * _look.TurretBase;
+        _turret.Position = _body.Transform * (_turretBase + ring) - ring;
+        _barrel.Position = new Vector3(0, 0, Animator.Recoil);
+    }
+
+    private static ShaderMaterial ToonMaterial(TankLook look, int mode) =>
+        Materials.FromShader("tank_toon")
+            .With("mode", mode)
+            .With("body_color", look.Paint.Body.ToColor())
+            .With("hub_color", look.Paint.Hub.ToColor())
+            .With("track_color", look.Paint.Track.ToColor())
+            .With("toon_rim_strength", RimStrength);
+
+    private void BuildWheels()
+    {
+        float halfThickness = _look.TrackThickness / 2;
+        ShaderMaterial wheelMaterial = ToonMaterial(_look, WheelMode);   // cream hub, track-coloured tyre (vertex-colour mask)
+        _belt = new BeltPath(TankParts.TrackLoop(_look));
+        _linksPerSide = (int)MathF.Round(_belt.Length / _look.LinkPitch);
+        int teeth = TankParts.SprocketTeethCount(_look);
+        float linkSpacing = _belt.Length / _linksPerSide;
+        // The wheels roll on the belt's centre line (radius + half the link thickness). The sprocket instead turns exactly one
+        // tooth per link, so its teeth never drift out of mesh with the links as the odometer grows.
+        float sprocketRadius = teeth * linkSpacing / MathF.Tau;
+        foreach (bool left in new[] { true, false })
+        {
+            float x = left ? -_look.TrackX : _look.TrackX;
+            ArrayMesh road = TankParts.Wheel(_look.RoadWheelRadius, _look.RoadWheelWidth, left).ToArrayMesh();
+            for (int i = 0; i < _look.RoadWheelCount; i++)
+                AddWheel(road, new Vector3(x, _look.RoadWheelY, _look.RoadWheelZ(i)), _look.RoadWheelRadius + halfThickness, left, 0f, wheelMaterial);
+            WheelSpot s = _look.Sprocket, d = _look.Idler;
+            AddWheel(TankParts.Sprocket(s.Radius, _look.RoadWheelWidth, left, teeth).ToArrayMesh(), new Vector3(x, s.Y, s.Z), sprocketRadius, left, SprocketPhase(s, linkSpacing), wheelMaterial);
+            AddWheel(TankParts.Wheel(d.Radius, _look.RoadWheelWidth * 0.8f, left).ToArrayMesh(), new Vector3(x, d.Y, d.Z), d.Radius + halfThickness, left, 0f, wheelMaterial);
+        }
+    }
+
+    /// <summary>
+    /// Wheel angle at which a sprocket tooth sits in a gap between two links (the belt offset 0 layout puts link i at
+    /// arc length i·spacing, so gaps are at half-steps), measured like the tooth angles: from +Y towards +Z.
+    /// </summary>
+    private float SprocketPhase(WheelSpot sprocket, float linkSpacing)
+    {
+        var centre = new System.Numerics.Vector2(sprocket.Z, sprocket.Y);
+        var top = centre + new System.Numerics.Vector2(0, sprocket.Radius + _look.TrackThickness / 2);
+        float bestArc = 0, best = float.MaxValue;
+        for (int i = 0; i < 2000; i++)
+        {
+            float arc = _belt.Length * i / 2000f;
+            float distance = System.Numerics.Vector2.DistanceSquared(_belt.Sample(arc).Position, top);
+            if (distance < best) (best, bestArc) = (distance, arc);
+        }
+        float gapArc = (MathF.Floor(bestArc / linkSpacing) + 0.5f) * linkSpacing;
+        System.Numerics.Vector2 offset = _belt.Sample(gapArc).Position - centre;
+        return MathF.Atan2(offset.X, offset.Y);
+    }
+
+    private void AddWheel(Mesh mesh, Vector3 position, float rollRadius, bool left, float phase, Material material)
+    {
+        var node = new MeshInstance3D { Mesh = mesh, MaterialOverride = material, Position = position };
+        _wheels.AddChild(node);
+        _wheelNodes.Add(new WheelNode(node, rollRadius, left, phase));
+    }
+
+    private void BuildTracks(Material material)
+    {
+        _linkMesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            Mesh = TankParts.TrackLink(_look).ToArrayMesh(),
+            InstanceCount = _linksPerSide * 2,
+            CustomAabb = TrackBounds(),
+        };
+        _linkBuffer = new float[_linksPerSide * 2 * LinkFloats];
+        _tracks.Multimesh = _linkMesh;
+        _tracks.MaterialOverride = material;
+        PlaceLinks(0, 0);
+    }
+
+    /// <summary>Static bounds of both tracks, so the engine never recomputes them as the links move.</summary>
+    private Aabb TrackBounds()
+    {
+        float minZ = float.MaxValue, maxZ = float.MinValue, maxY = float.MinValue;
+        for (int i = 0; i < 400; i++)
+        {
+            var p = _belt.Sample(_belt.Length * i / 400f).Position;
+            minZ = MathF.Min(minZ, p.X); maxZ = MathF.Max(maxZ, p.X); maxY = MathF.Max(maxY, p.Y);
+        }
+        const float Margin = 0.15f; // grousers, link size
+        float halfWidth = _look.TrackX + _look.TrackWidth / 2 + Margin;
+        return new Aabb(new Vector3(-halfWidth, 0, minZ - Margin), new Vector3(2 * halfWidth, maxY + Margin, maxZ - minZ + 2 * Margin));
+    }
+
+    private const int LinkFloats = 12; // Transform3D multimesh layout: three rows of (basis row, origin component)
+
+    private void PlaceLinks(float leftOffset, float rightOffset)
+    {
+        if (leftOffset == _placedLeft && rightOffset == _placedRight) return;
+        (_placedLeft, _placedRight) = (leftOffset, rightOffset);
+        float spacing = _belt.Length / _linksPerSide;
+        for (int side = 0; side < 2; side++)
+        {
+            float x = side == 0 ? -_look.TrackX : _look.TrackX;
+            float rolled = side == 0 ? leftOffset : rightOffset;
+            for (int i = 0; i < _linksPerSide; i++)
+            {
+                var (p, t) = _belt.Sample(rolled + i * spacing); // (z, y) position and direction of travel
+                var outward = new Vector3(0, -t.X, t.Y);          // right of travel on a counter-clockwise loop
+                Vector3 across = Vector3.Right, normal = Vector3.Right.Cross(outward);
+                int o = (side * _linksPerSide + i) * LinkFloats;
+                _linkBuffer[o + 0] = across.X; _linkBuffer[o + 1] = outward.X; _linkBuffer[o + 2] = normal.X; _linkBuffer[o + 3] = x;
+                _linkBuffer[o + 4] = across.Y; _linkBuffer[o + 5] = outward.Y; _linkBuffer[o + 6] = normal.Y; _linkBuffer[o + 7] = p.Y;
+                _linkBuffer[o + 8] = across.Z; _linkBuffer[o + 9] = outward.Z; _linkBuffer[o + 10] = normal.Z; _linkBuffer[o + 11] = p.X;
+            }
+        }
+        _linkMesh.Buffer = _linkBuffer;
+    }
 }

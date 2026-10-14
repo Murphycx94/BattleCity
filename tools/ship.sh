@@ -177,6 +177,12 @@ cmd_build() {
 		has_assemblies "$preset" "$target" || { grep -m5 "ERROR" "$WT/build/export-$preset.log" >&2 || true; die "导出 $preset 的包里没有 C# 程序集"; }
 		ok "$preset"
 	done
+	# 字体的 OFL 许可证和第三方署名随包分发（pck 里也有一份），放在可执行文件旁边
+	local legal
+	for legal in "$WT/src/Tank.Client/assets/fonts/OFL.txt" "$WT/src/Tank.Client/assets/CREDITS.md"; do
+		cp "$legal" "$WT/build/client/windows/" && cp "$legal" "$WT/build/client/linux/"
+		zip -qj "$WT/build/client/macos/$APP.zip" "$legal"
+	done
 	smoke_test_macos "$WT/build/client/macos/$APP.zip"
 	cp "$WT/build/client/macos/$APP.zip" "$stage/$APP-v$VERSION-macos-universal.zip"
 	(cd "$WT/build/client/windows" && rm -f ./*.log && zip -qr "$stage/$APP-v$VERSION-windows-x64.zip" .)

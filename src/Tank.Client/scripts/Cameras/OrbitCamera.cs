@@ -22,6 +22,9 @@ public partial class OrbitCamera : Node3D
 
     private readonly Camera3D _camera = new() { Current = true, Fov = BaseFov, Near = 0.1f, Far = 2000f };
     private int _zoomIndex;
+    private float _shakeLeft;
+    private float _shakeDuration;
+    private float _shakeAmplitude;
 
     public Camera3D Camera => _camera;
     public float Yaw { get; private set; }
@@ -31,6 +34,26 @@ public partial class OrbitCamera : Node3D
     public float Zoom => Zooms[_zoomIndex];
 
     public override void _Ready() => AddChild(_camera);
+
+    /// <summary>Brief jitter of the view (lens offset only, so aiming is unaffected), fading out over <paramref name="seconds"/>.</summary>
+    public void Shake(float amplitude, float seconds)
+    {
+        _shakeAmplitude = amplitude;
+        _shakeDuration = _shakeLeft = seconds;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_shakeLeft <= 0)
+        {
+            _camera.HOffset = _camera.VOffset = 0;
+            return;
+        }
+        _shakeLeft -= (float)delta;
+        float strength = _shakeAmplitude * Mathf.Max(_shakeLeft, 0f) / _shakeDuration;
+        _camera.HOffset = (GD.Randf() * 2f - 1f) * strength;
+        _camera.VOffset = (GD.Randf() * 2f - 1f) * strength;
+    }
 
     public void Look(Vector2 mouseDelta)
     {

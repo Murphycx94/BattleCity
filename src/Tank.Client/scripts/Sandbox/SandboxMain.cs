@@ -16,7 +16,8 @@ namespace Tank.Client.Sandbox;
 
 /// <summary>
 /// Stage-1 offline test drive: runs Tank.Sim locally at 30Hz and renders one tick behind, interpolated.
-/// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --autodrive --screenshot FILE --quit-after S]
+/// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --autodrive --camera-preset front|side|hill|spin|orbit|bush|...
+/// --fps-log --sniper --screenshot FILE --screenshot-at S --fx-shot S --quit-after S]
 /// </summary>
 public partial class SandboxMain : Node3D
 {
@@ -24,23 +25,37 @@ public partial class SandboxMain : Node3D
     private const float AimRange = 900f;
     private const float SniperEyeAboveTrunnion = 0.45f;
     private const float MinAimDistance = 8f;
+    private const float GrassCameraLean = 0.4f;   // grass focus sits this fraction of the way from tank to camera
+    private const float FireShake = 0.08f;
+    private const float FireShakeSeconds = 0.15f;
+    private const float FootprintMargin = 0.15f;   // grass lies flat this far beyond the hull and tracks
+    private const double FxShotWarmup = 3;          // --fx-shot: the first shot after this many seconds starts the clock
+    private const float FxShotPitch = -0.1f;        // --fx-shot: gun dipped so shells land about 40 m ahead
 
     private readonly SandboxInput _input = new();
     private readonly InputCmd[] _commands = new InputCmd[1];
+    private readonly FrameTimeLog _frameLog = new();
     private LaunchOptions _options = new();
     private Simulation _sim = null!;
     private TankState _previous;
     private TankState _current;
     private OrbitCamera _camera = null!;
     private TankModel _tank = null!;
+    private GrassField _grass = null!;
+    private BushField _bushes = null!;
+    private DustTrail _dust = null!;
+    private bool _playerFired;
     private ShellViews _shells = null!;
     private BattleFx _fx = null!;
     private Reticle _reticle = null!;
+    private StatusPanel _status = null!;
+    private SniperVignette _vignette = null!;
     private double _accumulator;
     private double _time;
     private float _aimYaw;
     private float _aimPitch;
     private bool _screenshotTaken;
+    private double _firstShotTime = -1;
 
     public override void _Ready()
     {
@@ -49,21 +64,37 @@ public partial class SandboxMain : Node3D
         SandboxInput.RegisterActions();
 
         _sim = new Simulation(SandboxMap.Create());
-        _sim.AddTank(TankCatalog.Medium, SandboxMap.Spawn, SandboxMap.SpawnYaw);
+        _sim.AddTank(TankCatalog.Medium, CameraPresets.Spawn(_options.CameraPreset), SandboxMap.SpawnYaw);
         _previous = _current = _sim.Tanks[0];
         _aimYaw = _current.Yaw;
 
         AddChild(Scenery.CreateEnvironment());
         AddChild(Scenery.CreateSun());
+        Scenery.ConfigureViewport(GetViewport());
         var terrain = new TerrainMesh();
         AddChild(terrain);
-        terrain.Build(_sim.Field.Terrain);
-        var props = new PropMeshes();
-        AddChild(props);
-        props.Build(_sim.Field.Props);
+        var dirt = new DirtMask(_sim.Field.Terrain.SizeX, _sim.Field.Terrain.SizeZ, SandboxMap.BushPatches, SandboxMap.Seed);
+        terrain.Build(_sim.Field.Terrain, dirt);
+        var rocks = new RockMeshes();
+        AddChild(rocks);
+        rocks.Build(_sim.Field.Props, _sim.Field.Terrain);
+        _bushes = new BushField();
+        AddChild(_bushes);
+        _bushes.Build(_sim.Field.Props, _sim.Field.Terrain);
+        _grass = new GrassField();
+        AddChild(_grass);
+        _grass.Build(_sim.Field.Terrain, dirt, _sim.Field.Props);
+        if (!CameraPresets.StreamsAroundCamera(_options.CameraPreset))
+            _grass.Update(new Vector3(_current.Position.X, 0, _current.Position.Y), int.MaxValue);   // fill what is in range before the first frame
+        var trees = new TreeLine();
+        AddChild(trees);
+        trees.Build(_sim.Field);
         _tank = new TankModel();
         AddChild(_tank);
         _tank.Build(TankCatalog.Medium);
+        _dust = new DustTrail();
+        _tank.AddChild(_dust);
+        _dust.Build(TankLooks.For(TankCatalog.Medium.Id).TrackX, TankCatalog.Medium.HullLength / 2f);
         _shells = new ShellViews();
         AddChild(_shells);
         _fx = new BattleFx();
@@ -71,16 +102,27 @@ public partial class SandboxMain : Node3D
         _camera = new OrbitCamera();
         AddChild(_camera);
         _camera.SetAngles(_current.Yaw, 0.25f);
+        if (_options.Sniper) _camera.ToggleSniper();
         var hud = new CanvasLayer();
         AddChild(hud);
+        _vignette = new SniperVignette();
+        hud.AddChild(_vignette);
         _reticle = new Reticle();
         hud.AddChild(_reticle);
+        _status = new StatusPanel();
+        hud.AddChild(_status);
 
-        if (!_options.AutoDrive) Input.MouseMode = Input.MouseModeEnum.Captured;
+        if (_options.FpsLog) RenderingServer.ViewportSetMeasureRenderTime(GetViewport().GetViewportRid(), true);
+        if (_options.CameraPreset is { } preset && !CameraPresets.IsKnown(preset))
+            GD.PushWarning($"Unknown --camera-preset '{preset}'; use front, side, close, closerear, sprocket, hill, spin, orbit or bush.");
+        if (!_options.AutoDrive && !HasPreset) Input.MouseMode = Input.MouseModeEnum.Captured;
     }
+
+    private bool HasPreset => CameraPresets.IsKnown(_options.CameraPreset);
 
     public override void _Input(InputEvent e)
     {
+        if (HasPreset) return; // fixed-camera runs ignore stray input so screenshots stay repeatable
         // Releases always pass so a held fire can end; presses only count while captured (the capturing click must not shoot).
         if (e.IsActionReleased("fire_gun") || Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
     }
@@ -94,6 +136,7 @@ public partial class SandboxMain : Node3D
 
     public override void _UnhandledInput(InputEvent e)
     {
+        if (HasPreset) return;
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
         switch (e)
         {
@@ -126,24 +169,64 @@ public partial class SandboxMain : Node3D
         TankState tank = Interpolate(_previous, _current, alpha);
         TankPose pose = TankPose.Compute(tank, _sim.Field.Terrain);
         _tank.Apply(pose, tank.TurretYaw, tank.GunPitch);
+        _tank.Animate(tank.Speed, Angles.Wrap(_current.Yaw - _previous.Yaw) / SimConstants.Dt, (float)delta);
+        _dust.Update(tank.Speed);
+        if (_playerFired)
+        {
+            _fx.Muzzle(_tank.MuzzleTransform, withSmoke: !_camera.Sniper);   // own puffs would block the scope
+            _camera.Shake(FireShake, FireShakeSeconds);
+            _playerFired = false;
+            if (_firstShotTime < 0 && _time > FxShotWarmup) _firstShotTime = _time;
+        }
         _tank.Visible = !_camera.Sniper;
         if (_options.AutoDrive) _camera.SetAngles(tank.Yaw + 0.35f, 0.18f);
         _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(tank.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), _sim.Field.Terrain);
-        if (!_input.FreeLook) UpdateAim(pose, tank.Spec);
-        _shells.Sync(_sim.Shells, alpha);
+        if (HasPreset)
+        {
+            var (eye, target) = CameraPresets.Get(_options.CameraPreset!, pose.Position.ToGodot(), tank.Yaw, _time, _sim.Field.Terrain.HeightAt);
+            _camera.Camera.LookAtFromPosition(eye, target, Vector3.Up);
+        }
+        else if (!_input.FreeLook) UpdateAim(pose, tank.Spec);
+        TankLook look = TankLooks.For(tank.Spec.Id);
+        float trackHalf = look.TrackX + look.TrackWidth / 2 + FootprintMargin;
+        _grass.SetTankFootprint(new Obb2(new SN.Vector2(pose.Position.X, pose.Position.Z),
+            new SN.Vector2(MathF.Max(tank.Spec.HullWidth / 2 + FootprintMargin, trackHalf), tank.Spec.HullLength / 2 + FootprintMargin), tank.Yaw));
+        // Detail streams around a point leaning from the tank toward the camera (so the ground right in front of a zoomed-out
+        // camera is in the dense band); fixed far-away presets stream around their eye.
+        Vector3 tankPos = pose.Position.ToGodot(), cameraPos = _camera.Camera.GlobalPosition;
+        _grass.Update(CameraPresets.StreamsAroundCamera(_options.CameraPreset) ? cameraPos
+            : new Vector3(Mathf.Lerp(tankPos.X, cameraPos.X, GrassCameraLean), 0f, Mathf.Lerp(tankPos.Z, cameraPos.Z, GrassCameraLean)));
+        _bushes.Update(cameraPos, TankMotion.Footprint(tank.Spec, tank.Position, tank.Yaw), (float)delta);
+        _shells.Sync(_sim.Shells, alpha, (float)delta);
         UpdateReticle(tank);
-        RunAutomation();
+        RunAutomation(delta);
     }
 
     private void StepSimulation()
     {
-        var (throttle, steer, fire) = _options.AutoDrive ? AutoDrive() : _input.Sample();
+        var (throttle, steer, fire) = _options.AutoDrive ? AutoDrive() : HasPreset ? ((sbyte)0, (sbyte)0, false) : _input.Sample();
+        if (_options.AutoDrive && _options.FxShotDelay is not null) _aimPitch = FxShotPitch;   // shells land in view
         _commands[0] = new InputCmd(_sim.Tick + 1, throttle, steer, _aimYaw, _aimPitch, fire);
         _sim.Step(_commands);
         foreach (GameEvent e in _sim.Events)
         {
-            if (e.Type == GameEventType.ShellFired) _fx.Muzzle(e.Position.ToGodot());
-            else if (e.Type == GameEventType.ShellExploded) _fx.Explosion(e.Position.ToGodot());
+            if (e.Type == GameEventType.ShellFired)
+            {
+                bool mine = e.TankId == _current.Id;
+                // Flash at the visible barrel tip for the player's tank (the sim event keeps its own muzzle position).
+                if (mine)
+                {
+                    _playerFired = true; // the flash is spawned after this frame's pose update, at the barrel tip as drawn
+                    _tank.Fire(_current.TurretYaw);
+                }
+                else _fx.Muzzle(new Transform3D(Basis.Identity, e.Position.ToGodot()));   // no barrel pose for other tanks yet
+            }
+            else if (e.Type == GameEventType.ShellExploded)
+            {
+                // Shells that stop above the ground hit a rock: grey dust instead of brown.
+                bool onRock = e.Position.Y > _sim.Field.Terrain.HeightAt(e.Position.X, e.Position.Z) + 0.5f;
+                _fx.Explosion(e.Position.ToGodot(), onRock);
+            }
         }
         _previous = _current;
         _current = _sim.Tanks[0];
@@ -180,10 +263,9 @@ public partial class SandboxMain : Node3D
         Camera3D cam = _camera.Camera;
         Vector3 point = impact.ToGodot();
         Vector2? screen = !hasImpact || cam.IsPositionBehind(point) ? null : cam.UnprojectPosition(point);
-        string reload = tank.Reload > 0 ? $"{tank.Reload:0.0} 秒" : "就绪";
-        string zoom = _camera.Sniper ? $"   狙击 {_camera.Zoom:0}×" : "";
-        _reticle.UpdateState(screen, 1f - tank.Reload / tank.Spec.ReloadTime,
-            $"速度 {MathF.Abs(tank.Speed) * 3.6f:0} km/h   装填 {reload}{zoom}");
+        _reticle.UpdateState(screen, 1f - tank.Reload / tank.Spec.ReloadTime, _camera.Sniper ? _camera.Zoom : 0f);
+        _status.UpdateState(tank.Speed * 3.6f, tank.Reload);
+        _vignette.Visible = _camera.Sniper;
     }
 
     private static TankState Interpolate(in TankState a, in TankState b, float t) => b with
@@ -195,9 +277,20 @@ public partial class SandboxMain : Node3D
         Speed = a.Speed + (b.Speed - a.Speed) * t,
     };
 
-    private void RunAutomation()
+    private void RunAutomation(double delta)
     {
-        if (_options.ScreenshotPath is { } path && !_screenshotTaken && _time >= _options.ScreenshotAt)
+        if (_options.FpsLog)
+        {
+            var rid = GetViewport().GetViewportRid();
+            if (_frameLog.Add(delta,
+                    RenderingServer.ViewportGetMeasuredRenderTimeCpu(rid), RenderingServer.ViewportGetMeasuredRenderTimeGpu(rid),
+                    Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0,
+                    (long)RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalDrawCallsInFrame),
+                    (long)RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalPrimitivesInFrame)) is { } line)
+                GD.Print(line);
+        }
+        double shotAt = _options.FxShotDelay is { } fxDelay ? (_firstShotTime < 0 ? double.MaxValue : _firstShotTime + fxDelay) : _options.ScreenshotAt;
+        if (_options.ScreenshotPath is { } path && !_screenshotTaken && _time >= shotAt)
         {
             _screenshotTaken = true;
             Error error = GetViewport().GetTexture().GetImage().SavePng(path);

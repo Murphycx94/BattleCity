@@ -88,7 +88,7 @@ public sealed class SimulationTests
     [Fact]
     public void Fire_WithBarrelInsideARock_ExplodesAtTheRockFace()
     {
-        // Rock face 3m ahead of the trunnion; the 4.2m barrel pokes into it.
+        // Rock face 3m ahead of the trunnion; the 3.2m barrel pokes into it.
         float face = 100 - Spec.TurretOffset - 3f;
         var rock = new Tank.Sim.Maps.Prop(1, Tank.Sim.Maps.PropKind.Rock,
             new Tank.Sim.Geometry.Obb2(new Vector2(100, face - 2), new Vector2(3, 2), 0), -1, 6);

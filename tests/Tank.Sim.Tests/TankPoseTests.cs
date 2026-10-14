@@ -57,6 +57,15 @@ public sealed class TankPoseTests
     }
 
     [Fact]
+    public void Muzzle_OfTheToyMediumTank_Is3_2mAheadOfTheTrunnion()
+    {
+        TankPose pose = PoseOn(TestWorld.Flat(), 0);
+        Vector3 muzzle = pose.Muzzle(Spec, 0f, 0f);
+        Vector3 expected = pose.Trunnion(Spec) + new Vector3(0, 0, -3.2f);
+        Assert.True(Vector3.Distance(expected, muzzle) < 1e-4f, $"muzzle at {muzzle}, expected {expected}");
+    }
+
+    [Fact]
     public void ToHullAngles_InvertsGunDirection()
     {
         TankPose pose = PoseOn(TestWorld.RampNorth(0.3f), 0.3f);

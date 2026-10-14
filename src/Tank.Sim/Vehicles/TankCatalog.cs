@@ -25,7 +25,7 @@ public static class TankCatalog
         MaxClimb = Angles.Deg(32),
         TrunnionHeight = 2.1f,
         TurretOffset = 0.3f,
-        GunLength = 4.2f,
+        GunLength = 3.2f,
         ShellSpeed = 780f,
         ReloadTime = 6.5f,
     };

@@ -22,6 +22,21 @@ window/stretch/aspect="expand"
 
 project/assembly_name="Tank.Client"
 
+[shader_globals]
+
+tank_footprint={
+"type": "vec4",
+"value": Vector4(-100000, -100000, 0, 0)
+}
+tank_axes={
+"type": "vec4",
+"value": Vector4(1, 0, 0, 1)
+}
+grass_focus={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
+
 [input]
 
 move_up={

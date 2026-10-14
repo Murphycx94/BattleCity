@@ -1,101 +1,72 @@
 using Godot;
+using Tank.Client.Art;
+using Tank.Client.Art.Meshes;
 using Tank.Sim.Terrain;
 
 namespace Tank.Client.World;
 
 /// <summary>
-/// Flat-shaded low-poly ground built from the sim's height field. Split into chunks so the renderer can cull
-/// what is off screen. Colour comes from slope (grass → dirt → rock) with a little per-cell variation.
+/// Smooth ground built from the sim's height field: same vertices as the sim, per-vertex normals from
+/// <see cref="HeightField.NormalAt"/>, split into 32×32-cell chunks for culling, drawn with the cartoon terrain shader.
+/// A large plane below the map edge carries the far-ground shader (same grass colour) out to the horizon.
 /// </summary>
 public partial class TerrainMesh : Node3D
 {
+    public const float FarGroundY = -0.3f;
     private const int ChunkCells = 32;
-    private const float RockBelowUp = 0.81f;  // steeper than ~36°
-    private const float DirtBelowUp = 0.91f;  // steeper than ~24°
-    private const float DryAtHeight = 30f;
+    private const float FarGroundSize = 4000f;
+    private const float EdgeFadeMetres = 8f; // outside the 10 m playable border, so purely visual
 
-    private static readonly Color Grass = new(0.36f, 0.47f, 0.24f);
-    private static readonly Color DryGrass = new(0.52f, 0.52f, 0.30f);
-    private static readonly Color Dirt = new(0.47f, 0.38f, 0.26f);
-    private static readonly Color Rock = new(0.46f, 0.45f, 0.43f);
-
-    public void Build(HeightField field)
+    /// <summary>Weight of the real terrain: 0 on the map edge, 1 from <see cref="EdgeFadeMetres"/> inwards.</summary>
+    private static float EdgeWeight(HeightField field, float x, float z)
     {
-        var material = new StandardMaterial3D
-        {
-            VertexColorUseAsAlbedo = true,
-            VertexColorIsSrgb = true,
-            Roughness = 1f,
-        };
+        float distance = MathF.Min(MathF.Min(x, field.SizeX - x), MathF.Min(z, field.SizeZ - z));
+        float t = Math.Clamp(distance / EdgeFadeMetres, 0f, 1f);
+        return t * t * (3f - 2f * t);
+    }
+
+    /// <summary>
+    /// Height of the ground as drawn: equal to <see cref="HeightField.HeightAt"/> inside the map and eased down to the
+    /// far-ground level over the outer <see cref="EdgeFadeMetres"/>. Use this (not HeightAt) to place visual-only
+    /// things such as grass so they follow the mesh at the map edge.
+    /// </summary>
+    public static float VisualHeightAt(HeightField field, float x, float z) =>
+        FarGroundY + (field.HeightAt(x, z) - FarGroundY) * EdgeWeight(field, x, z);
+
+    /// <summary>Terrain height at a grid vertex, sinking to the far-ground level at the map edge so there is no visible step.</summary>
+    private static float EdgeHeight(HeightField field, int i, int j) =>
+        VisualHeightAt(field, i * field.CellSize, j * field.CellSize);
+
+    /// <summary>Normal of the eased surface from central differences of <see cref="VisualHeightAt"/>.</summary>
+    private static System.Numerics.Vector3 EdgeNormal(HeightField field, int i, int j)
+    {
+        float x = i * field.CellSize, z = j * field.CellSize, d = field.CellSize;
+        float dx = (VisualHeightAt(field, x + d, z) - VisualHeightAt(field, x - d, z)) / (2 * d);
+        float dz = (VisualHeightAt(field, x, z + d) - VisualHeightAt(field, x, z - d)) / (2 * d);
+        return System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(-dx, 1f, -dz));
+    }
+
+    public void Build(HeightField field, DirtMask dirt)
+    {
+        ShaderMaterial material = Materials.FromShader("terrain_toon")
+            .With("dirt_mask", dirt.ToTexture())
+            .With("map_size", new Vector2(field.SizeX, field.SizeZ))
+            .With("grass_max_slope", GroundCover.GrassMaxSlopeDegrees)   // one source of truth with the grass scatter rules
+            .With("rock_min_slope", GroundCover.RockMinSlopeDegrees);
         int cellsX = field.SamplesX - 1, cellsZ = field.SamplesZ - 1;
         for (int z0 = 0; z0 < cellsZ; z0 += ChunkCells)
         for (int x0 = 0; x0 < cellsX; x0 += ChunkCells)
         {
-            var chunk = BuildChunk(field, x0, z0, Math.Min(ChunkCells, cellsX - x0), Math.Min(ChunkCells, cellsZ - z0));
-            AddChild(new MeshInstance3D { Mesh = chunk, MaterialOverride = material });
+            MeshData chunk = GridMesh.Build(x0, z0, Math.Min(ChunkCells, cellsX - x0), Math.Min(ChunkCells, cellsZ - z0), field.CellSize,
+                (i, j) => EdgeHeight(field, i, j), (i, j) => EdgeNormal(field, i, j));
+            AddChild(new MeshInstance3D { Mesh = chunk.ToArrayMesh(), MaterialOverride = material });
         }
-        // Skirt: grass-coloured ground far beyond the map so the horizon never shows the grey void where the terrain ends.
         AddChild(new MeshInstance3D
         {
-            Mesh = new PlaneMesh { Size = new Vector2(4000f, 4000f) },
-            Position = new Vector3(field.SizeX / 2f, -0.3f, field.SizeZ / 2f),
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = Grass, Roughness = 1f },
+            Mesh = new PlaneMesh { Size = new Vector2(FarGroundSize, FarGroundSize) },
+            Position = new Vector3(field.SizeX / 2f, FarGroundY, field.SizeZ / 2f),
+            MaterialOverride = Materials.FromShader("far_ground"),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         });
-    }
-
-    private static ArrayMesh BuildChunk(HeightField field, int x0, int z0, int width, int depth)
-    {
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
-        for (int j = z0; j < z0 + depth; j++)
-        for (int i = x0; i < x0 + width; i++)
-        {
-            Vector3 a = Point(field, i, j), b = Point(field, i + 1, j), c = Point(field, i, j + 1), d = Point(field, i + 1, j + 1);
-            // Alternate the diagonal so long slopes don't streak in one direction.
-            if (((i + j) & 1) == 0)
-            {
-                AddTriangle(st, a, b, d, i, j);
-                AddTriangle(st, a, d, c, i, j);
-            }
-            else
-            {
-                AddTriangle(st, a, b, c, i, j);
-                AddTriangle(st, b, d, c, i, j);
-            }
-        }
-        return st.Commit();
-    }
-
-    private static Vector3 Point(HeightField field, int i, int j) => new(i * field.CellSize, field.Sample(i, j), j * field.CellSize);
-
-    private static void AddTriangle(SurfaceTool st, Vector3 a, Vector3 b, Vector3 c, int i, int j)
-    {
-        Vector3 normal = (b - a).Cross(c - a).Normalized();
-        if (normal.Y < 0) normal = -normal;
-        st.SetNormal(normal);
-        st.SetColor(Shade(normal.Y, (a.Y + b.Y + c.Y) / 3f, i, j));
-        st.AddVertex(a);
-        st.AddVertex(b);
-        st.AddVertex(c);
-    }
-
-    private static Color Shade(float up, float height, int i, int j)
-    {
-        if (up < RockBelowUp) return Rock;
-        if (up < DirtBelowUp) return Dirt;
-        float dryness = Hash(i, j) * 0.12f + Mathf.Clamp(height / DryAtHeight, 0f, 0.6f);
-        return Grass.Lerp(DryGrass, dryness);
-    }
-
-    private static float Hash(int i, int j)
-    {
-        unchecked
-        {
-            uint h = (uint)i * 73856093u ^ (uint)j * 19349663u;
-            h ^= h >> 13;
-            h *= 0x5bd1e995u;
-            h ^= h >> 15;
-            return (h & 0xFFFF) / 65535f;
-        }
     }
 }
