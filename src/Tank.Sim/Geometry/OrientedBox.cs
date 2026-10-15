@@ -45,8 +45,8 @@ public readonly record struct OrientedBox(Vector3 Center, Vector3 HalfExtents, Q
     {
         t = 0;
         face = BoxFace.NegZ;
+        Vector3 start = ToLocal(from);
         Quaternion inverse = Quaternion.Conjugate(Rotation);
-        Vector3 start = Vector3.Transform(from - Center, inverse);
         Vector3 delta = Vector3.Transform(to - from, inverse);
         float tMin = 0f, tMax = 1f;
         int entryAxis = -1;

@@ -56,8 +56,8 @@ public sealed class CombatSpecTests
         TankSpec m = TankCatalog.Medium;
         Assert.Equal(900, m.MaxHealth);
         Assert.Equal(85f, m.Caliber);
-        Assert.Equal(new Armor(90, 60, 40, 20, 20), m.HullArmor.Armor);
-        Assert.Equal(new Armor(120, 80, 50, 25, 25), m.TurretArmor.Armor);
+        Assert.Equal(new ArmorBox(Width: 3.2f, Length: 6.2f, Bottom: 0.3f, Top: 1.74f, new Armor(90, 60, 40, 20, 20)), m.HullArmor);
+        Assert.Equal(new ArmorBox(Width: 2.9f, Length: 2.9f, Bottom: 1.68f, Top: 2.8f, new Armor(120, 80, 50, 25, 25)), m.TurretArmor);
         Assert.Equal(new ShellSpec(175, 220, 780, 0, 40), m.Ap);
         Assert.Equal(new ShellSpec(45, 280, 624, 3, 15), m.He);
         Assert.Equal(0.36f, m.Dispersion);
@@ -73,8 +73,11 @@ public sealed class CombatSpecTests
         Assert.Equal(25f, armor[ArmorFace.Bottom]);
         Assert.Equal(20f, armor.Thinnest);
         Assert.Equal(ArmorFace.Front, Armor.FaceOf(Geometry.BoxFace.NegZ));
-        Assert.Equal(ArmorFace.Side, Armor.FaceOf(Geometry.BoxFace.PosX));
+        Assert.Equal(ArmorFace.Rear, Armor.FaceOf(Geometry.BoxFace.PosZ));
         Assert.Equal(ArmorFace.Top, Armor.FaceOf(Geometry.BoxFace.PosY));
+        Assert.Equal(ArmorFace.Bottom, Armor.FaceOf(Geometry.BoxFace.NegY));
+        Assert.Equal(ArmorFace.Side, Armor.FaceOf(Geometry.BoxFace.PosX));
+        Assert.Equal(ArmorFace.Side, Armor.FaceOf(Geometry.BoxFace.NegX));
     }
 
     [Fact]

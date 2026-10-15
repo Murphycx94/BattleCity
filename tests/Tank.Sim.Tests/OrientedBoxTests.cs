@@ -77,5 +77,9 @@ public sealed class OrientedBoxTests
         Assert.Equal(0f, Box.DistanceTo(new Vector3(10.5f, 5, 11)));
         Assert.Equal(3f, Box.DistanceTo(new Vector3(14, 5, 10)), 1e-5f);
         Assert.Equal(5f, Box.DistanceTo(new Vector3(14, 9.5f, 10)), 1e-5f);   // 3 along X, 4 along Y
+        // Turned 90° about Y, the box's half sizes swap onto the world axes: 2 along X, 1 along Z.
+        var turned = Box with { Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2) };
+        Assert.Equal(3f, turned.DistanceTo(new Vector3(15, 5, 10)), 1e-4f);
+        Assert.Equal(1.5f, turned.DistanceTo(new Vector3(10, 5, 12.5f)), 1e-4f);
     }
 }

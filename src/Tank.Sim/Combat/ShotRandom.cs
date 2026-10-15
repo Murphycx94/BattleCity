@@ -16,7 +16,7 @@ public static class ShotRandom
     /// <summary>Uniform in [0, 1).</summary>
     public static float Unit(uint seed, uint salt) => (Mix(seed ^ (salt * 0x9E3779B9u)) >> 8) / 16777216f;
 
-    /// <summary>Uniform in [<paramref name="min"/>, <paramref name="max"/>).</summary>
+    /// <summary>Uniform in [<paramref name="min"/>, <paramref name="max"/>]; float rounding can reach max.</summary>
     public static float Range(uint seed, uint salt, float min, float max) => min + (max - min) * Unit(seed, salt);
 
     /// <summary>An integer hash with good avalanche (Chris Wellons' lowbias32).</summary>
