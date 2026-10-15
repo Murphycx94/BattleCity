@@ -62,7 +62,8 @@ public sealed partial class Simulation
             ref readonly OrientedBox turret = ref _turretBoxes[j];
             float reach = MathF.Max(hull.BoundingRadius, Vector3.Distance(hull.Center, turret.Center) + turret.BoundingRadius);
             if (Vector3.Distance(hull.Center, middle) > halfLength + reach) continue;   // nowhere near this tank
-            if (!ArmorHit.Find(_tanks[j].Spec, hull, turret, from, to, maxT, out ArmorHit candidate)) continue;
+            TankSpec spec = _tanks[j].Spec;
+            if (!ArmorHit.Find(spec.HullArmor, spec.TurretArmor, hull, turret, from, to, maxT, out ArmorHit candidate)) continue;
             (slot, hit, maxT) = (j, candidate, candidate.T);
         }
         return slot >= 0;

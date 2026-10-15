@@ -71,7 +71,7 @@ public sealed class TankHitTests
     {
         var sim = new Simulation(TestWorld.FlatField());
         sim.AddTank(Duel.Spec, Duel.ShooterAt, 0f);
-        int far = sim.AddTank(Duel.Spec, new Vector2(100, 85), MathF.PI);    // checked first
+        sim.AddTank(Duel.Spec, new Vector2(100, 85), MathF.PI);              // the far one, checked first
         int near = sim.AddTank(Duel.Spec, Duel.TargetAt, MathF.PI);
         var pose = Tank.Sim.Vehicles.TankPose.Compute(sim.Tanks[0], sim.Field.Terrain);
         var (yaw, pitch) = Angles.AimAngles(new Vector3(100, 1.02f, 103.1f) - pose.Trunnion(Duel.Spec));
@@ -85,7 +85,6 @@ public sealed class TankHitTests
         }
         GameEvent hit = Assert.Single(events, e => e.Type == GameEventType.TankHit);
         Assert.Equal(near, hit.TargetTankId);
-        Assert.NotEqual(far, hit.TargetTankId);
     }
 
     [Fact]

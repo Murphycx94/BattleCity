@@ -20,7 +20,7 @@ public sealed class ArmorHitTests
     private static ArmorHit Shoot(Vector3 from, Vector3 to, float yaw = 0, float turretYaw = 0, Tank.Sim.Terrain.HeightField? ground = null)
     {
         var (hull, turret) = Boxes(yaw, turretYaw, ground);
-        Assert.True(ArmorHit.Find(Spec, hull, turret, from, to, 1f, out ArmorHit hit), "missed");
+        Assert.True(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, 1f, out ArmorHit hit), "missed");
         return hit;
     }
 
@@ -93,8 +93,8 @@ public sealed class ArmorHitTests
         var (hull, turret) = Boxes();
         // From high in front, diving onto the hull's glacis area: the turret is behind and out of the way.
         Vector3 from = new(100, 1.6f, 80), to = new(100, 1.6f, 120);
-        Assert.True(ArmorHit.Find(Spec, hull, turret, from, to, 1f, out ArmorHit hit));
+        Assert.True(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, 1f, out ArmorHit hit));
         Assert.Equal(HitPart.Hull, hit.Part);
-        Assert.False(ArmorHit.Find(Spec, hull, turret, from, to, hit.T * 0.9f, out _));
+        Assert.False(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, hit.T * 0.9f, out _));
     }
 }

@@ -54,5 +54,6 @@ public sealed record TankSpec
 
     public required BloomFactors Bloom { get; init; }
 
-    public ShellSpec Shell(AmmoType ammo) => ammo == AmmoType.HE ? He : Ap;
+    /// <summary>The stats of this gun's round of type <paramref name="ammo"/>.</summary>
+    public ShellSpec Round(AmmoType ammo) => ammo == AmmoType.HE ? He : Ap;
 }

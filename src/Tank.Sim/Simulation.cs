@@ -17,14 +17,20 @@ public sealed partial class Simulation
     public const int MaxTanks = 32;
     public const int MaxShells = 256;
 
+    /// <summary>Float drift in the countdown must not cost an extra tick of reload.</summary>
+    private const float ReloadEpsilon = 1e-4f;
+
     private readonly TankState[] _tanks = new TankState[MaxTanks];
     private readonly Shell[] _shells = new Shell[MaxShells];
     private readonly Obb2[] _footprints = new Obb2[MaxTanks];
     private readonly Obb2[] _others = new Obb2[MaxTanks];
-    private readonly List<GameEvent> _events = new(16);
-    private readonly List<GameEvent> _pending = new(4);   // raised between steps (Revive); reported by the next Step
-    /// <summary>Float drift in the countdown must not cost an extra tick of reload.</summary>
-    private const float ReloadEpsilon = 1e-4f;
+
+    /// <summary>Sized for a busy tick (every tank firing, plus some hits) so a normal step never grows it.</summary>
+    private readonly List<GameEvent> _events = new(MaxTanks * 2);
+
+    /// <summary>Events raised between steps (<see cref="Revive"/>); the next <see cref="Step"/> reports them.</summary>
+    private readonly List<GameEvent> _pending = new(4);
+
     private int _nextId = 1;
 
     public Simulation(Battlefield field) => Field = field;
@@ -181,7 +187,7 @@ public sealed partial class Simulation
             Position = launch.Origin,
             Velocity = Dispersion.Deflect(launch.Velocity, Dispersion.Radius(tank.Spec, tank.Bloom), seed) * speed,
             Ammo = tank.Ammo,
-            Round = tank.Spec.Shell(tank.Ammo),
+            Round = tank.Spec.Round(tank.Ammo),
             Caliber = tank.Spec.Caliber,
             Seed = seed,
         };

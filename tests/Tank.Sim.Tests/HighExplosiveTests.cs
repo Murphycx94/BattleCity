@@ -22,7 +22,9 @@ public sealed class HighExplosiveTests
         GameEvent hit = Assert.Single(events, e => e.Type == GameEventType.TankHit);
         Assert.Equal(AmmoType.HE, hit.Ammo);
         Assert.Equal(HitResult.NotPenetrated, hit.Result);
-        Assert.Equal(41, hit.Damage);                                  // 280 × 0.5 − 90 × 1.1 (a near head-on shot)
+        // 280 × 0.5 − 90 × 1.1 / cos θ. Exact only because the shot lands almost head-on (θ ≈ 1.3°, giving 40.97);
+        // beyond about 5.7° it would round to 40.
+        Assert.Equal(41, hit.Damage);
         Assert.Equal(900 - 41, duel.Target.Health);
         GameEvent boom = Assert.Single(events, e => e.Type == GameEventType.ShellExploded);
         Assert.Equal(hit.Position, boom.Position);

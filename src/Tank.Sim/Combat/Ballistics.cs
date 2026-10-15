@@ -29,7 +29,7 @@ public static class Ballistics
         TankPose pose = TankPose.Compute(tank, field.Terrain);
         Vector3 trunnion = pose.Trunnion(tank.Spec);
         Vector3 muzzle = pose.Muzzle(tank.Spec, tank.TurretYaw, tank.GunPitch);
-        Vector3 velocity = pose.GunDirection(tank.TurretYaw, tank.GunPitch) * tank.Spec.Shell(tank.Ammo).Speed;
+        Vector3 velocity = pose.GunDirection(tank.TurretYaw, tank.GunPitch) * tank.Spec.Round(tank.Ammo).Speed;
         bool blocked = field.Raycast(trunnion, muzzle, out RayHit hit);
         return new Launch(muzzle, velocity, blocked, blocked ? hit.Point : Vector3.Zero);
     }
