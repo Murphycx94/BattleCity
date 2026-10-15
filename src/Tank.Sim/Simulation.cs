@@ -37,12 +37,22 @@ public sealed class Simulation
     /// <summary>Events produced by the most recent <see cref="Step"/>.</summary>
     public ReadOnlySpan<GameEvent> Events => CollectionsMarshal.AsSpan(_events);
 
+    /// <summary>Adds a tank with full health and ammunition, AP loaded.</summary>
     /// <returns>The new tank's id. It occupies the next slot in <see cref="Tanks"/>.</returns>
     public int AddTank(TankSpec spec, Vector2 position, float yaw)
     {
         if (TankCount == MaxTanks) throw new InvalidOperationException($"At most {MaxTanks} tanks.");
         int id = _nextId++;
-        _tanks[TankCount++] = new TankState { Id = id, Spec = spec, Position = Field.ClampToPlayable(position), Yaw = Angles.Wrap(yaw) };
+        _tanks[TankCount++] = new TankState
+        {
+            Id = id,
+            Spec = spec,
+            Position = Field.ClampToPlayable(position),
+            Yaw = Angles.Wrap(yaw),
+            Health = spec.MaxHealth,
+            ApLeft = spec.Ap.Capacity,
+            HeLeft = spec.He.Capacity,
+        };
         return id;
     }
 

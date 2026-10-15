@@ -1,3 +1,5 @@
+using Tank.Sim.Combat;
+
 namespace Tank.Sim.Vehicles;
 
 /// <summary>Per-vehicle constants. Metres, seconds, radians, m/s. Hull origin is the ground contact centre.</summary>
@@ -28,6 +30,29 @@ public sealed record TankSpec
     public required float TurretOffset { get; init; }
 
     public required float GunLength { get; init; }
-    public required float ShellSpeed { get; init; }
     public required float ReloadTime { get; init; }
+
+    public required int MaxHealth { get; init; }
+
+    /// <summary>Gun calibre, mm (for the three-calibre overmatch rule).</summary>
+    public required float Caliber { get; init; }
+
+    /// <summary>Hull hit box, anchored at the hull origin.</summary>
+    public required ArmorBox HullArmor { get; init; }
+
+    /// <summary>Turret hit box, anchored at the turret ring (<see cref="TurretOffset"/> ahead of the hull origin); turns with the turret.</summary>
+    public required ArmorBox TurretArmor { get; init; }
+
+    public required ShellSpec Ap { get; init; }
+    public required ShellSpec He { get; init; }
+
+    /// <summary>Aim-circle radius at 100 m when fully aimed, m.</summary>
+    public required float Dispersion { get; init; }
+
+    /// <summary>Seconds for the aim circle to close after moving (three time constants).</summary>
+    public required float AimTime { get; init; }
+
+    public required BloomFactors Bloom { get; init; }
+
+    public ShellSpec Shell(AmmoType ammo) => ammo == AmmoType.HE ? He : Ap;
 }

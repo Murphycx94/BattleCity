@@ -60,7 +60,7 @@ public sealed class SimulationTests
         Assert.Equal(tankId, fired.TankId);
         var expectedMuzzle = new Vector3(100, Spec.TrunnionHeight, 100 - Spec.TurretOffset - Spec.GunLength);
         Assert.True(Vector3.Distance(expectedMuzzle, fired.Position) < 1e-3f, $"muzzle at {fired.Position}");
-        Assert.Equal(Spec.ShellSpeed, sim.Shells[0].Velocity.Length(), 0.5f);
+        Assert.Equal(Spec.Ap.Speed, sim.Shells[0].Velocity.Length(), 0.5f);
         Assert.Equal(Spec.ReloadTime, sim.Tanks[0].Reload, 1e-4f);
     }
 

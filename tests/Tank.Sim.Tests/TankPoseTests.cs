@@ -20,7 +20,7 @@ public sealed class TankPoseTests
             {
                 s.HullLength, s.HullWidth, s.MaxForwardSpeed, s.MaxReverseSpeed, s.Acceleration, s.Braking, s.HullTraverse,
                 s.TurretTraverse, s.GunPitchSpeed, s.GunDepression, s.GunElevation, s.MaxClimb, s.TrunnionHeight, s.GunLength,
-                s.ShellSpeed, s.ReloadTime,
+                s.ReloadTime, s.Caliber, s.Dispersion, s.AimTime,
             }, v => Assert.True(v > 0, $"{s.Id} has a non-positive parameter"));
         }
     }
