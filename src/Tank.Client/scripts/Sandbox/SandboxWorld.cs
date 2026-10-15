@@ -1,7 +1,6 @@
 using Godot;
 using Tank.Client.Vehicles;
 using Tank.Client.World;
-using Tank.Sim;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Vehicles;

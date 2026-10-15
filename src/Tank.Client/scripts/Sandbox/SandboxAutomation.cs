@@ -22,7 +22,7 @@ public sealed class SandboxAutomation
     private const double FxShotWarmup = 3;          // --fx-shot: moments before this many seconds don't count
     private const float FxShotPitch = -0.1f;        // --fx-shot: gun dipped so shells land about 40 m ahead
     private const float DemoCameraPitch = 0.1f;     // --range-demo: looking over the tank at the target
-    private const float AutoCameraYaw = 0.35f;      // --autodrive: the camera trails a little to the tank's left
+    private const float AutoCameraYaw = 0.35f;      // --autodrive: the camera looks this far off the hull's heading, rad
     private const float AutoCameraPitch = 0.18f;
     private const double AutoTurnRate = 0.4;        // --autodrive: steers right while sin(rate × time) is above the threshold
     private const double AutoTurnThreshold = 0.5;

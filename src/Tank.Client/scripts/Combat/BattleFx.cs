@@ -32,6 +32,7 @@ public partial class BattleFx : Node3D
 
     private readonly List<MuzzleSlot> _muzzles = new();
     private readonly List<ImpactSlot> _impacts = new();
+
     public override void _Ready()
     {
         for (int i = 0; i < MuzzleSlots; i++) _muzzles.Add(new MuzzleSlot(this));
