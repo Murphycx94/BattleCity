@@ -10,8 +10,9 @@ namespace Tank.Sim;
 /// <summary>
 /// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted; each tank drives,
 /// aims, updates its aim circle and fires (in slot order) against that snapshot, touching no other tank, so its turn
-/// doesn't depend on its slot. Then the shell phase: shots that burst in a blocked barrel go off, then every shell in
-/// flight flies and resolves its hits, each in firing order (shots of the same tick in slot order).
+/// doesn't depend on its slot (except that when the shell pool is full lower slots get to fire first, and shell ids
+/// follow slot order). Then the shell phase: shots that burst in a blocked barrel go off, then every shell in flight
+/// flies and resolves its hits, each group in firing order (shots of the same tick in slot order).
 /// </summary>
 public sealed partial class Simulation
 {

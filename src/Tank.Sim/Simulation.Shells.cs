@@ -20,10 +20,11 @@ public sealed partial class Simulation
     private readonly record struct BarrelBurst(Shell Shell, Vector3 At);
 
     /// <summary>
-    /// The shell phase of a tick, all in firing order. Shots that burst in a blocked barrel go off first (as the gun
-    /// fires, before anything in flight can land). Then every shell in flight flies one tick; its path stops at whichever
-    /// comes first: the ground or a rock, or a tank's hull or turret box (never the shooter's own). Shells that leave the
-    /// map or time out vanish without an event. Those still flying keep their order for the next tick.
+    /// The shell phase of a tick, in two groups, each in firing order. This tick's shots that burst in a blocked barrel go
+    /// off first (as the gun fires, before anything in flight can land), so they come before shells fired on earlier
+    /// ticks. Then every shell in flight flies one tick; its path stops at whichever comes first: the ground or a rock, or
+    /// a tank's hull or turret box (never the shooter's own). Shells that leave the map or time out vanish without an
+    /// event. Those still flying keep their order for the next tick.
     /// </summary>
     private void StepShells()
     {
