@@ -46,12 +46,13 @@ public partial class WreckSmoke : Node3D
         AddChild(_emitter);
     }
 
-    /// <summary>On starts a fresh column; off stops it and clears the puffs already in the air.</summary>
+    /// <summary>On starts a fresh column; off stops it and clears the puffs already in the air. Setting the current state does nothing.</summary>
     public bool Emitting
     {
         get => _emitter.Emitting;
         set
         {
+            if (value == _emitter.Emitting) return;   // a column already rising keeps rising
             _emitter.Visible = value;
             if (value) _emitter.Restart();   // clears leftover puffs (a hidden emitter isn't simulated) and starts emitting
             else _emitter.Emitting = false;

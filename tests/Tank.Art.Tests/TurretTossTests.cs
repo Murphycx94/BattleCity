@@ -49,6 +49,7 @@ public class TurretTossTests
     [InlineData(MathF.PI / 2)]
     [InlineData(-MathF.PI / 2)]
     [InlineData(MathF.PI)]
+    [InlineData(-MathF.PI)]
     [InlineData(2.5f)]
     public void Spins_more_than_a_full_turn_without_jumps(float startYaw)
     {
@@ -72,20 +73,38 @@ public class TurretTossTests
     [InlineData(MathF.PI / 2)]
     [InlineData(-MathF.PI / 2)]
     [InlineData(MathF.PI)]
+    [InlineData(-MathF.PI)]
     [InlineData(2.5f)]
     public void Landed_gun_points_away_from_the_hull(float startYaw)
     {
-        TankSpec spec = TankCatalog.Medium;
         var (position, rotation) = Toss.At(TurretToss.FlightTime, startYaw);
-        // As TankModel nests it: Toss (at the pivot) → TurretBody (the pivot height undone) → Gun (trunnion, GunPivotZ) →
-        // muzzle GunLength + GunPivotZ further along −Z, i.e. GunLength ahead of the turret ring.
-        var muzzleInTurret = new Vector3(0, spec.TrunnionHeight, Look.GunPivotZ - (spec.GunLength + Look.GunPivotZ));
-        Vector3 muzzle = position + Vector3.Transform(muzzleInTurret - new Vector3(0, Toss.Pivot.Y, 0), rotation);
+        Vector3 muzzle = LandedMuzzle(startYaw, gunPitch: 0f);
         Assert.True(MathF.Abs(muzzle.X) > Look.UpperHullWidth / 2, $"muzzle {muzzle} is over the hull");
         Assert.True(muzzle.X > position.X, $"muzzle {muzzle} points back towards the hull");
-        Assert.True(muzzle.Y > -0.05f, $"muzzle {muzzle} is buried in the ground");
+        Assert.True(muzzle.Y > Look.MuzzleRadius, $"muzzle {muzzle} dips into the ground");
         Quaternion landed = Toss.At(TurretToss.FlightTime, 0f).Rotation;
         Assert.True(MathF.Abs(Quaternion.Dot(landed, rotation)) > 0.9999f, "the landed pose depends on the start yaw");
+    }
+
+    [Fact]
+    public void Landed_gun_at_full_depression_stays_above_the_ground()
+    {
+        // A wreck keeps the gun pitch it had at the kill (TankModel.Apply still sets it); the landed pose ignores the start yaw.
+        Vector3 muzzle = LandedMuzzle(0f, -TankCatalog.Medium.GunDepression);
+        Assert.True(muzzle.Y > 0f, $"muzzle {muzzle} is buried in the ground");
+    }
+
+    /// <summary>
+    /// The landed muzzle in hull space, nested as TankModel nests it: Toss (at the pivot) → TurretBody (the pivot height
+    /// undone) → Gun (trunnion, GunPivotZ, pitched) → muzzle GunLength + GunPivotZ further along the gun's −Z.
+    /// </summary>
+    private static Vector3 LandedMuzzle(float startYaw, float gunPitch)
+    {
+        TankSpec spec = TankCatalog.Medium;
+        var (position, rotation) = Toss.At(TurretToss.FlightTime, startYaw);
+        var gun = new Vector3(0, spec.TrunnionHeight, Look.GunPivotZ);
+        Vector3 barrel = Vector3.Transform(new Vector3(0, 0, -(spec.GunLength + Look.GunPivotZ)), Quaternion.CreateFromAxisAngle(Vector3.UnitX, gunPitch));
+        return position + Vector3.Transform(gun + barrel - new Vector3(0, Toss.Pivot.Y, 0), rotation);
     }
 
     private static float Heading(Quaternion rotation)

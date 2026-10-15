@@ -54,9 +54,10 @@ public sealed class SandboxAutomation
     /// <summary>The scripted range demo, or null.</summary>
     public RangeDemo? Demo { get; }
 
-    /// <summary>Warns about launch options that name no known preset or demo.</summary>
+    /// <summary>Warns about launch options that couldn't be read or name no known preset or demo.</summary>
     public void ReportBadOptions()
     {
+        foreach (string warning in _options.Warnings) GD.PushWarning(warning);
         if (_options.CameraPreset is { } preset && !CameraPresets.IsKnown(preset))
             GD.PushWarning($"Unknown --camera-preset '{preset}'; use front, side, close, closerear, sprocket, hill, spin, orbit, bush or target.");
         if (_options.RangeDemo is { } demo && Demo is null)
