@@ -34,6 +34,7 @@ public partial class SandboxMain : Node3D
     private const float FxShotPitch = -0.1f;        // --fx-shot: gun dipped so shells land about 40 m ahead
     private const float ArmorHitSize = 0.5f;        // an AP shell striking armour: a small grey puff
     private const float DemoCameraPitch = 0.1f;     // --range-demo: looking over the tank at the target
+    private const float HeadHeight = 3.4f;          // health bars and damage numbers float this high over a tank's origin
 
     private readonly SandboxInput _input = new();
     private readonly InputCmd[] _commands = new InputCmd[1 + SandboxMap.TargetSpots.Count];
@@ -53,6 +54,8 @@ public partial class SandboxMain : Node3D
     private BattleFx _fx = null!;
     private Reticle _reticle = null!;
     private StatusPanel _status = null!;
+    private CombatPopups _popups = null!;
+    private HealthBars _bars = null!;
     private SniperVignette _vignette = null!;
     private double _accumulator;
     private double _time;
@@ -118,6 +121,12 @@ public partial class SandboxMain : Node3D
         AddChild(hud);
         _vignette = new SniperVignette();
         hud.AddChild(_vignette);
+        _bars = new HealthBars();
+        hud.AddChild(_bars);
+        _bars.Setup(_camera.Camera, _targets.Count);
+        _popups = new CombatPopups();
+        hud.AddChild(_popups);
+        _popups.SetCamera(_camera.Camera);
         _reticle = new Reticle();
         hud.AddChild(_reticle);
         _status = new StatusPanel();
@@ -217,6 +226,7 @@ public partial class SandboxMain : Node3D
         _targets.Sync(_sim, (float)delta);
         _shells.Sync(_sim.Shells, alpha, (float)delta);
         UpdateReticle(tank);
+        UpdateHealthBars();
         RunAutomation(delta);
     }
 
@@ -253,14 +263,38 @@ public partial class SandboxMain : Node3D
                 bool onRock = e.Position.Y > _sim.Field.Terrain.HeightAt(e.Position.X, e.Position.Z) + 0.5f;
                 _fx.Explosion(e.Position.ToGodot(), onRock);
                 break;
-            case GameEventType.TankHit when e.Ammo == AmmoType.AP:
-                _fx.Explosion(e.Position.ToGodot(), onRock: true, ArmorHitSize);   // HE gets its own ShellExploded
+            case GameEventType.TankHit:
+                if (e.Ammo == AmmoType.AP) _fx.Explosion(e.Position.ToGodot(), onRock: true, ArmorHitSize);   // HE gets its own ShellExploded
+                _popups.Verdict(e.Position.ToGodot(), e.Result);
+                if (e.Damage > 0) _popups.Damage(HeadOf(e.TargetTankId), e.Damage, splash: false);
+                break;
+            case GameEventType.SplashDamage:
+                _popups.Damage(HeadOf(e.TargetTankId), e.Damage, splash: true);
                 break;
         }
         _targets.OnEvent(e, _sim, _fx);
     }
 
     private (sbyte Throttle, sbyte Steer, bool Fire) AutoDrive() => (1, (sbyte)(Math.Sin(_time * 0.4) > 0.5 ? 1 : 0), true);
+
+    private void UpdateHealthBars()
+    {
+        for (int i = 0; i < _targets.Count; i++)
+        {
+            TankState target = _sim.Tanks[1 + i];   // the targets follow the player's slot
+            _bars.Set(i, HeadOf(target), target.Health / (float)target.Spec.MaxHealth, !target.IsDestroyed);
+        }
+    }
+
+    private Vector3 HeadOf(in TankState tank) =>
+        (TankPose.Compute(tank, _sim.Field.Terrain).Position + SN.Vector3.UnitY * HeadHeight).ToGodot();
+
+    private Vector3 HeadOf(int tankId)
+    {
+        foreach (TankState tank in _sim.Tanks)
+            if (tank.Id == tankId) return HeadOf(tank);
+        return Vector3.Zero;
+    }
 
     /// <summary>--range-demo: stand still, lay the gun on the demo's aim point, fire once (or keep firing) after the warm-up.</summary>
     private (sbyte Throttle, sbyte Steer, bool Fire) DemoInput(RangeDemo demo)
@@ -316,9 +350,23 @@ public partial class SandboxMain : Node3D
         Camera3D cam = _camera.Camera;
         Vector3 point = impact.ToGodot();
         Vector2? screen = !hasImpact || cam.IsPositionBehind(point) ? null : cam.UnprojectPosition(point);
-        _reticle.UpdateState(screen, 1f - tank.Reload / tank.Spec.ReloadTime, _camera.Sniper ? _camera.Zoom : 0f);
-        _status.UpdateState(tank.Speed * 3.6f, tank.Reload);
+        _reticle.UpdateState(screen, 1f - tank.Reload / tank.Spec.ReloadTime, _camera.Sniper ? _camera.Zoom : 0f, AimCirclePixels(tank, launch.Origin, point));
+        _status.UpdateState(tank.Speed * 3.6f, tank.Reload, tank.Health, tank.Spec.MaxHealth, tank.Ammo, tank.ApLeft, tank.HeLeft);
         _vignette.Visible = _camera.Sniper;
+    }
+
+    /// <summary>
+    /// The aim circle's radius at the predicted impact, as seen by the camera: the circle is quoted at 100 m from the gun,
+    /// so it measures <c>radius × gun distance / 100</c> there, and shrinks with the camera's distance to that point.
+    /// </summary>
+    private float AimCirclePixels(in TankState tank, SN.Vector3 muzzle, Vector3 impact)
+    {
+        Camera3D cam = _camera.Camera;
+        float fromCamera = cam.GlobalPosition.DistanceTo(impact);
+        if (fromCamera < 0.1f) return 0f;
+        float worldRadius = Dispersion.Radius(tank.Spec, tank.Bloom) * SN.Vector3.Distance(muzzle, impact.ToSim()) / Dispersion.ReferenceRange;
+        float focal = GetViewport().GetVisibleRect().Size.Y / 2f / MathF.Tan(Mathf.DegToRad(cam.Fov) / 2f);
+        return worldRadius / fromCamera * focal;
     }
 
     private static TankState Interpolate(in TankState a, in TankState b, float t) => b with
@@ -328,6 +376,7 @@ public partial class SandboxMain : Node3D
         TurretYaw = Angles.Lerp(a.TurretYaw, b.TurretYaw, t),
         GunPitch = a.GunPitch + (b.GunPitch - a.GunPitch) * t,
         Speed = a.Speed + (b.Speed - a.Speed) * t,
+        Bloom = a.Bloom + (b.Bloom - a.Bloom) * t,
     };
 
     private void RunAutomation(double delta)

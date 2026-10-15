@@ -22,18 +22,21 @@ public static class HudStyle
     public static Color Accent => Palette.UiAccent.ToColor();
     public static Color Panel => Palette.UiPanel.ToColor(Palette.UiPanelAlpha);
 
-    /// <summary>Text with a dark outline; <paramref name="baseline"/> is the left end of the text baseline.</summary>
-    public static void DrawOutlined(CanvasItem canvas, Vector2 baseline, string text, int size, Color color, int outline = Outline)
+    /// <summary>
+    /// Text with a dark outline; <paramref name="baseline"/> is the left end of the text baseline. <paramref name="alpha"/>
+    /// fades the outline too (the fill's alpha is the colour's own).
+    /// </summary>
+    public static void DrawOutlined(CanvasItem canvas, Vector2 baseline, string text, int size, Color color, int outline = Outline, float alpha = 1f)
     {
-        canvas.DrawStringOutline(Font, baseline, text, HorizontalAlignment.Left, -1, size, outline, OutlineColor);
+        canvas.DrawStringOutline(Font, baseline, text, HorizontalAlignment.Left, -1, size, outline, new Color(OutlineColor, alpha));
         canvas.DrawString(Font, baseline, text, HorizontalAlignment.Left, -1, size, color);
     }
 
     /// <summary>Same, centred horizontally on <paramref name="centerX"/>.</summary>
-    public static void DrawOutlinedCentered(CanvasItem canvas, float centerX, float baselineY, string text, int size, Color color, int outline = Outline)
+    public static void DrawOutlinedCentered(CanvasItem canvas, float centerX, float baselineY, string text, int size, Color color, int outline = Outline, float alpha = 1f)
     {
         float width = Font.GetStringSize(text, HorizontalAlignment.Left, -1, size).X;
-        DrawOutlined(canvas, new Vector2(centerX - width / 2, baselineY), text, size, color, outline);
+        DrawOutlined(canvas, new Vector2(centerX - width / 2, baselineY), text, size, color, outline, alpha);
     }
 
     public static float TextWidth(string text, int size) => Font.GetStringSize(text, HorizontalAlignment.Left, -1, size).X;
