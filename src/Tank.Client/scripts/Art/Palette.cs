@@ -27,6 +27,8 @@ public static class Palette
     public static readonly Vector3 UiPanel = Hex("1E2333");
     public const float UiPanelAlpha = 0.7f;
     public static readonly Vector3 UiAccent = Hex("FFC93C");
+    public static readonly Vector3 TargetBody = Hex("6F8FB5");   // blue-grey practice targets (stage 2A design)
+    public static readonly Vector3 Charred = Hex("2B2622");      // a knocked-out tank's scorched paint
 
     // Not in the design table; picked to sit with the colours above.
     public static readonly Vector3 Leaves = Hex("6CC04A");      // broadleaf crowns
@@ -39,6 +41,10 @@ public static class Palette
     public static readonly Vector3 SoilDust = Hex("E3C79A");    // puffs from a shell on soil, track dust
     public static readonly Vector3 UiText = Hex("FFFFFF");
     public static readonly Vector3 UiOutline = Hex("141826");
+    public static readonly Vector3 HitPierced = Hex("FF4D4D");   // "击穿！", damage numbers, a low health bar
+    public static readonly Vector3 HitBlocked = Hex("B9BDC8");   // "未击穿" ("跳弹！" uses UiAccent)
+    public static readonly Vector3 Health = Hex("6CD45A");       // a healthy health bar
+    public static readonly Vector3 WreckSmoke = Hex("4A4650");   // dark smoke from a wreck
 
     /// <summary>"RRGGBB" (an optional leading '#') to sRGB 0–1.</summary>
     public static Vector3 Hex(string hex)

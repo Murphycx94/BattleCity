@@ -6,7 +6,8 @@ namespace Tank.Client.Cameras;
 /// Fixed viewpoints for repeatable screenshots and frame-time runs (<c>--camera-preset NAME</c>).
 /// front/side follow the tank in its own frame; hill is a fixed overview; spin turns a full circle every 10 s from the
 /// middle of the map, the worst case for draw distance; orbit circles the tank at 14 m every 12 s; bush starts the tank
-/// inside the bush patch nearest the spawn and looks at it from outside the patch.
+/// inside the bush patch nearest the spawn and looks at it from outside the patch; target looks at the first practice
+/// target from its front-right, on the side where its turret lands (pair it with --range-demo).
 /// </summary>
 public static class CameraPresets
 {
@@ -19,11 +20,13 @@ public static class CameraPresets
     private static readonly Vector2 SpinEye = new(200f, 200f);
     private const float OrbitPeriod = 12f;
     private const float OrbitRadius = 14f;
+    private static readonly Vector3 TargetEye = new(7f, 4.5f, -13f);    // front-right of the target (its forward is −Z)
+    private static readonly Vector3 TargetFocus = new(1.5f, 1.6f, 0f);  // between the hull and where the turret lands
 
     /// <summary>Presets whose eye is far from the tank: world detail (grass) should then stream around the eye, not the tank.</summary>
     public static bool StreamsAroundCamera(string? name) => name is "hill" or "spin";
 
-    public static bool IsKnown(string? name) => name is "front" or "side" or "close" or "closerear" or "sprocket" or "hill" or "spin" or "orbit" or "bush";
+    public static bool IsKnown(string? name) => name is "front" or "side" or "close" or "closerear" or "sprocket" or "hill" or "spin" or "orbit" or "bush" or "target";
 
     /// <summary>Where the tank starts for this preset: "bush" parks it in the bush patch nearest the spawn, the rest use the normal spawn.</summary>
     public static System.Numerics.Vector2 Spawn(string? name) => name == "bush" ? Tank.Sim.Maps.SandboxMap.BushPatches[0] : Tank.Sim.Maps.SandboxMap.Spawn;
@@ -46,6 +49,11 @@ public static class CameraPresets
                 return (tank + yaw * new Vector3(3.4f, 0.9f, -4.8f), tank + yaw * new Vector3(1.3f, 0.65f, -2.95f));
             case "bush": // the tank parked inside a bush patch, seen from outside it (west, towards the lane)
                 return (tank + new Vector3(-16f, 3.4f, 6f), tank + TankFocus);
+            case "target":
+                var spot = Tank.Sim.Maps.SandboxMap.TargetSpots[0];
+                var at = new Vector3(spot.Position.X, groundAt(spot.Position.X, spot.Position.Y), spot.Position.Y);
+                var turn = new Basis(Vector3.Up, spot.Yaw);
+                return (at + turn * TargetEye, at + turn * TargetFocus);
             case "hill":
                 return (new Vector3(HillEye.X, groundAt(HillEye.X, HillEye.Y) + 28f, HillEye.Y), HillTarget);
             case "orbit": // circles the parked tank at 14 m, level with the turret: stresses anything keyed to the camera

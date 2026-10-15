@@ -38,6 +38,8 @@ public class PaletteTests
         Assert.Equal(Palette.Hex("1E2333"), Palette.UiPanel);
         Assert.Equal(0.7f, Palette.UiPanelAlpha);
         Assert.Equal(Palette.Hex("FFC93C"), Palette.UiAccent);
+        Assert.Equal(Palette.Hex("6F8FB5"), Palette.TargetBody);   // stage 2A design §4.2
+        Assert.Equal(Palette.Hex("2B2622"), Palette.Charred);
     }
 
     [Fact]

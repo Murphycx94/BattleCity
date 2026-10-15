@@ -3,13 +3,16 @@ using Tank.Client.Art;
 
 namespace Tank.Client.Combat;
 
+/// <summary>Colour of an impact's rolling puffs: white smoke (a burst on the ground, a tank blowing up) or grey dust (rock, armour).</summary>
+public enum PuffColor { White, Grey }
+
 /// <summary>
 /// Cartoon muzzle blasts and shell impacts, built once and reused round-robin (no allocation per shot).
 /// Muzzle: a bright yellow flash ball (0.08 s), then 3–5 white puffs pushed out along the barrel one after another,
 /// each swelling past full size, settling and shrinking away (~0.8 s).
-/// Impact: an orange fireball that balloons and collapses, 6–10 white-grey puffs rolling outward (greyer on rock) and
-/// 8 small stones thrown up under gravity.
-/// Pool sizes (4 muzzle, 6 impact slots) are an estimate: highest fire rate (one shell per reload, ~6.5 s, plus a few
+/// Impact: an orange fireball that balloons and collapses, 6–10 puffs rolling outward (<see cref="PuffColor"/>: white
+/// smoke, or grey dust off rock and armour) and 8 small stones thrown up under gravity.
+/// Pool sizes (4 muzzle, 6 impact slots) are an estimate: highest fire rate (one shell per reload, ~4 s, plus a few
 /// other tanks) times the longest particle life (1.3 s) stays well under the slot count. If every slot is busy anyway,
 /// the one that started playing longest ago is reused (idle slots always win, being the oldest). Nothing allocates per
 /// shot: no tweens, no closures; each slot advances its own flash animation from <see cref="_Process"/>.
@@ -29,6 +32,7 @@ public partial class BattleFx : Node3D
 
     private readonly List<MuzzleSlot> _muzzles = new();
     private readonly List<ImpactSlot> _impacts = new();
+
     public override void _Ready()
     {
         for (int i = 0; i < MuzzleSlots; i++) _muzzles.Add(new MuzzleSlot(this));
@@ -58,9 +62,10 @@ public partial class BattleFx : Node3D
         Oldest(_muzzles).Play(muzzle, withSmoke);
     }
 
-    public void Explosion(Vector3 at, bool onRock)
+    /// <param name="size">1 for a shell burst; larger for a tank blowing up, smaller for a shell striking armour.</param>
+    public void Explosion(Vector3 at, PuffColor puffs, float size = 1f)
     {
-        Oldest(_impacts).Play(at, onRock ? Palette.RockDust.ToColor() : Palette.Smoke.ToColor());
+        Oldest(_impacts).Play(at, puffs == PuffColor.Grey ? Palette.RockDust.ToColor() : Palette.Smoke.ToColor(), size);
     }
 
     private interface ISlot
@@ -190,6 +195,8 @@ public partial class BattleFx : Node3D
 
     private sealed class ImpactSlot : ISlot
     {
+        private const float PuffScaleMin = 1.1f, PuffScaleMax = 1.9f, PuffSpeedMin = 3.5f, PuffSpeedMax = 7f;
+
         private readonly Flash _fireball;
         private readonly GpuParticles3D _puffs;
         private readonly ParticleProcessMaterial _puffProcess;
@@ -204,13 +211,13 @@ public partial class BattleFx : Node3D
                 EmissionSphereRadius = 0.6f,
                 Direction = Vector3.Up,
                 Spread = 75f,
-                InitialVelocityMin = 3.5f,
-                InitialVelocityMax = 7f,
+                InitialVelocityMin = PuffSpeedMin,
+                InitialVelocityMax = PuffSpeedMax,
                 DampingMin = 5f,
                 DampingMax = 7f,
                 Gravity = new Vector3(0, 0.4f, 0),
-                ScaleMin = 1.1f,
-                ScaleMax = 1.9f,
+                ScaleMin = PuffScaleMin,
+                ScaleMax = PuffScaleMax,
                 ScaleCurve = ParticleKit.Pop(start: 0.3f, overshoot: 1.2f, peakAt: 0.15f, shrinkFrom: 0.5f),
                 Color = Palette.Smoke.ToColor(),
             };
@@ -237,10 +244,14 @@ public partial class BattleFx : Node3D
 
         public void Advance(float dt) => _fireball.Advance(dt);
 
-        public void Play(Vector3 at, Color puffColor)
+        public void Play(Vector3 at, Color puffColor, float size)
         {
-            _fireball.Play(at + Vector3.Up * 0.6f, FireballSize, FireballGrowTime, FireballShrinkTime);
+            _fireball.Play(at + Vector3.Up * 0.6f * size, FireballSize * size, FireballGrowTime, FireballShrinkTime * MathF.Max(1f, size));
             _puffProcess.Color = puffColor;
+            _puffProcess.ScaleMin = PuffScaleMin * size;
+            _puffProcess.ScaleMax = PuffScaleMax * size;
+            _puffProcess.InitialVelocityMin = PuffSpeedMin * size;
+            _puffProcess.InitialVelocityMax = PuffSpeedMax * size;
             _puffs.GlobalPosition = at + Vector3.Up * 0.3f;
             _puffs.AmountRatio = (6 + GD.Randi() % 5) / (float)ImpactPuffs;
             _puffs.Restart();

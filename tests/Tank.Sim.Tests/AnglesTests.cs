@@ -81,6 +81,26 @@ public sealed class AnglesTests
     public void MoveTowards_CrossingMinusPi_WrapsToTheOtherSide() =>
         Assert.Equal(Angles.Deg(-175), Angles.MoveTowards(Angles.Deg(175), Angles.Deg(-170), Angles.Deg(10)), 1e-4f);
 
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.7f)]
+    [InlineData(-2.0f)]
+    [InlineData(3.0f)]
+    [InlineData(-MathF.PI / 2)]
+    public void YawOf_InvertsForward(float yaw)
+    {
+        Assert.Equal(yaw, Angles.YawOf(Angles.Forward(yaw)), 1e-5f);
+        Assert.Equal(yaw, Angles.YawOf(Angles.Forward(yaw) * 37f), 1e-5f);   // any length
+    }
+
+    [Fact]
+    public void YawOf_StraightBack_IsPlusPi()
+    {
+        float yaw = Angles.YawOf(new Vector2(0, 1));
+        Assert.True(yaw > 0);
+        Assert.Equal(MathF.PI, yaw, 1e-5f);
+    }
+
     [Fact]
     public void Wrap_Pi_StaysPi() => Assert.Equal(MathF.PI, Angles.Wrap(MathF.PI));
 

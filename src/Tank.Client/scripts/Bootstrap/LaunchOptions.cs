@@ -1,3 +1,4 @@
+using System.Globalization;
 using Tank.Core.World;
 using Tank.Net.Protocol;
 
@@ -10,6 +11,9 @@ namespace Tank.Client.Bootstrap;
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场：自动驾驶并开火，用于截图）
 /// --camera-preset front|side|hill|spin（试驾场：固定镜头，用于截图和测帧）  --fps-log（试驾场：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场：以狙击镜视角启动，用于截图）
+/// --range-demo pen|ricochet|nopen|he|kill（试驾场：自动对靶车开炮，用于截图）  --shot-after fire|hit|kill:SECONDS（试驾场：玩家第一次开炮、第一次命中坦克或第一次击毁坦克后再过 SECONDS 秒截图）
+/// A plain parser, free of the engine: values it can't read fall back to defaults and are listed in <see cref="Warnings"/>
+/// for the caller to report.
 /// </summary>
 public sealed record LaunchOptions
 {
@@ -32,10 +36,19 @@ public sealed record LaunchOptions
     public bool FpsLog { get; init; }
     public double? FxShotDelay { get; init; }
     public bool Sniper { get; init; }
+    public string? RangeDemo { get; init; }
+
+    /// <summary>"fire", "hit" or "kill" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
+    public string? ShotAfterEvent { get; init; }
+    public double ShotAfterDelay { get; init; }
+
+    /// <summary>One line per option value that couldn't be read (and was ignored or replaced by its default).</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
     public static LaunchOptions Parse(IReadOnlyList<string> args)
     {
         var o = new LaunchOptions();
+        var warnings = new List<string>();
         for (int i = 0; i < args.Count; i++)
         {
             string Next() => i + 1 < args.Count ? args[++i] : "";
@@ -56,13 +69,37 @@ public sealed record LaunchOptions
                 "--camera-preset" => o with { CameraPreset = Next() },
                 "--fps-log" => o with { FpsLog = true },
                 "--sniper" => o with { Sniper = true },
-                "--fx-shot" => o with { FxShotDelay = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double f) ? f : 0.05 },
+                "--fx-shot" => o with { FxShotDelay = Seconds("--fx-shot", Next(), 0.05, warnings) },
+                "--range-demo" => o with { RangeDemo = Next() },
+                "--shot-after" => ParseShotAfter(o, Next(), warnings),
                 "--screenshot" => o with { ScreenshotPath = Next() },
-                "--screenshot-at" => o with { ScreenshotAt = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double s) ? s : o.ScreenshotAt },
-                "--quit-after" => o with { QuitAfter = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double q) ? q : 0 },
+                "--screenshot-at" => o with { ScreenshotAt = Seconds("--screenshot-at", Next(), o.ScreenshotAt, warnings) },
+                "--quit-after" => o with { QuitAfter = Seconds("--quit-after", Next(), 0, warnings) },
                 _ => o,
             };
         }
-        return o;
+        return o with { Warnings = warnings };
     }
+
+    /// <summary><paramref name="value"/> as seconds, or <paramref name="fallback"/> (noting a warning) when it isn't a number.</summary>
+    private static double Seconds(string option, string value, double fallback, List<string> warnings)
+    {
+        if (TryParseSeconds(value, out double seconds)) return seconds;
+        warnings.Add($"Bad {option} '{value}'; use SECONDS, e.g. 2.5. Using {fallback.ToString(CultureInfo.InvariantCulture)}.");
+        return fallback;
+    }
+
+    private static LaunchOptions ParseShotAfter(LaunchOptions o, string value, List<string> warnings)
+    {
+        string[] parts = value.Split(':');
+        if (parts.Length != 2 || parts[0] is not ("fire" or "hit" or "kill") || !TryParseSeconds(parts[1], out double delay))
+        {
+            warnings.Add($"Bad --shot-after '{value}'; use fire|hit|kill:SECONDS, e.g. kill:2.5.");
+            return o;
+        }
+        return o with { ShotAfterEvent = parts[0], ShotAfterDelay = delay };
+    }
+
+    private static bool TryParseSeconds(string value, out double seconds) =>
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out seconds);
 }

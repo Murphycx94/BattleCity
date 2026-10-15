@@ -5,6 +5,7 @@
 //              on the ground (the gun);
 //   1 wheel  — cream hub, rubber tyre in the track colour (vertex colour R: 1 hub, 0 tyre);
 //   2 track  — plain track colour (tracks, muzzle bulb).
+// char_amount (0 … 1) scorches every mode towards char_color: a knocked-out tank burns black over about half a second.
 shader_type spatial;
 render_mode cull_back;
 
@@ -18,6 +19,8 @@ uniform float bottom_shade = 0.85;       // brightness at the ground
 uniform float full_height = 1.7;         // object-space height (plus height_offset) where the paint reaches full brightness
 uniform float height_offset = 0.0;
 uniform float wheel_shade = 0.9;         // the running gear sits low, so it gets roughly the bottom of the gradient
+uniform vec3 char_color : source_color = vec3(0.169, 0.149, 0.133);   // Palette.Charred
+uniform float char_amount = 0.0;
 
 varying float object_height;
 
@@ -35,6 +38,7 @@ void fragment() {
 		albedo = mix(hub_color, body_color, COLOR.r);
 		albedo *= mix(bottom_shade, 1.0, smoothstep(0.2, full_height, object_height + height_offset));
 	}
+	albedo = mix(albedo, char_color, char_amount);
 	ALBEDO = albedo;
 	ROUGHNESS = 1.0;
 	METALLIC = 0.0;

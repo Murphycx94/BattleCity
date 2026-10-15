@@ -37,6 +37,13 @@ public static class Angles
 
     public static Vector2 Right(float yaw) => new(MathF.Cos(yaw), -MathF.Sin(yaw));
 
+    /// <summary>
+    /// Inverse of <see cref="Forward"/>: the yaw facing along the ground direction <paramref name="direction"/>, in (-π, π].
+    /// Any length but zero: a zero vector has no direction, and the result is then meaningless.
+    /// </summary>
+    // `+ 0f` turns -0 into +0 so that straight back (+Z) yields +π instead of -π.
+    public static float YawOf(Vector2 direction) => MathF.Atan2(-direction.X + 0f, -direction.Y);
+
     /// <summary>Unit 3D direction for a yaw and pitch.</summary>
     public static Vector3 Direction(float yaw, float pitch)
     {
@@ -52,9 +59,8 @@ public static class Angles
     {
         float length = direction.Length();
         if (length < 1e-6f) return (fallbackYaw, 0);
-        float horizontal = MathF.Sqrt(direction.X * direction.X + direction.Z * direction.Z);
-        // `+ 0f` turns -0 into +0 so that straight back (+Z) yields +π instead of -π.
-        float yaw = horizontal < 1e-6f * length ? fallbackYaw : Wrap(MathF.Atan2(-direction.X + 0f, -direction.Z));
+        var ground = new Vector2(direction.X, direction.Z);
+        float yaw = ground.Length() < 1e-6f * length ? fallbackYaw : YawOf(ground);
         return (yaw, MathF.Asin(System.Math.Clamp(direction.Y / length, -1f, 1f)));
     }
 }

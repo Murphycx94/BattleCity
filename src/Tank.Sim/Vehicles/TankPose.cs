@@ -1,4 +1,5 @@
 using System.Numerics;
+using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Terrain;
 
@@ -39,6 +40,18 @@ public readonly record struct TankPose(Vector3 Position, Quaternion Rotation)
 
     public Vector3 Muzzle(TankSpec spec, float turretYaw, float gunPitch) =>
         Trunnion(spec) + GunDirection(turretYaw, gunPitch) * spec.GunLength;
+
+    /// <summary>The hull's armour box in world space; it tilts with the hull.</summary>
+    public OrientedBox HullBox(TankSpec spec) =>
+        new(Position + Vector3.Transform(spec.HullArmor.LocalCenter, Rotation), spec.HullArmor.HalfExtents, Rotation);
+
+    /// <summary>The turret's armour box in world space: centred over the turret ring, tilted with the hull, turned by <paramref name="turretYaw"/>.</summary>
+    public OrientedBox TurretBox(TankSpec spec, float turretYaw)
+    {
+        Vector3 ring = new(0, 0, -spec.TurretOffset);
+        Quaternion rotation = Rotation * Quaternion.CreateFromAxisAngle(Vector3.UnitY, turretYaw);
+        return new OrientedBox(Position + Vector3.Transform(ring + spec.TurretArmor.LocalCenter, Rotation), spec.TurretArmor.HalfExtents, rotation);
+    }
 
     /// <summary>Turret yaw and gun pitch (hull-relative) that point the barrel along world <paramref name="direction"/>.</summary>
     public (float TurretYaw, float GunPitch) ToHullAngles(Vector3 direction, float fallbackYaw = 0f) =>

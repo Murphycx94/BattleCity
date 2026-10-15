@@ -18,7 +18,10 @@ public static class Ballistics
     private static readonly Vector3 GravityStep = new(0, -SimConstants.Gravity * SimConstants.Dt, 0);
     private static readonly Vector3 GravityDrop = new(0, -0.5f * SimConstants.Gravity * SimConstants.Dt * SimConstants.Dt, 0);
 
-    /// <summary>Where and how a shot fired now would leave the barrel. <see cref="Blocked"/> when the barrel is inside a prop or the ground.</summary>
+    /// <summary>
+    /// Where and how a shot of the loaded round fired now would leave the barrel, before dispersion. <see cref="Blocked"/>
+    /// when the barrel is inside a prop or the ground.
+    /// </summary>
     public readonly record struct Launch(Vector3 Origin, Vector3 Velocity, bool Blocked, Vector3 BlockPoint);
 
     public static Launch Aim(in TankState tank, Battlefield field)
@@ -26,7 +29,7 @@ public static class Ballistics
         TankPose pose = TankPose.Compute(tank, field.Terrain);
         Vector3 trunnion = pose.Trunnion(tank.Spec);
         Vector3 muzzle = pose.Muzzle(tank.Spec, tank.TurretYaw, tank.GunPitch);
-        Vector3 velocity = pose.GunDirection(tank.TurretYaw, tank.GunPitch) * tank.Spec.ShellSpeed;
+        Vector3 velocity = pose.GunDirection(tank.TurretYaw, tank.GunPitch) * tank.Spec.Round(tank.Ammo).Speed;
         bool blocked = field.Raycast(trunnion, muzzle, out RayHit hit);
         return new Launch(muzzle, velocity, blocked, blocked ? hit.Point : Vector3.Zero);
     }

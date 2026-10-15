@@ -14,8 +14,10 @@
     <Compile Include="..\..\src\Tank.Client\scripts\Art\Mesh\**\*.cs" LinkBase="Mesh" />
     <!-- The palette is engine-neutral too, so look data and vertex colours can use it. -->
     <Compile Include="..\..\src\Tank.Client\scripts\Art\Palette.cs" LinkBase="Art" />
+    <!-- Popup timing curves are engine-neutral too. -->
+    <Compile Include="..\..\src\Tank.Client\scripts\Overlay\PopupCurves.cs" LinkBase="Overlay" />
     <!-- Tank look data, part builders and animation state are engine-neutral too. -->
-    <Compile Include="..\..\src\Tank.Client\scripts\Vehicles\TankLook.cs;..\..\src\Tank.Client\scripts\Vehicles\TankLooks.cs;..\..\src\Tank.Client\scripts\Vehicles\TankParts.cs;..\..\src\Tank.Client\scripts\Vehicles\TankAnimator.cs" LinkBase="Vehicles" />
+    <Compile Include="..\..\src\Tank.Client\scripts\Vehicles\TankLook.cs;..\..\src\Tank.Client\scripts\Vehicles\TankLooks.cs;..\..\src\Tank.Client\scripts\Vehicles\TankParts.cs;..\..\src\Tank.Client\scripts\Vehicles\TankAnimator.cs;..\..\src\Tank.Client\scripts\Vehicles\TurretToss.cs" LinkBase="Vehicles" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tank.Sim\Tank.Sim.csproj" />

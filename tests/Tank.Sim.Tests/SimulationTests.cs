@@ -60,7 +60,7 @@ public sealed class SimulationTests
         Assert.Equal(tankId, fired.TankId);
         var expectedMuzzle = new Vector3(100, Spec.TrunnionHeight, 100 - Spec.TurretOffset - Spec.GunLength);
         Assert.True(Vector3.Distance(expectedMuzzle, fired.Position) < 1e-3f, $"muzzle at {fired.Position}");
-        Assert.Equal(Spec.ShellSpeed, sim.Shells[0].Velocity.Length(), 0.5f);
+        Assert.Equal(Spec.Ap.Speed, sim.Shells[0].Velocity.Length(), 0.5f);
         Assert.Equal(Spec.ReloadTime, sim.Tanks[0].Reload, 1e-4f);
     }
 
@@ -119,6 +119,24 @@ public sealed class SimulationTests
     }
 
     [Fact]
+    public void ShellsInFlight_KeepTheirFiringOrder()
+    {
+        // Three tanks side by side fire on the same tick. The first one's gun is fully depressed, so its shell lands at
+        // once; the other two fly on and stay in the order they were fired.
+        var sim = new Simulation(TestWorld.FlatField());
+        sim.AddTank(Spec, new Vector2(90, 100), 0f);
+        int second = sim.AddTank(Spec, new Vector2(100, 100), 0f);
+        int third = sim.AddTank(Spec, new Vector2(110, 100), 0f);
+        var down = TestWorld.Cmd(aimPitch: -0.3f);
+        var level = TestWorld.Cmd();
+        for (int i = 0; i < 30; i++) sim.Step(new[] { down, level, level });   // let the first gun settle at full depression
+        sim.Step(new[] { down with { Fire = true }, level with { Fire = true }, level with { Fire = true } });
+
+        Assert.Single(sim.Events.ToArray(), e => e.Type == GameEventType.ShellExploded);
+        Assert.Equal(new[] { second, third }, sim.Shells.ToArray().Select(s => s.OwnerTankId));
+    }
+
+    [Fact]
     public void ShellAimedAtTheGround_ExplodesAheadOfTheTank()
     {
         var sim = NewSim(out _);
@@ -147,16 +165,20 @@ public sealed class SimulationTests
     }
 
     [Fact]
-    public void Reticle_PredictsTheExactImpactOfTheNextShot()
+    public void Reticle_PredictsTheCentreOfTheAimCircle_AndTheShellFollowsItsOwnPrediction()
     {
         var sim = NewSim(out _);
         var aim = TestWorld.Cmd(aimPitch: -0.05f);
-        Run(sim, aim, 30);
+        Run(sim, aim, 90);   // gun settled and the aim circle closed
         var launch = Tank.Sim.Combat.Ballistics.Aim(sim.Tanks[0], sim.Field);
         Assert.False(launch.Blocked);
-        Assert.True(Tank.Sim.Combat.Ballistics.PredictImpact(launch.Origin, launch.Velocity, sim.Field, out Vector3 predicted));
+        float radius = Tank.Sim.Combat.Dispersion.Radius(Spec, sim.Tanks[0].Bloom);
 
         var events = Run(sim, TestWorld.Cmd(aimPitch: -0.05f, fire: true), 90);
+        GameEvent fired = Assert.Single(events, e => e.Type == GameEventType.ShellFired);
+        float off = MathF.Acos(MathF.Min(1f, Vector3.Dot(Vector3.Normalize(fired.Velocity), Vector3.Normalize(launch.Velocity))));
+        Assert.True(MathF.Tan(off) * 100f <= radius * 1.001f, $"left {MathF.Tan(off) * 100f} m off at 100 m, circle {radius} m");
+        Assert.True(Tank.Sim.Combat.Ballistics.PredictImpact(fired.Position, fired.Velocity, sim.Field, out Vector3 predicted));
         GameEvent boom = Assert.Single(events, e => e.Type == GameEventType.ShellExploded);
         Assert.Equal(predicted, boom.Position);
     }
