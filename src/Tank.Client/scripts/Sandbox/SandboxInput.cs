@@ -10,19 +10,24 @@ namespace Tank.Client.Sandbox;
 /// </summary>
 public sealed class SandboxInput
 {
+    // Polled every tick or frame: cached, since a string would make a new StringName per call.
+    private static readonly StringName DriveForward = "drive_forward", DriveBack = "drive_back";
+    private static readonly StringName DriveLeft = "drive_left", DriveRight = "drive_right";
+    private static readonly StringName FreeLookAction = "free_look";
+
     private bool _fireLatched;
     private bool _fireHeld;
     private bool _restock;
 
     public static void RegisterActions()
     {
-        AddKey("drive_forward", Key.W);
-        AddKey("drive_back", Key.S);
-        AddKey("drive_left", Key.A);
-        AddKey("drive_right", Key.D);
+        AddKey(DriveForward, Key.W);
+        AddKey(DriveBack, Key.S);
+        AddKey(DriveLeft, Key.A);
+        AddKey(DriveRight, Key.D);
         AddKey("sniper_toggle", Key.Shift);
         AddMouse("fire_gun", MouseButton.Left);
-        AddMouse("free_look", MouseButton.Right);
+        AddMouse(FreeLookAction, MouseButton.Right);
         AddKey("ammo_ap", Key.Key1);
         AddKey("ammo_he", Key.Key2);
         AddKey("restock", Key.R);
@@ -31,7 +36,7 @@ public sealed class SandboxInput
     /// <summary>The round the player wants loaded.</summary>
     public AmmoType Ammo { get; private set; } = AmmoType.AP;
 
-    public bool FreeLook => Input.IsActionPressed("free_look");
+    public bool FreeLook => Input.IsActionPressed(FreeLookAction);
 
     public void OnInputEvent(InputEvent e)
     {
@@ -59,20 +64,20 @@ public sealed class SandboxInput
 
     public (sbyte Throttle, sbyte Steer, bool Fire) Sample()
     {
-        sbyte throttle = (sbyte)(Held("drive_forward") - Held("drive_back"));
-        sbyte steer = (sbyte)(Held("drive_right") - Held("drive_left"));
+        sbyte throttle = (sbyte)(Held(DriveForward) - Held(DriveBack));
+        sbyte steer = (sbyte)(Held(DriveRight) - Held(DriveLeft));
         bool fire = _fireLatched || _fireHeld;
         _fireLatched = false;
         return (throttle, steer, fire);
     }
 
-    private static int Held(string action) => Input.IsActionPressed(action) ? 1 : 0;
+    private static int Held(StringName action) => Input.IsActionPressed(action) ? 1 : 0;
 
-    private static void AddKey(string action, Key key) => Add(action, new InputEventKey { PhysicalKeycode = key });
+    private static void AddKey(StringName action, Key key) => Add(action, new InputEventKey { PhysicalKeycode = key });
 
-    private static void AddMouse(string action, MouseButton button) => Add(action, new InputEventMouseButton { ButtonIndex = button });
+    private static void AddMouse(StringName action, MouseButton button) => Add(action, new InputEventMouseButton { ButtonIndex = button });
 
-    private static void Add(string action, InputEvent e)
+    private static void Add(StringName action, InputEvent e)
     {
         if (InputMap.HasAction(action)) return;
         InputMap.AddAction(action);

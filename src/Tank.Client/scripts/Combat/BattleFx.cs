@@ -3,12 +3,15 @@ using Tank.Client.Art;
 
 namespace Tank.Client.Combat;
 
+/// <summary>Colour of an impact's rolling puffs: white smoke (a burst on the ground, a tank blowing up) or grey dust (rock, armour).</summary>
+public enum PuffColor { White, Grey }
+
 /// <summary>
 /// Cartoon muzzle blasts and shell impacts, built once and reused round-robin (no allocation per shot).
 /// Muzzle: a bright yellow flash ball (0.08 s), then 3–5 white puffs pushed out along the barrel one after another,
 /// each swelling past full size, settling and shrinking away (~0.8 s).
-/// Impact: an orange fireball that balloons and collapses, 6–10 white-grey puffs rolling outward (greyer on rock) and
-/// 8 small stones thrown up under gravity.
+/// Impact: an orange fireball that balloons and collapses, 6–10 puffs rolling outward (<see cref="PuffColor"/>: white
+/// smoke, or grey dust off rock and armour) and 8 small stones thrown up under gravity.
 /// Pool sizes (4 muzzle, 6 impact slots) are an estimate: highest fire rate (one shell per reload, ~6.5 s, plus a few
 /// other tanks) times the longest particle life (1.3 s) stays well under the slot count. If every slot is busy anyway,
 /// the one that started playing longest ago is reused (idle slots always win, being the oldest). Nothing allocates per
@@ -59,9 +62,9 @@ public partial class BattleFx : Node3D
     }
 
     /// <param name="size">1 for a shell burst; larger for a tank blowing up, smaller for a shell striking armour.</param>
-    public void Explosion(Vector3 at, bool onRock, float size = 1f)
+    public void Explosion(Vector3 at, PuffColor puffs, float size = 1f)
     {
-        Oldest(_impacts).Play(at, onRock ? Palette.RockDust.ToColor() : Palette.Smoke.ToColor(), size);
+        Oldest(_impacts).Play(at, puffs == PuffColor.Grey ? Palette.RockDust.ToColor() : Palette.Smoke.ToColor(), size);
     }
 
     private interface ISlot
