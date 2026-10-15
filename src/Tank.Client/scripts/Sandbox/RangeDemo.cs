@@ -1,3 +1,4 @@
+using Tank.Sim;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
@@ -10,11 +11,18 @@ namespace Tank.Client.Sandbox;
 /// Scripted shooting at the practice targets, for screenshots (<c>--range-demo NAME</c>): the player's tank is parked
 /// <see cref="Distance"/> m from target <see cref="Target"/>, <see cref="AngleOffFront"/> degrees round from straight
 /// ahead of it, lays its gun on <see cref="AimLocal"/> (target hull space: x right, y up, −z forward) and fires from
-/// <see cref="FireAfter"/> s on, once or (<see cref="KeepFiring"/>) whenever reloaded.
+/// <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded.
 /// </summary>
 public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, SN.Vector3 AimLocal, AmmoType Ammo, bool KeepFiring)
 {
     public const double FireAfter = 3.0;
+
+    /// <summary>
+    /// The first sim tick the demo fires on: <see cref="FireAfter"/> s of simulation time, not wall-clock time, so a
+    /// startup hitch can't make it fire before the turret has settled, and the shot (its tick seeds the dispersion) is
+    /// the same every run.
+    /// </summary>
+    public static readonly int FireTick = (int)Math.Ceiling(FireAfter * SimConstants.TickRate);
     private static readonly SN.Vector3 HullFront = FrontFace(TankCatalog.Medium.HullArmor, 0f);
     private static readonly SN.Vector3 TurretFront = FrontFace(TankCatalog.Medium.TurretArmor, TankCatalog.Medium.TurretOffset);
 

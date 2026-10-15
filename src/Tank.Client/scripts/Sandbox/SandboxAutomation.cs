@@ -16,6 +16,8 @@ namespace Tank.Client.Sandbox;
 /// the screenshot is taken a delay after the run's start (--screenshot-at), the player's first shot (--fx-shot, or
 /// --shot-after fire) or the first tank hit or kill (--shot-after hit|kill), and a range demo that fires once stops
 /// after the player's first shot. With --fx-shot, nothing before a warm-up counts. Also --fps-log and --quit-after.
+/// Moments and the delays after them are wall-clock seconds (the screenshot is of what is on screen); only a range
+/// demo's first shot is timed in simulation ticks (<see cref="RangeDemo.FireTick"/>), so the shot itself is repeatable.
 /// </summary>
 public sealed class SandboxAutomation
 {
@@ -81,7 +83,7 @@ public sealed class SandboxAutomation
     public InputCmd Command(in InputCmd player, in TankState tank, Battlefield field, double time)
     {
         InputCmd command = player;
-        if (Demo is { } demo) command = DemoCommand(demo, player, tank, field, time);
+        if (Demo is { } demo) command = DemoCommand(demo, player, tank, field);
         else if (_options.AutoDrive) command = AutoDrive(player, time);
         else if (_standStill) command = player with { Throttle = 0, Steer = 0, Fire = false };
         if (_options.AutoDrive && _options.FxShotDelay is not null) command = command with { AimPitch = FxShotPitch };   // shells land in view
@@ -124,14 +126,14 @@ public sealed class SandboxAutomation
         return since >= 0 && time >= since + _shotDelay;
     }
 
-    /// <summary>--range-demo: stand still, lay the gun on the demo's aim point, fire once (or keep firing) after the warm-up.</summary>
-    private InputCmd DemoCommand(RangeDemo demo, in InputCmd player, in TankState tank, Battlefield field, double time)
+    /// <summary>--range-demo: stand still, lay the gun on the demo's aim point, fire once (or keep firing) from <see cref="RangeDemo.FireTick"/> on.</summary>
+    private InputCmd DemoCommand(RangeDemo demo, in InputCmd player, in TankState tank, Battlefield field)
     {
         TankPose pose = TankPose.Compute(tank, field.Terrain);
         SN.Vector2 spot = demo.Spot.Position;
         SN.Vector3 aim = demo.AimPoint(field.Terrain.HeightAt(spot.X, spot.Y));
         var (yaw, pitch) = Angles.AimAngles(aim - pose.Trunnion(tank.Spec), player.AimYaw);
-        bool fire = time >= RangeDemo.FireAfter && (demo.KeepFiring || _firstSeen[(int)Moment.Fire] < 0);
+        bool fire = player.Tick >= RangeDemo.FireTick && (demo.KeepFiring || _firstSeen[(int)Moment.Fire] < 0);
         return player with { Throttle = 0, Steer = 0, AimYaw = yaw, AimPitch = pitch, Fire = fire, Ammo = demo.Ammo };
     }
 
