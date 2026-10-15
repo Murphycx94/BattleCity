@@ -104,7 +104,9 @@ public sealed class HighExplosiveTests
         Assert.Equal(duel.TargetId, splash.TargetTankId);
         Assert.Equal(duel.ShooterId, splash.TankId);
         float distance = TankPose.Compute(duel.Target, duel.Sim.Field.Terrain).HullBox(Spec).DistanceTo(boom.Position);
-        Assert.InRange(distance, 0.3f, 2f);
+        // Only "clear of the hull, inside the splash radius": the shell grazes the ground, so the dispersion (seeded by
+        // the firing tick, which moves with the reload time) shifts where it lands along the line by a metre or more.
+        Assert.InRange(distance, 0.3f, Spec.He.SplashRadius);
         Assert.Equal(Penetration.Splash(Spec.He, distance, 20), splash.Damage);
         Assert.True(splash.Damage > 0);
         Assert.Equal(900 - splash.Damage, duel.Target.Health);

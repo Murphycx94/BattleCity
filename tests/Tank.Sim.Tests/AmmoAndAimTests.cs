@@ -62,7 +62,7 @@ public sealed class AmmoAndAimTests
     public void SwitchingBackMidReload_StartsAFreshFullReload()
     {
         var sim = NewSim(out _);
-        Run(sim, TestWorld.Cmd(fire: true), 1);            // fire AP: reload 6.5 s
+        Run(sim, TestWorld.Cmd(fire: true), 1);            // fire AP: a full reload
         Run(sim, TestWorld.Cmd(), 60);                     // 2 s in
         Run(sim, TestWorld.Cmd(ammo: AmmoType.HE), 1);     // swap
         Assert.Equal(Spec.ReloadTime, sim.Tanks[0].Reload, 1e-4f);

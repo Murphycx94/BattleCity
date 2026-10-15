@@ -27,7 +27,7 @@ public static class TankCatalog
         TrunnionHeight = 2.1f,
         TurretOffset = 0.3f,
         GunLength = 3.2f,
-        ReloadTime = 6.5f,
+        ReloadTime = 4f,
         MaxHealth = 900,
         Caliber = 85,
         HullArmor = new ArmorBox(Width: 3.2f, Length: 6.2f, Bottom: 0.3f, Top: 1.74f, new Armor(Front: 90, Side: 60, Rear: 40, Top: 20, Bottom: 20)),

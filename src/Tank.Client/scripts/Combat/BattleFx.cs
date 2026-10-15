@@ -12,7 +12,7 @@ public enum PuffColor { White, Grey }
 /// each swelling past full size, settling and shrinking away (~0.8 s).
 /// Impact: an orange fireball that balloons and collapses, 6–10 puffs rolling outward (<see cref="PuffColor"/>: white
 /// smoke, or grey dust off rock and armour) and 8 small stones thrown up under gravity.
-/// Pool sizes (4 muzzle, 6 impact slots) are an estimate: highest fire rate (one shell per reload, ~6.5 s, plus a few
+/// Pool sizes (4 muzzle, 6 impact slots) are an estimate: highest fire rate (one shell per reload, ~4 s, plus a few
 /// other tanks) times the longest particle life (1.3 s) stays well under the slot count. If every slot is busy anyway,
 /// the one that started playing longest ago is reused (idle slots always win, being the oldest). Nothing allocates per
 /// shot: no tweens, no closures; each slot advances its own flash animation from <see cref="_Process"/>.
