@@ -10,10 +10,15 @@ namespace Tank.Client.Sandbox;
 /// </summary>
 public sealed class SandboxInput
 {
-    // Polled every tick or frame: cached, since a string would make a new StringName per call.
+    // Action names are cached: a string argument becomes a new StringName on every call, and these are looked up each
+    // tick or frame and in the input-event handlers (mouse motion alone arrives about once per frame while aiming).
     private static readonly StringName DriveForward = "drive_forward", DriveBack = "drive_back";
     private static readonly StringName DriveLeft = "drive_left", DriveRight = "drive_right";
     private static readonly StringName FreeLookAction = "free_look";
+    private static readonly StringName AmmoAp = "ammo_ap", AmmoHe = "ammo_he", Restock = "restock";
+
+    // Also read by SandboxMain's input handlers; UiCancel is Godot's built-in action, not registered here.
+    internal static readonly StringName FireGun = "fire_gun", SniperToggle = "sniper_toggle", UiCancel = "ui_cancel";
 
     private bool _fireLatched;
     private bool _fireHeld;
@@ -25,12 +30,12 @@ public sealed class SandboxInput
         AddKey(DriveBack, Key.S);
         AddKey(DriveLeft, Key.A);
         AddKey(DriveRight, Key.D);
-        AddKey("sniper_toggle", Key.Shift);
-        AddMouse("fire_gun", MouseButton.Left);
+        AddKey(SniperToggle, Key.Shift);
+        AddMouse(FireGun, MouseButton.Left);
         AddMouse(FreeLookAction, MouseButton.Right);
-        AddKey("ammo_ap", Key.Key1);
-        AddKey("ammo_he", Key.Key2);
-        AddKey("restock", Key.R);
+        AddKey(AmmoAp, Key.Key1);
+        AddKey(AmmoHe, Key.Key2);
+        AddKey(Restock, Key.R);
     }
 
     /// <summary>The round the player wants loaded.</summary>
@@ -40,11 +45,11 @@ public sealed class SandboxInput
 
     public void OnInputEvent(InputEvent e)
     {
-        if (e.IsActionPressed("fire_gun")) _fireLatched = _fireHeld = true;
-        else if (e.IsActionReleased("fire_gun")) _fireHeld = false;
-        else if (e.IsActionPressed("ammo_ap")) Ammo = AmmoType.AP;
-        else if (e.IsActionPressed("ammo_he")) Ammo = AmmoType.HE;
-        else if (e.IsActionPressed("restock")) _restock = true;
+        if (e.IsActionPressed(FireGun)) _fireLatched = _fireHeld = true;
+        else if (e.IsActionReleased(FireGun)) _fireHeld = false;
+        else if (e.IsActionPressed(AmmoAp)) Ammo = AmmoType.AP;
+        else if (e.IsActionPressed(AmmoHe)) Ammo = AmmoType.HE;
+        else if (e.IsActionPressed(Restock)) _restock = true;
     }
 
     /// <summary>Drops any pending or held fire (focus lost, so a release may never arrive).</summary>

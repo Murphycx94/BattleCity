@@ -32,6 +32,7 @@ public partial class Main : Node
     public override void _Ready()
     {
         _options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
+        foreach (string warning in _options.Warnings) GD.PushWarning(warning);
         _netGraph = _options.NetGraph;
         GetWindow().Title = "坦克 3D";
         _menu = new MenuScreen();

@@ -10,17 +10,19 @@ namespace Tank.Client.Sandbox;
 /// <summary>
 /// Scripted shooting at the practice targets, for screenshots (<c>--range-demo NAME</c>): the player's tank is parked
 /// <see cref="Distance"/> m from target <see cref="Target"/>, <see cref="AngleOffFront"/> degrees round from straight
-/// ahead of it, lays its gun on <see cref="AimLocal"/> (target hull space: x right, y up, −z forward) and fires from
-/// <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded.
+/// ahead of it, lays its gun on <see cref="AimLocal"/> (target hull space: x right, y up, −z forward) and pulls the
+/// trigger from <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded.
 /// </summary>
 public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, SN.Vector3 AimLocal, AmmoType Ammo, bool KeepFiring)
 {
     public const double FireAfter = 3.0;
 
     /// <summary>
-    /// The first sim tick the demo fires on: <see cref="FireAfter"/> s of simulation time, not wall-clock time, so a
-    /// startup hitch can't make it fire before the turret has settled, and the shot (its tick seeds the dispersion) is
-    /// the same every run.
+    /// The earliest sim tick the demo pulls the trigger: <see cref="FireAfter"/> s of simulation time, not wall-clock
+    /// time, so a startup hitch can't make it fire before the turret has settled, and the shot (its tick seeds the
+    /// dispersion) is the same every run. The player's tank starts with AP loaded, so a demo with another round
+    /// (<c>he</c>) first waits out the full reload that switching starts (<c>TryFire</c> in the sim): it then fires
+    /// <c>ReloadTime</c> after tick 1 rather than at <see cref="FireTick"/>.
     /// </summary>
     public static readonly int FireTick = (int)Math.Ceiling(FireAfter * SimConstants.TickRate);
     private static readonly SN.Vector3 HullFront = FrontFace(TankCatalog.Medium.HullArmor, 0f);

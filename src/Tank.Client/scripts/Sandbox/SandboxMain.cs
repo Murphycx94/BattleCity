@@ -98,7 +98,7 @@ public partial class SandboxMain : Node3D
     {
         if (IgnoresInput) return;
         // Releases always pass so a held fire can end; presses only count while captured (the capturing click must not shoot).
-        if (e.IsActionReleased("fire_gun") || Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
+        if (e.IsActionReleased(SandboxInput.FireGun) || Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
     }
 
     public override void _Notification(int what)
@@ -125,8 +125,8 @@ public partial class SandboxMain : Node3D
                 GetViewport().SetInputAsHandled();
                 break;
         }
-        if (e.IsActionPressed("sniper_toggle")) _camera.ToggleSniper();
-        if (e.IsActionPressed("ui_cancel")) Input.MouseMode = Input.MouseModeEnum.Visible;
+        if (e.IsActionPressed(SandboxInput.SniperToggle)) _camera.ToggleSniper();
+        if (e.IsActionPressed(SandboxInput.UiCancel)) Input.MouseMode = Input.MouseModeEnum.Visible;
     }
 
     public override void _Process(double delta)

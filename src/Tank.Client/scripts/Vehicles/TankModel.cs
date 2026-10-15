@@ -172,6 +172,7 @@ public partial class TankModel : Node3D
             .With("body_color", _paint.Body.ToColor())
             .With("hub_color", _paint.Hub.ToColor())
             .With("track_color", _paint.Track.ToColor())
+            .With("char_color", Palette.Charred.ToColor())
             .With("toon_rim_strength", RimStrength);
         _materials.Add(material);
         return material;
