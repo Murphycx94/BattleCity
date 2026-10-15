@@ -117,6 +117,31 @@ public sealed class AmmoAndAimTests
     }
 
     [Fact]
+    public void TurningOnTheSpot_OpensTheAimCircle_ForTheHullAndTheTurretHoldingTheAim()
+    {
+        // Steering without throttle swings the hull at its full traverse. The aim stays put, so the turret turns the other
+        // way relative to the hull; it can't keep up (40°/s against 42°/s), so it turns flat out and counts in full too.
+        var sim = NewSim(out _);
+        Run(sim, TestWorld.Cmd(steer: 1), 15);
+
+        Assert.Equal(new Vector2(100, 100), sim.Tanks[0].Position);
+        Assert.Equal(0f, sim.Tanks[0].Speed);
+        float turret = MathF.Min(1f, Spec.HullTraverse / Spec.TurretTraverse);
+        Assert.Equal(Spec.Bloom.HullTurn + Spec.Bloom.TurretTurn * turret, sim.Tanks[0].Bloom, 1e-3f);   // 1.5 + 1.0
+    }
+
+    [Fact]
+    public void SwingingTheTurret_OpensTheAimCircle_WhileItTurns()
+    {
+        var sim = NewSim(out _);
+        Run(sim, TestWorld.Cmd(aimYaw: 1.5f), 15);   // half a second into a swing of about 2.1 s
+
+        Assert.Equal(15 * Spec.TurretTraverse * SimConstants.Dt, sim.Tanks[0].TurretYaw, 1e-4f);   // still turning, flat out
+        Assert.Equal(0f, sim.Tanks[0].Yaw);
+        Assert.Equal(Spec.Bloom.TurretTurn, sim.Tanks[0].Bloom, 1e-3f);
+    }
+
+    [Fact]
     public void Dispersion_IsTheSameForTheSameShot()
     {
         Vector3 FirstShot()

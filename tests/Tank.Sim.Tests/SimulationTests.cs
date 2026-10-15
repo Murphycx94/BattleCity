@@ -119,6 +119,24 @@ public sealed class SimulationTests
     }
 
     [Fact]
+    public void ShellsInFlight_KeepTheirFiringOrder()
+    {
+        // Three tanks side by side fire on the same tick. The first one's gun is fully depressed, so its shell lands at
+        // once; the other two fly on and stay in the order they were fired.
+        var sim = new Simulation(TestWorld.FlatField());
+        sim.AddTank(Spec, new Vector2(90, 100), 0f);
+        int second = sim.AddTank(Spec, new Vector2(100, 100), 0f);
+        int third = sim.AddTank(Spec, new Vector2(110, 100), 0f);
+        var down = TestWorld.Cmd(aimPitch: -0.3f);
+        var level = TestWorld.Cmd();
+        for (int i = 0; i < 30; i++) sim.Step(new[] { down, level, level });   // let the first gun settle at full depression
+        sim.Step(new[] { down with { Fire = true }, level with { Fire = true }, level with { Fire = true } });
+
+        Assert.Single(sim.Events.ToArray(), e => e.Type == GameEventType.ShellExploded);
+        Assert.Equal(new[] { second, third }, sim.Shells.ToArray().Select(s => s.OwnerTankId));
+    }
+
+    [Fact]
     public void ShellAimedAtTheGround_ExplodesAheadOfTheTank()
     {
         var sim = NewSim(out _);

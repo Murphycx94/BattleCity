@@ -12,15 +12,31 @@ public sealed partial class Simulation
     private readonly OrientedBox[] _hullBoxes = new OrientedBox[MaxTanks];
     private readonly OrientedBox[] _turretBoxes = new OrientedBox[MaxTanks];
 
+    /// <summary>Shots fired this tick into a rock or the ground, in firing order. A tank fires at most once a tick.</summary>
+    private readonly BarrelBurst[] _barrelBursts = new BarrelBurst[MaxTanks];
+    private int _barrelBurstCount;
+
+    /// <summary>A shell that bursts where its barrel meets a rock or the ground, instead of leaving the muzzle.</summary>
+    private readonly record struct BarrelBurst(Shell Shell, Vector3 At);
+
     /// <summary>
-    /// Flies every shell one tick. Its path this tick stops at whichever comes first: the ground or a rock, or a tank's
-    /// hull or turret box (never the shooter's own). Shells that leave the map or time out vanish without an event.
+    /// The shell phase of a tick, all in firing order. Shots that burst in a blocked barrel go off first (as the gun
+    /// fires, before anything in flight can land). Then every shell in flight flies one tick; its path stops at whichever
+    /// comes first: the ground or a rock, or a tank's hull or turret box (never the shooter's own). Shells that leave the
+    /// map or time out vanish without an event. Those still flying keep their order for the next tick.
     /// </summary>
     private void StepShells()
     {
+        for (int i = 0; i < _barrelBurstCount; i++)
+        {
+            ref readonly BarrelBurst burst = ref _barrelBursts[i];
+            Explode(burst.Shell, burst.At, directSlot: -1);
+        }
+        _barrelBurstCount = 0;
         if (ShellCount == 0) return;
         SnapshotHitBoxes();
-        for (int i = ShellCount - 1; i >= 0; i--)
+        int kept = 0;
+        for (int i = 0; i < ShellCount; i++)
         {
             ref Shell shell = ref _shells[i];
             Vector3 from = shell.Position;
@@ -31,9 +47,9 @@ public sealed partial class Simulation
             else if (step == ShellStep.Hit)
                 Explode(shell, rayHit.Point, directSlot: -1);
             else if (step == ShellStep.Flying)
-                continue;
-            _shells[i] = _shells[--ShellCount];
+                _shells[kept++] = shell;   // still flying: compact in place (kept <= i), keeping firing order
         }
+        ShellCount = kept;
     }
 
     /// <summary>Tanks don't move while shells fly, so their boxes are worked out once per tick.</summary>
@@ -99,10 +115,13 @@ public sealed partial class Simulation
     {
         _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, shell.OwnerTankId, shell.Id, at, Vector3.Zero, Ammo: shell.Ammo));
         if (shell.Round.SplashRadius <= 0) return;
+        var ground = new Vector2(at.X, at.Z);
         for (int j = 0; j < TankCount; j++)
         {
             ref TankState target = ref _tanks[j];
             if (j == directSlot || target.Id == shell.OwnerTankId || target.IsDestroyed) continue;
+            float reach = shell.Round.SplashRadius + HullReach(target.Spec);
+            if (Vector2.DistanceSquared(target.Position, ground) > reach * reach) continue;   // out of range: skip the pose
             float distance = TankPose.Compute(target, Field.Terrain).HullBox(target.Spec).DistanceTo(at);
             int damage = Penetration.Splash(shell.Round, distance, target.Spec.HullArmor.Armor.Thinnest);
             if (damage <= 0) continue;
@@ -110,6 +129,17 @@ public sealed partial class Simulation
                 target.Id, HitResult.None, damage, shell.Ammo));
             Damage(ref target, damage, shell.OwnerTankId, shell.Id);
         }
+    }
+
+    /// <summary>
+    /// The farthest the hull's armour box reaches across the ground from the tank's position, however the hull tilts: the
+    /// distance from the hull origin to the box's farthest corner. (The footprint's half-diagonal isn't a safe bound: on a
+    /// slope the box's top corners can lean out past it.)
+    /// </summary>
+    private static float HullReach(TankSpec spec)
+    {
+        ArmorBox box = spec.HullArmor;
+        return new Vector3(box.Width / 2, MathF.Max(MathF.Abs(box.Bottom), MathF.Abs(box.Top)), box.Length / 2).Length();
     }
 
     /// <summary>Takes <paramref name="damage"/> off a live tank. At zero it becomes a wreck and stops where it is.</summary>

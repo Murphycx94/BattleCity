@@ -91,10 +91,30 @@ public sealed class ArmorHitTests
     public void Find_TakesTheNearerBox_AndHonoursMaxT()
     {
         var (hull, turret) = Boxes();
-        // From high in front, diving onto the hull's glacis area: the turret is behind and out of the way.
+        // Level from the front, just under the turret's bottom (1.68 m): only the hull is in the way.
         Vector3 from = new(100, 1.6f, 80), to = new(100, 1.6f, 120);
         Assert.True(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, 1f, out ArmorHit hit));
         Assert.Equal(HitPart.Hull, hit.Part);
         Assert.False(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, hit.T * 0.9f, out _));
+    }
+
+    [Fact]
+    public void Find_TakesTheTurret_WhenThePathMeetsItBeforeTheHull()
+    {
+        var (hull, turret) = Boxes();
+        // Diving steeply from high in front. The turret front (z = 99.7 − 1.45 = 98.25) is met at t = 8.25 / 16.5 = 0.5,
+        // 2.2 m up (inside its 1.68–2.8). The path would go on into the hull through its deck (y = 1.74) at
+        // t = 8.26 / 15.6 ≈ 0.5295, z ≈ 98.74; it passes over the hull's front plate (z = 96.9) at 3.48 m, too high.
+        Vector3 from = new(100, 10f, 90), to = new(100, -5.6f, 106.5f);
+        Assert.True(hull.Raycast(from, to, out float hullT, out BoxFace hullFace));
+        Assert.Equal(BoxFace.PosY, hullFace);
+        Assert.Equal(0.5295f, hullT, 1e-3f);
+
+        Assert.True(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, 1f, out ArmorHit hit));
+        Assert.Equal(HitPart.Turret, hit.Part);
+        Assert.Equal(ArmorFace.Front, hit.Face);
+        Assert.Equal(120f, hit.Thickness);
+        Assert.Equal(0.5f, hit.T, 1e-4f);
+        Assert.Equal(2.2f, hit.Point.Y, 1e-3f);
     }
 }

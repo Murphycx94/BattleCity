@@ -8,9 +8,10 @@ using Tank.Sim.Vehicles;
 namespace Tank.Sim;
 
 /// <summary>
-/// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted, each tank
-/// drives, aims, updates its aim circle and fires (in slot order) against that snapshot, then every shell flies and
-/// resolves its hits.
+/// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted; each tank drives,
+/// aims, updates its aim circle and fires (in slot order) against that snapshot, touching no other tank, so its turn
+/// doesn't depend on its slot. Then the shell phase: shots that burst in a blocked barrel go off, then every shell in
+/// flight flies and resolves its hits, each in firing order (shots of the same tick in slot order).
 /// </summary>
 public sealed partial class Simulation
 {
@@ -199,9 +200,10 @@ public sealed partial class Simulation
         _events.Add(new GameEvent(GameEventType.ShellFired, Tick, tank.Id, shell.Id, shell.Position, shell.Velocity, Ammo: shell.Ammo));
 
         // Barrel pushed into a rock or the ground: the shell bursts where the barrel meets it instead of spawning inside.
+        // It goes off in the shell phase, so every tank has had its turn before the splash, whatever the slots.
         if (launch.Blocked)
         {
-            Explode(shell, launch.BlockPoint, directSlot: -1);
+            _barrelBursts[_barrelBurstCount++] = new BarrelBurst(shell, launch.BlockPoint);
             return;
         }
         _shells[ShellCount++] = shell;

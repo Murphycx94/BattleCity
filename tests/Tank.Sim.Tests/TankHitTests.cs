@@ -88,6 +88,46 @@ public sealed class TankHitTests
     }
 
     [Fact]
+    public void ShellsLandingInTheSameTick_ResolveInFiringOrder()
+    {
+        // Two shooters 5 m either side of the duel line fire on the same tick at the same plate from the same distance, so
+        // both shells arrive in the same tick. Slot 0 fired first: its shell takes the last hit point, the other meets a wreck.
+        var sim = new Simulation(TestWorld.FlatField());
+        int first = sim.AddTank(Duel.Spec, new Vector2(95, 150), 0f);
+        int second = sim.AddTank(Duel.Spec, new Vector2(105, 150), 0f);
+        int target = sim.AddTank(Duel.Spec, Duel.TargetAt, MathF.PI);
+        sim.TankRef(target).Health = 1;
+        var plate = new Vector3(100, 1.02f, 103.1f);
+        InputCmd AimFrom(int slot)
+        {
+            var pose = Tank.Sim.Vehicles.TankPose.Compute(sim.Tanks[slot], sim.Field.Terrain);
+            var (yaw, pitch) = Angles.AimAngles(plate - pose.Trunnion(Duel.Spec));
+            return new InputCmd(0, 0, 0, yaw, pitch, false);
+        }
+        InputCmd aimFirst = AimFrom(0), aimSecond = AimFrom(1);
+        var hold = new InputCmd(0, 0, 0, MathF.PI, 0, false);
+        var events = new List<GameEvent>();
+        for (int i = 0; i < 80; i++)
+        {
+            bool fire = i == 60;
+            sim.Step(new[] { aimFirst with { Fire = fire }, aimSecond with { Fire = fire }, hold });
+            events.AddRange(sim.Events.ToArray());
+        }
+
+        GameEvent[] fired = events.Where(e => e.Type == GameEventType.ShellFired).ToArray();
+        Assert.Equal(2, fired.Length);
+        Assert.Equal(fired[0].Tick, fired[1].Tick);
+        GameEvent hit = Assert.Single(events, e => e.Type == GameEventType.TankHit);
+        Assert.Equal(first, hit.TankId);
+        GameEvent wreck = Assert.Single(events, e => e.Type == GameEventType.TankDestroyed);
+        Assert.Equal(first, wreck.TankId);
+        Assert.Equal(target, wreck.TargetTankId);
+        GameEvent puff = Assert.Single(events, e => e.Type == GameEventType.ShellExploded);   // AP stopped by the wreck
+        Assert.Equal(second, puff.TankId);
+        Assert.Equal(hit.Tick, puff.Tick);
+    }
+
+    [Fact]
     public void LastHitPoints_WreckTheTank()
     {
         var duel = new Duel(MathF.PI);
@@ -144,6 +184,9 @@ public sealed class TankHitTests
         var duel = new Duel(MathF.PI);
         duel.Sim.TankRef(duel.TargetId).Health = 1;
         duel.Fire(duel.AimAt(duel.OnTarget(HullFront)));
+        Assert.True(duel.Target.IsDestroyed);
+        duel.Sim.TankRef(duel.TargetId).Reload = 3f;   // as if it died mid-reload, aim circle open
+        duel.Sim.TankRef(duel.TargetId).Bloom = 2f;
 
         duel.Sim.Revive(duel.TargetId);
         Assert.Equal(900, duel.Target.Health);
