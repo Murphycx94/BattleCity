@@ -12,7 +12,7 @@ namespace Tank.Sim;
 /// drives, aims, updates its aim circle and fires (in slot order) against that snapshot, then every shell flies and
 /// resolves its hits.
 /// </summary>
-public sealed class Simulation
+public sealed partial class Simulation
 {
     public const int MaxTanks = 32;
     public const int MaxShells = 256;
@@ -22,6 +22,7 @@ public sealed class Simulation
     private readonly Obb2[] _footprints = new Obb2[MaxTanks];
     private readonly Obb2[] _others = new Obb2[MaxTanks];
     private readonly List<GameEvent> _events = new(16);
+    private readonly List<GameEvent> _pending = new(4);   // raised between steps (Revive); reported by the next Step
     /// <summary>Float drift in the countdown must not cost an extra tick of reload.</summary>
     private const float ReloadEpsilon = 1e-4f;
     private int _nextId = 1;
@@ -64,10 +65,13 @@ public sealed class Simulation
             throw new ArgumentException($"Expected {TankCount} inputs, got {inputs.Length}.", nameof(inputs));
         _events.Clear();
         Tick++;
+        foreach (GameEvent e in _pending) _events.Add(e with { Tick = Tick });
+        _pending.Clear();
         SnapshotFootprints();
         for (int i = 0; i < TankCount; i++)
         {
             ref TankState tank = ref _tanks[i];
+            if (tank.IsDestroyed) continue;   // wrecks don't drive, aim or fire, but still block (see SnapshotFootprints)
             InputCmd input = Sanitize(inputs[i], tank);
             float yaw = tank.Yaw, turretYaw = tank.TurretYaw;
             TankMotion.Drive(ref tank, input, Field, FootprintsExcept(i));
@@ -76,6 +80,22 @@ public sealed class Simulation
             TryFire(ref tank, input);
         }
         StepShells();
+    }
+
+    /// <summary>
+    /// Brings a wreck back where it stands: full health, aim circle closed, gun loaded (sandbox only for now). The
+    /// <see cref="GameEventType.TankRevived"/> event is reported by the next <see cref="Step"/>.
+    /// </summary>
+    public void Revive(int tankId)
+    {
+        ref TankState tank = ref TankRef(tankId);
+        tank.Health = tank.Spec.MaxHealth;
+        tank.IsDestroyed = false;
+        tank.Bloom = 0f;
+        tank.Reload = 0f;
+        tank.Speed = 0f;
+        Vector3 at = TankPose.Compute(tank, Field.Terrain).Position;
+        _pending.Add(new GameEvent(GameEventType.TankRevived, Tick, tankId, 0, at, Vector3.Zero, TargetTankId: tankId));
     }
 
     /// <summary>Refills both ammunition racks (sandbox only for now).</summary>
@@ -175,22 +195,9 @@ public sealed class Simulation
         // Barrel pushed into a rock or the ground: the shell bursts where the barrel meets it instead of spawning inside.
         if (launch.Blocked)
         {
-            _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, tank.Id, shell.Id, launch.BlockPoint, Vector3.Zero, Ammo: shell.Ammo));
+            Explode(shell, launch.BlockPoint, directSlot: -1);
             return;
         }
         _shells[ShellCount++] = shell;
-    }
-
-    private void StepShells()
-    {
-        for (int i = ShellCount - 1; i >= 0; i--)
-        {
-            ref Shell shell = ref _shells[i];
-            ShellStep step = Ballistics.Step(ref shell, Field, out RayHit rayHit);
-            if (step == ShellStep.Flying) continue;
-            if (step == ShellStep.Hit)
-                _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, shell.OwnerTankId, shell.Id, rayHit.Point, Vector3.Zero, Ammo: shell.Ammo));
-            _shells[i] = _shells[--ShellCount];
-        }
     }
 }
