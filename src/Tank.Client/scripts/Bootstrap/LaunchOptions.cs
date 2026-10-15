@@ -10,6 +10,7 @@ namespace Tank.Client.Bootstrap;
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场：自动驾驶并开火，用于截图）
 /// --camera-preset front|side|hill|spin（试驾场：固定镜头，用于截图和测帧）  --fps-log（试驾场：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场：以狙击镜视角启动，用于截图）
+/// --range-demo pen|ricochet|nopen|he|kill（试驾场：自动对靶车开炮，用于截图）  --shot-after fire|hit|kill:SECONDS（试驾场：玩家第一次开炮、第一次命中坦克或第一次击毁坦克后再过 SECONDS 秒截图）
 /// </summary>
 public sealed record LaunchOptions
 {
@@ -32,6 +33,11 @@ public sealed record LaunchOptions
     public bool FpsLog { get; init; }
     public double? FxShotDelay { get; init; }
     public bool Sniper { get; init; }
+    public string? RangeDemo { get; init; }
+
+    /// <summary>"fire", "hit" or "kill" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
+    public string? ShotAfterEvent { get; init; }
+    public double ShotAfterDelay { get; init; }
 
     public static LaunchOptions Parse(IReadOnlyList<string> args)
     {
@@ -57,6 +63,8 @@ public sealed record LaunchOptions
                 "--fps-log" => o with { FpsLog = true },
                 "--sniper" => o with { Sniper = true },
                 "--fx-shot" => o with { FxShotDelay = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double f) ? f : 0.05 },
+                "--range-demo" => o with { RangeDemo = Next() },
+                "--shot-after" => ParseShotAfter(o, Next()),
                 "--screenshot" => o with { ScreenshotPath = Next() },
                 "--screenshot-at" => o with { ScreenshotAt = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double s) ? s : o.ScreenshotAt },
                 "--quit-after" => o with { QuitAfter = double.TryParse(Next(), System.Globalization.CultureInfo.InvariantCulture, out double q) ? q : 0 },
@@ -64,5 +72,14 @@ public sealed record LaunchOptions
             };
         }
         return o;
+    }
+
+    private static LaunchOptions ParseShotAfter(LaunchOptions o, string value)
+    {
+        string[] parts = value.Split(':');
+        if (parts.Length != 2 || parts[0] is not ("fire" or "hit" or "kill")
+            || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double delay))
+            return o;
+        return o with { ShotAfterEvent = parts[0], ShotAfterDelay = delay };
     }
 }
