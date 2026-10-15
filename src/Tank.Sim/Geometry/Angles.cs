@@ -37,6 +37,10 @@ public static class Angles
 
     public static Vector2 Right(float yaw) => new(MathF.Cos(yaw), -MathF.Sin(yaw));
 
+    /// <summary>Inverse of <see cref="Forward"/>: the yaw facing along the ground direction <paramref name="direction"/> (any length), in (-π, π].</summary>
+    // `+ 0f` turns -0 into +0 so that straight back (+Z) yields +π instead of -π.
+    public static float YawOf(Vector2 direction) => MathF.Atan2(-direction.X + 0f, -direction.Y);
+
     /// <summary>Unit 3D direction for a yaw and pitch.</summary>
     public static Vector3 Direction(float yaw, float pitch)
     {

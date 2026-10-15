@@ -44,21 +44,53 @@ public class TurretTossTests
         Assert.Equal(0f, lowest, 0.02f);
     }
 
-    [Fact]
-    public void Spins_more_than_a_full_turn()
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(MathF.PI / 2)]
+    [InlineData(-MathF.PI / 2)]
+    [InlineData(MathF.PI)]
+    [InlineData(2.5f)]
+    public void Spins_more_than_a_full_turn_without_jumps(float startYaw)
     {
-        // Sample the forward direction's heading; it must sweep past a full circle.
-        float swept = 0f, last = 0f;
+        // Sample the forward direction's heading; it must sweep past a full circle in small steps.
+        float swept = 0f, last = Heading(Toss.At(0f, startYaw).Rotation);
         for (int i = 1; i <= 100; i++)
         {
-            Vector3 forward = Vector3.Transform(-Vector3.UnitZ, Toss.At(TurretToss.FlightTime * i / 100f, 0f).Rotation);
-            float heading = MathF.Atan2(-forward.X, -forward.Z);
+            float heading = Heading(Toss.At(TurretToss.FlightTime * i / 100f, startYaw).Rotation);
             float step = heading - last;
             if (step > MathF.PI) step -= MathF.Tau;
             if (step < -MathF.PI) step += MathF.Tau;
+            Assert.True(MathF.Abs(step) < 0.5f, $"heading jumps by {step} rad at sample {i}");
             swept += step;
             last = heading;
         }
         Assert.True(MathF.Abs(swept) > MathF.Tau, $"swept only {swept} rad");
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(MathF.PI / 2)]
+    [InlineData(-MathF.PI / 2)]
+    [InlineData(MathF.PI)]
+    [InlineData(2.5f)]
+    public void Landed_gun_points_away_from_the_hull(float startYaw)
+    {
+        TankSpec spec = TankCatalog.Medium;
+        var (position, rotation) = Toss.At(TurretToss.FlightTime, startYaw);
+        // As TankModel nests it: Toss (at the pivot) → TurretBody (the pivot height undone) → Gun (trunnion, GunPivotZ) →
+        // muzzle GunLength + GunPivotZ further along −Z, i.e. GunLength ahead of the turret ring.
+        var muzzleInTurret = new Vector3(0, spec.TrunnionHeight, Look.GunPivotZ - (spec.GunLength + Look.GunPivotZ));
+        Vector3 muzzle = position + Vector3.Transform(muzzleInTurret - new Vector3(0, Toss.Pivot.Y, 0), rotation);
+        Assert.True(MathF.Abs(muzzle.X) > Look.UpperHullWidth / 2, $"muzzle {muzzle} is over the hull");
+        Assert.True(muzzle.X > position.X, $"muzzle {muzzle} points back towards the hull");
+        Assert.True(muzzle.Y > -0.05f, $"muzzle {muzzle} is buried in the ground");
+        Quaternion landed = Toss.At(TurretToss.FlightTime, 0f).Rotation;
+        Assert.True(MathF.Abs(Quaternion.Dot(landed, rotation)) > 0.9999f, "the landed pose depends on the start yaw");
+    }
+
+    private static float Heading(Quaternion rotation)
+    {
+        Vector3 forward = Vector3.Transform(-Vector3.UnitZ, rotation);
+        return MathF.Atan2(-forward.X, -forward.Z);
     }
 }

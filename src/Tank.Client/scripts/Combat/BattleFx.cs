@@ -191,7 +191,7 @@ public partial class BattleFx : Node3D
 
     private sealed class ImpactSlot : ISlot
     {
-        private const float PuffScaleMin = 1.1f, PuffScaleMax = 1.9f, PuffSpeedMax = 7f;
+        private const float PuffScaleMin = 1.1f, PuffScaleMax = 1.9f, PuffSpeedMin = 3.5f, PuffSpeedMax = 7f;
 
         private readonly Flash _fireball;
         private readonly GpuParticles3D _puffs;
@@ -207,7 +207,7 @@ public partial class BattleFx : Node3D
                 EmissionSphereRadius = 0.6f,
                 Direction = Vector3.Up,
                 Spread = 75f,
-                InitialVelocityMin = 3.5f,
+                InitialVelocityMin = PuffSpeedMin,
                 InitialVelocityMax = PuffSpeedMax,
                 DampingMin = 5f,
                 DampingMax = 7f,
@@ -246,6 +246,7 @@ public partial class BattleFx : Node3D
             _puffProcess.Color = puffColor;
             _puffProcess.ScaleMin = PuffScaleMin * size;
             _puffProcess.ScaleMax = PuffScaleMax * size;
+            _puffProcess.InitialVelocityMin = PuffSpeedMin * size;
             _puffProcess.InitialVelocityMax = PuffSpeedMax * size;
             _puffs.GlobalPosition = at + Vector3.Up * 0.3f;
             _puffs.AmountRatio = (6 + GD.Randi() % 5) / (float)ImpactPuffs;

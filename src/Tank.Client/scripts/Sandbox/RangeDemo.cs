@@ -1,6 +1,7 @@
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Vehicles;
 using SN = System.Numerics;
 
 namespace Tank.Client.Sandbox;
@@ -14,8 +15,8 @@ namespace Tank.Client.Sandbox;
 public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, SN.Vector3 AimLocal, AmmoType Ammo, bool KeepFiring)
 {
     public const double FireAfter = 3.0;
-    private static readonly SN.Vector3 HullFront = new(0, 1.02f, -3.1f);
-    private static readonly SN.Vector3 TurretFront = new(0, 2.24f, -1.75f);
+    private static readonly SN.Vector3 HullFront = FrontFace(TankCatalog.Medium.HullArmor, 0f);
+    private static readonly SN.Vector3 TurretFront = FrontFace(TankCatalog.Medium.TurretArmor, TankCatalog.Medium.TurretOffset);
 
     /// <summary>pen, ricochet, nopen, he or kill; null for any other name.</summary>
     public static RangeDemo? Find(string? name) => name switch
@@ -34,14 +35,10 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
     public SN.Vector2 PlayerPosition => Spot.Position + Angles.Forward(Spot.Yaw + Angles.Deg(AngleOffFront)) * Distance;
 
     /// <summary>The player's hull faces the target.</summary>
-    public float PlayerYaw
-    {
-        get
-        {
-            SN.Vector2 toTarget = Spot.Position - PlayerPosition;
-            return MathF.Atan2(-toTarget.X, -toTarget.Y);
-        }
-    }
+    public float PlayerYaw => Angles.YawOf(Spot.Position - PlayerPosition);
+
+    /// <summary>Middle of a target armour box's front face (hull space), for a box centred <paramref name="ahead"/> m ahead of the hull origin.</summary>
+    private static SN.Vector3 FrontFace(ArmorBox box, float ahead) => new(0, box.LocalCenter.Y, -ahead - box.Length / 2);
 
     /// <summary>The aim point in world space, given the ground height under the target.</summary>
     public SN.Vector3 AimPoint(float groundY)

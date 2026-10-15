@@ -18,7 +18,6 @@ public partial class TargetRange : Node3D
 {
     public const float ReviveSeconds = 10f;
     private const float BlastSize = 1.8f;
-    private static readonly Vector3 SmokeAt = new(0, 1.7f, -0.3f);   // the open turret ring
     private static readonly TankPaint Paint = new(Palette.TargetBody, Palette.Track, Palette.TankHub);
 
     private readonly List<Target> _targets = new();
@@ -47,12 +46,10 @@ public partial class TargetRange : Node3D
             model.Build(TankCatalog.Medium, Paint);
             var smoke = new WreckSmoke();
             model.AddChild(smoke);
-            smoke.Build(SmokeAt);
+            smoke.Build(model.TurretRing);   // pours from the open turret ring
             _targets.Add(new Target { Id = id, Slot = slot, Spot = spot, Model = model, Smoke = smoke });
         }
     }
-
-    public bool IsTarget(int tankId) => Find(tankId) is not null;
 
     /// <summary>Every target holds still with its gun straight ahead. <paramref name="commands"/> starts at the first target's slot.</summary>
     public void FillInputs(Span<InputCmd> commands, int tick)

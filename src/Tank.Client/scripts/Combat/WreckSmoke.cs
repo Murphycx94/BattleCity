@@ -5,7 +5,8 @@ namespace Tank.Client.Combat;
 
 /// <summary>
 /// A steady column of dark cartoon puffs rising from a wreck: opaque toon balls that swell as they climb and shrink away
-/// (like every other puff, no transparency). Attach to the tank model; puffs are emitted in world space.
+/// (like every other puff, no transparency). Attach to the tank model; puffs are emitted in world space. Hidden while
+/// off, so a revived tank stops smoking at once instead of leaving its last puffs hanging in the air.
 /// </summary>
 public partial class WreckSmoke : Node3D
 {
@@ -19,6 +20,7 @@ public partial class WreckSmoke : Node3D
             Amount = 14,
             Lifetime = 3.2,
             Emitting = false,
+            Visible = false,
             LocalCoords = false,
             ProcessMaterial = new ParticleProcessMaterial
             {
@@ -44,9 +46,15 @@ public partial class WreckSmoke : Node3D
         AddChild(_emitter);
     }
 
+    /// <summary>On starts a fresh column; off stops it and clears the puffs already in the air.</summary>
     public bool Emitting
     {
         get => _emitter.Emitting;
-        set => _emitter.Emitting = value;
+        set
+        {
+            _emitter.Visible = value;
+            if (value) _emitter.Restart();   // clears leftover puffs (a hidden emitter isn't simulated) and starts emitting
+            else _emitter.Emitting = false;
+        }
     }
 }

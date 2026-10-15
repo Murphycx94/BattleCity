@@ -18,6 +18,7 @@ public partial class TankModel : Node3D
     private const float RimStrength = 0.25f;
     private const int PaintMode = 0, WheelMode = 1, TrackMode = 2;   // tank_toon.gdshader "mode"
     private const float CharSeconds = 0.6f;
+    private static readonly StringName CharAmount = new("char_amount");   // cached: a string would make a new StringName per call
 
     private readonly Node3D _body = new() { Name = "Body" };
     private readonly Node3D _turret = new() { Name = "Turret" };
@@ -50,6 +51,9 @@ public partial class TankModel : Node3D
 
     /// <summary>Barrel tip in world space, for muzzle effects.</summary>
     public Transform3D MuzzleTransform => _muzzle.GlobalTransform;
+
+    /// <summary>Middle of the turret ring on the hull roof, in hull space (where a wreck's smoke pours out).</summary>
+    public Vector3 TurretRing => _turretBase + Vector3.Up * _look.TurretBase;
 
     /// <param name="paint">Overrides the look's paint (the practice targets are blue-grey).</param>
     public void Build(TankSpec spec, TankPaint? paint = null)
@@ -113,7 +117,7 @@ public partial class TankModel : Node3D
     public void Apply(TankPose pose, float turretYaw, float gunPitch)
     {
         GlobalTransform = new Transform3D(new Basis(pose.Rotation.ToGodot()), pose.Position.ToGodot());
-        _turret.Rotation = new Vector3(0, turretYaw, 0);
+        if (!IsWrecked) _turret.Rotation = new Vector3(0, turretYaw, 0);   // a wreck's turret is AnimateWreck's
         _gun.Rotation = new Vector3(gunPitch, 0, 0);
     }
 
@@ -158,7 +162,7 @@ public partial class TankModel : Node3D
     {
         if (amount == _charShown) return;
         _charShown = amount;
-        foreach (ShaderMaterial material in _materials) material.SetShaderParameter("char_amount", amount);
+        foreach (ShaderMaterial material in _materials) material.SetShaderParameter(CharAmount, amount);
     }
 
     private ShaderMaterial ToonMaterial(int mode)

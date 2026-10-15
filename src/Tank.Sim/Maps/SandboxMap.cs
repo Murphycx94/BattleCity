@@ -191,11 +191,8 @@ public static class SandboxMap
     }
 
     /// <summary>A target whose hull is turned <paramref name="turnDegrees"/> to its left from facing the spawn.</summary>
-    private static TargetSpot Facing(Vector2 position, float turnDegrees)
-    {
-        Vector2 toSpawn = Spawn - position;
-        return new TargetSpot(position, Angles.Wrap(MathF.Atan2(-toSpawn.X, -toSpawn.Y) + Angles.Deg(turnDegrees)));
-    }
+    private static TargetSpot Facing(Vector2 position, float turnDegrees) =>
+        new(position, Angles.Wrap(Angles.YawOf(Spawn - position) + Angles.Deg(turnDegrees)));
 
     internal static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
     {

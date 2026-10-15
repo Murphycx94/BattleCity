@@ -1,3 +1,4 @@
+using Godot;
 using Tank.Core.World;
 using Tank.Net.Protocol;
 
@@ -79,7 +80,10 @@ public sealed record LaunchOptions
         string[] parts = value.Split(':');
         if (parts.Length != 2 || parts[0] is not ("fire" or "hit" or "kill")
             || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double delay))
+        {
+            GD.PushWarning($"Bad --shot-after '{value}'; use fire|hit|kill:SECONDS, e.g. kill:2.5.");
             return o;
+        }
         return o with { ShotAfterEvent = parts[0], ShotAfterDelay = delay };
     }
 }
