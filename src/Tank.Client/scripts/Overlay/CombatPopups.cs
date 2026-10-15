@@ -6,10 +6,11 @@ namespace Tank.Client.Overlay;
 
 /// <summary>
 /// Big outlined cartoon words where a shell strikes a tank — red "击穿！", yellow "跳弹！", grey "未击穿" — and damage
-/// numbers ("-220") floating up from the target's head (splash damage a size smaller). A verdict sits just above the
-/// point struck, so the reticle (usually right on it) doesn't cover it. Anchored in the world and drawn
-/// in screen space; pooled slots animated by <see cref="PopupCurves"/>, no tweens. When every slot is busy the oldest
-/// is reused.
+/// numbers ("-220") floating up from the target's head (splash damage a size smaller). A verdict sits level with the
+/// point struck, just right of it, so neither the reticle (usually right on that point) nor the target's health bar
+/// (over its head, drawn above the popups) covers it; a damage number starts just above the health bar. Anchored in the
+/// world and drawn in screen space; pooled slots animated by <see cref="PopupCurves"/>, no tweens. When every slot is
+/// busy the oldest is reused.
 /// </summary>
 public partial class CombatPopups : Control
 {
@@ -18,7 +19,8 @@ public partial class CombatPopups : Control
     private const int DamageSize = 38;
     private const int SplashSize = 30;
     private const float VerdictLift = 0.6f;   // a verdict drifts up this far over its life, m
-    private const float VerdictAbove = 52f;   // pixels above the point struck, clear of the reticle drawn over it
+    private const float VerdictBeside = 42f;   // pixels from the point struck to a verdict's left end, clear of the reticle's rings
+    private const float DamageAbove = 24f;     // pixels from the head point up to a damage number's middle, clear of the health bar
 
     private readonly Popup[] _popups = new Popup[Slots];
     private Camera3D? _camera;
@@ -105,10 +107,19 @@ public partial class CombatPopups : Control
             Vector3 world = p.World + Vector3.Up * rise;
             if (_camera.IsPositionBehind(world)) continue;
             float scale = p.IsDamage ? PopupCurves.DamageScale(p.Age) : PopupCurves.VerdictScale(p.Age);
-            float alpha = PopupCurves.Alpha(p.Age, life);
-            Vector2 at = _camera.UnprojectPosition(world) - new Vector2(0, p.IsDamage ? 0f : VerdictAbove);
-            DrawSetTransform(at, 0f, new Vector2(scale, scale));
-            HudStyle.DrawOutlinedCentered(this, 0f, p.Size * 0.36f, p.Text, p.Size, new Color(p.Color, alpha), HudStyle.Outline, alpha);
+            var color = new Color(p.Color, PopupCurves.Alpha(p.Age, life));
+            Vector2 at = _camera.UnprojectPosition(world);
+            float baseline = HudStyle.Baseline(0f, p.Size);
+            if (p.IsDamage)
+            {
+                DrawSetTransform(at - new Vector2(0, DamageAbove), 0f, new Vector2(scale, scale));
+                HudStyle.DrawOutlinedCentered(this, 0f, baseline, p.Text, p.Size, color);
+            }
+            else
+            {
+                DrawSetTransform(at + new Vector2(VerdictBeside, 0), 0f, new Vector2(scale, scale));   // pops out from its left end
+                HudStyle.DrawOutlined(this, new Vector2(0f, baseline), p.Text, p.Size, color);
+            }
         }
         DrawSetTransform(Vector2.Zero);
     }

@@ -11,9 +11,9 @@ using SN = System.Numerics;
 namespace Tank.Client.Sandbox;
 
 /// <summary>
-/// The sandbox's HUD layer, back to front: the sniper vignette, hit popups, the targets' health bars, the reticle and
-/// the status panel. <see cref="OnEvent"/> spawns hit verdicts and damage numbers; <see cref="Refresh"/> updates the
-/// rest once per frame.
+/// The sandbox's HUD layer, back to front: the sniper vignette, hit popups, the targets' health bars (over the popups,
+/// so a bar stays in sight while it drops), the reticle and the status panel. <see cref="OnEvent"/> spawns hit verdicts
+/// and damage numbers; <see cref="Refresh"/> updates the rest once per frame.
 /// </summary>
 public partial class SandboxHud : CanvasLayer
 {
@@ -32,10 +32,10 @@ public partial class SandboxHud : CanvasLayer
     {
         (_camera, _targets, _field) = (camera, targets, field);
         _vignette = Add(new SniperVignette());
-        _bars = Add(new HealthBars());
-        _bars.Setup(camera.Camera, targets.Count);
         _popups = Add(new CombatPopups());
         _popups.SetCamera(camera.Camera);
+        _bars = Add(new HealthBars());
+        _bars.Setup(camera.Camera, targets.Count);
         _reticle = Add(new Reticle());
         _status = Add(new StatusPanel());
     }
@@ -82,22 +82,26 @@ public partial class SandboxHud : CanvasLayer
         bool hasImpact = launch.Blocked || Ballistics.PredictImpact(launch.Origin, launch.Velocity, _field, out impact);
         Camera3D cam = _camera.Camera;
         Vector3 point = impact.ToGodot();
-        Vector2? screen = !hasImpact || cam.IsPositionBehind(point) ? null : cam.UnprojectPosition(point);
-        float zoom = _camera.Sniper ? _camera.Zoom : 0f;
-        _reticle.UpdateState(screen, 1f - player.Reload / player.Spec.ReloadTime, zoom, AimCirclePixels(player, launch.Origin, point));
+        Vector2? screen = null;
+        float circle = 0f;
+        if (hasImpact && !cam.IsPositionBehind(point))
+        {
+            screen = cam.UnprojectPosition(point);
+            circle = AimCirclePixels(player, launch.Origin, point, screen.Value);
+        }
+        _reticle.UpdateState(screen, 1f - player.Reload / player.Spec.ReloadTime, _camera.Sniper ? _camera.Zoom : 0f, circle);
     }
 
     /// <summary>
-    /// The aim circle's radius at the predicted impact, as seen by the camera: the circle is quoted at 100 m from the gun,
-    /// so it measures <c>radius × gun distance / 100</c> there, and shrinks with the camera's distance to that point.
+    /// The aim circle's radius around the predicted impact on screen: the circle is quoted at 100 m from the gun, so it
+    /// measures <c>radius × gun distance / 100</c> there; a point that far to the camera's side of the impact is projected
+    /// and its distance from <paramref name="screen"/> (the impact's own projection) measured.
     /// </summary>
-    private float AimCirclePixels(in TankState player, SN.Vector3 muzzle, Vector3 impact)
+    private float AimCirclePixels(in TankState player, SN.Vector3 muzzle, Vector3 impact, Vector2 screen)
     {
         Camera3D cam = _camera.Camera;
-        float fromCamera = cam.GlobalPosition.DistanceTo(impact);
-        if (fromCamera < 0.1f) return 0f;
         float worldRadius = Dispersion.Radius(player.Spec, player.Bloom) * SN.Vector3.Distance(muzzle, impact.ToSim()) / Dispersion.ReferenceRange;
-        float focal = GetViewport().GetVisibleRect().Size.Y / 2f / MathF.Tan(Mathf.DegToRad(cam.Fov) / 2f);
-        return worldRadius / fromCamera * focal;
+        Vector3 edge = impact + cam.GlobalBasis.X * worldRadius;
+        return cam.IsPositionBehind(edge) ? 0f : cam.UnprojectPosition(edge).DistanceTo(screen);
     }
 }

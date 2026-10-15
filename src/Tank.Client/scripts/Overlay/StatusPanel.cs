@@ -25,7 +25,8 @@ public partial class StatusPanel : Control
     private const float HealthRow = 34f, GaugeRow = 64f, ChipRow = 40f, RowGap = 4f;
     private const float BarHeight = 16f;
     private const float ChipPad = 10f, ChipGap = 12f;
-    private const float LowHealth = 0.3f;
+    private const int ChipRadius = 10;
+    private const float PanelHeight = Pad + HealthRow + RowGap + GaugeRow + RowGap + ChipRow + Pad;
 
     // Shell icon, centred on the origin; the outline is the same polygon scaled up. Built once.
     private static readonly Vector2[] ShellBody =
@@ -36,17 +37,11 @@ public partial class StatusPanel : Control
     private static readonly Vector2[] Heart = HeartShape();
     private static readonly Vector2[] HeartOutline = ScaleAll(Heart, 1.3f);
 
-    private readonly StyleBoxFlat _box = new() { BgColor = new Color(HudStyle.Panel, PanelAlpha), CornerDetail = 8, AntiAliasing = true };
-    private readonly StyleBoxFlat _barBack = new() { BgColor = HudStyle.OutlineColor, CornerDetail = 8, AntiAliasing = true };
-    private readonly StyleBoxFlat _barFill = new() { CornerDetail = 8, AntiAliasing = true };
-    private readonly StyleBoxFlat _chip = new() { BgColor = new Color(HudStyle.OutlineColor, 0.6f), CornerDetail = 6, AntiAliasing = true };
-    private readonly StyleBoxFlat _chipLoaded = new()
-    {
-        BgColor = new Color(HudStyle.Accent, 0.22f),
-        BorderColor = HudStyle.Accent,
-        CornerDetail = 6,
-        AntiAliasing = true,
-    };
+    private readonly StyleBoxFlat _box = HudStyle.RoundedBox(new Color(HudStyle.Panel, PanelAlpha), 18, 8);
+    private readonly StyleBoxFlat _barBack = HudStyle.RoundedBox(HudStyle.OutlineColor, (int)(BarHeight / 2 + 2), 8);
+    private readonly HudStyle.HealthFill _barFill = new((int)(BarHeight / 2), 8);
+    private readonly StyleBoxFlat _chip = HudStyle.RoundedBox(new Color(HudStyle.OutlineColor, 0.6f), ChipRadius, 6);
+    private readonly StyleBoxFlat _chipLoaded = LoadedChip();
 
     private int _speed;
     private int _reloadTenths;
@@ -64,12 +59,6 @@ public partial class StatusPanel : Control
 
     public override void _Ready()
     {
-        _box.SetCornerRadiusAll(18);
-        _barBack.SetCornerRadiusAll((int)(BarHeight / 2 + 2));
-        _barFill.SetCornerRadiusAll((int)(BarHeight / 2));
-        _chip.SetCornerRadiusAll(10);
-        _chipLoaded.SetCornerRadiusAll(10);
-        _chipLoaded.SetBorderWidthAll(3);
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
         // Sized for the widest content ("888 km/h", "8.8 秒", "2 高爆 88") so the panel never resizes while playing.
@@ -79,8 +68,6 @@ public partial class StatusPanel : Control
         _panelWidth = IconColumn + 28f - 14f + speedW + ColumnGap + 20f + 20f + reloadW + Pad;
         _chipWidth = HudStyle.TextWidth("2 高爆 88", ChipSize) + 2 * ChipPad;
     }
-
-    private static float PanelHeight => Pad + HealthRow + RowGap + GaugeRow + RowGap + ChipRow + Pad;
 
     /// <param name="speedKmh">Ground speed, km/h (sign ignored).</param>
     /// <param name="reloadSeconds">Seconds until the gun is ready; 0 = ready.</param>
@@ -127,16 +114,15 @@ public partial class StatusPanel : Control
         float share = Math.Clamp(_health / (float)Math.Max(_maxHealth, 1), 0f, 1f);
         if (share > 0f)
         {
-            _barFill.BgColor = share > LowHealth ? Palette.Health.ToColor() : Palette.HitPierced.ToColor();
             float width = MathF.Max(BarHeight, (barRight - barLeft) * share);   // never narrower than its round ends
-            DrawStyleBox(_barFill, new Rect2(barLeft, middle - BarHeight / 2, width, BarHeight));
+            DrawStyleBox(_barFill.For(share), new Rect2(barLeft, middle - BarHeight / 2, width, BarHeight));
         }
-        HudStyle.DrawOutlined(this, new Vector2(barRight + 10f, middle + HealthSize * 0.36f), _healthText, HealthSize, HudStyle.Text, 4);
+        HudStyle.DrawOutlined(this, new Vector2(barRight + 10f, HudStyle.Baseline(middle, HealthSize)), _healthText, HealthSize, HudStyle.Text, 4);
     }
 
     private void DrawGauges(float left, float middle)
     {
-        float baseline = middle + NumberSize * 0.36f;
+        float baseline = HudStyle.Baseline(middle, NumberSize);
         Vector2 gauge = new(left + IconColumn, middle);
         DrawSpeedometer(gauge);
         float x = gauge.X + 28f;
@@ -165,7 +151,16 @@ public partial class StatusPanel : Control
         var rect = new Rect2(x, middle - ChipRow / 2 + 2, _chipWidth, ChipRow - 4);
         DrawStyleBox(loaded ? _chipLoaded : _chip, rect);
         Color color = roundsLeft == 0 ? Palette.HitBlocked.ToColor() : loaded ? HudStyle.Accent : HudStyle.Text;
-        HudStyle.DrawOutlinedCentered(this, rect.Position.X + rect.Size.X / 2, middle + ChipSize * 0.36f, text, ChipSize, color, 4);
+        HudStyle.DrawOutlinedCentered(this, rect.Position.X + rect.Size.X / 2, HudStyle.Baseline(middle, ChipSize), text, ChipSize, color, 4);
+    }
+
+    /// <summary>The loaded round's chip: tinted and outlined in the accent colour.</summary>
+    private static StyleBoxFlat LoadedChip()
+    {
+        StyleBoxFlat box = HudStyle.RoundedBox(new Color(HudStyle.Accent, 0.22f), ChipRadius, 6);
+        box.BorderColor = HudStyle.Accent;
+        box.SetBorderWidthAll(3);
+        return box;
     }
 
     /// <summary>A half-dial with a needle.</summary>
