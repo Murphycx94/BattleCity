@@ -147,16 +147,20 @@ public sealed class SimulationTests
     }
 
     [Fact]
-    public void Reticle_PredictsTheExactImpactOfTheNextShot()
+    public void Reticle_PredictsTheCentreOfTheAimCircle_AndTheShellFollowsItsOwnPrediction()
     {
         var sim = NewSim(out _);
         var aim = TestWorld.Cmd(aimPitch: -0.05f);
-        Run(sim, aim, 30);
+        Run(sim, aim, 90);   // gun settled and the aim circle closed
         var launch = Tank.Sim.Combat.Ballistics.Aim(sim.Tanks[0], sim.Field);
         Assert.False(launch.Blocked);
-        Assert.True(Tank.Sim.Combat.Ballistics.PredictImpact(launch.Origin, launch.Velocity, sim.Field, out Vector3 predicted));
+        float radius = Tank.Sim.Combat.Dispersion.Radius(Spec, sim.Tanks[0].Bloom);
 
         var events = Run(sim, TestWorld.Cmd(aimPitch: -0.05f, fire: true), 90);
+        GameEvent fired = Assert.Single(events, e => e.Type == GameEventType.ShellFired);
+        float off = MathF.Acos(MathF.Min(1f, Vector3.Dot(Vector3.Normalize(fired.Velocity), Vector3.Normalize(launch.Velocity))));
+        Assert.True(MathF.Tan(off) * 100f <= radius * 1.001f, $"left {MathF.Tan(off) * 100f} m off at 100 m, circle {radius} m");
+        Assert.True(Tank.Sim.Combat.Ballistics.PredictImpact(fired.Position, fired.Velocity, sim.Field, out Vector3 predicted));
         GameEvent boom = Assert.Single(events, e => e.Type == GameEventType.ShellExploded);
         Assert.Equal(predicted, boom.Position);
     }

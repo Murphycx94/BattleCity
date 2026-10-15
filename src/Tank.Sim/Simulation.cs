@@ -9,7 +9,8 @@ namespace Tank.Sim;
 
 /// <summary>
 /// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted, each tank
-/// drives, aims and fires (in slot order) against that snapshot, then every shell flies and resolves its hits.
+/// drives, aims, updates its aim circle and fires (in slot order) against that snapshot, then every shell flies and
+/// resolves its hits.
 /// </summary>
 public sealed class Simulation
 {
@@ -68,16 +69,33 @@ public sealed class Simulation
         {
             ref TankState tank = ref _tanks[i];
             InputCmd input = Sanitize(inputs[i], tank);
+            float yaw = tank.Yaw, turretYaw = tank.TurretYaw;
             TankMotion.Drive(ref tank, input, Field, FootprintsExcept(i));
             TankMotion.AimGun(ref tank, input, Field.Terrain);
+            UpdateBloom(ref tank, yaw, turretYaw);
             TryFire(ref tank, input);
         }
         StepShells();
     }
 
+    /// <summary>Refills both ammunition racks (sandbox only for now).</summary>
+    public void Restock(int tankId)
+    {
+        ref TankState tank = ref TankRef(tankId);
+        tank.ApLeft = tank.Spec.Ap.Capacity;
+        tank.HeLeft = tank.Spec.He.Capacity;
+    }
+
+    internal ref TankState TankRef(int tankId)
+    {
+        for (int i = 0; i < TankCount; i++)
+            if (_tanks[i].Id == tankId) return ref _tanks[i];
+        throw new ArgumentException($"No tank {tankId}.", nameof(tankId));
+    }
+
     /// <summary>
-    /// Inputs come from the network: clamp the axes, and replace a non-finite aim with the turret's current heading
-    /// so a bad packet can't spin the turret.
+    /// Inputs come from the network: clamp the axes, replace a non-finite aim with the turret's current heading so a bad
+    /// packet can't spin the turret, and keep the loaded round if the requested one isn't a known type.
     /// </summary>
     internal static InputCmd Sanitize(in InputCmd input, in TankState tank)
     {
@@ -86,7 +104,17 @@ public sealed class Simulation
         bool aimValid = float.IsFinite(input.AimYaw) && float.IsFinite(input.AimPitch);
         float aimYaw = aimValid ? input.AimYaw : Angles.Wrap(tank.Yaw + tank.TurretYaw);
         float aimPitch = aimValid ? input.AimPitch : 0f;
-        return input with { Throttle = throttle, Steer = steer, AimYaw = aimYaw, AimPitch = aimPitch };
+        AmmoType ammo = input.Ammo is AmmoType.AP or AmmoType.HE ? input.Ammo : tank.Ammo;
+        return input with { Throttle = throttle, Steer = steer, AimYaw = aimYaw, AimPitch = aimPitch, Ammo = ammo };
+    }
+
+    /// <summary>Opens the aim circle for this tick's driving, hull turn and turret turn, or lets it settle.</summary>
+    private static void UpdateBloom(ref TankState tank, float oldYaw, float oldTurretYaw)
+    {
+        float hullRate = Angles.Wrap(tank.Yaw - oldYaw) / SimConstants.Dt;
+        float turretRate = Angles.Wrap(tank.TurretYaw - oldTurretYaw) / SimConstants.Dt;
+        float target = Dispersion.Target(tank.Spec, tank.Speed, hullRate, turretRate);
+        tank.Bloom = Dispersion.Step(tank.Bloom, target, tank.Spec.AimTime);
     }
 
     /// <summary>Every tank collides against where the others were at the start of the tick, independent of slot order.</summary>
@@ -107,28 +135,47 @@ public sealed class Simulation
         return _others.AsSpan(0, n);
     }
 
+    /// <summary>
+    /// Counts the reload down, swaps rounds if the input asks for the other type (which restarts the reload), then fires
+    /// if asked, loaded and a round of that type is left. The shell leaves inside the aim circle, which then opens.
+    /// </summary>
     private void TryFire(ref TankState tank, in InputCmd input)
     {
         tank.Reload = MathF.Max(0, tank.Reload - SimConstants.Dt);
         if (tank.Reload < ReloadEpsilon) tank.Reload = 0f;
-        if (!input.Fire || tank.Reload > 0 || ShellCount == MaxShells) return;
+        if (input.Ammo != tank.Ammo)
+        {
+            tank.Ammo = input.Ammo;
+            tank.Reload = tank.Spec.ReloadTime;
+            return;
+        }
+        if (!input.Fire || tank.Reload > 0 || tank.AmmoLeft(tank.Ammo) == 0 || ShellCount == MaxShells) return;
 
         Ballistics.Launch launch = Ballistics.Aim(tank, Field);
+        uint seed = ShotRandom.Seed(Tick, tank.Id, tank.ShotCount);
+        float speed = launch.Velocity.Length();
         var shell = new Shell
         {
             Id = _nextId++,
             OwnerTankId = tank.Id,
             Position = launch.Origin,
-            Velocity = launch.Velocity,
+            Velocity = Dispersion.Deflect(launch.Velocity, Dispersion.Radius(tank.Spec, tank.Bloom), seed) * speed,
+            Ammo = tank.Ammo,
+            Round = tank.Spec.Shell(tank.Ammo),
+            Caliber = tank.Spec.Caliber,
+            Seed = seed,
         };
         tank.Reload = tank.Spec.ReloadTime;
         tank.ShotCount++;
-        _events.Add(new GameEvent(GameEventType.ShellFired, Tick, tank.Id, shell.Id, shell.Position, shell.Velocity));
+        tank.Bloom += tank.Spec.Bloom.Fire;
+        if (tank.Ammo == AmmoType.HE) tank.HeLeft--;
+        else tank.ApLeft--;
+        _events.Add(new GameEvent(GameEventType.ShellFired, Tick, tank.Id, shell.Id, shell.Position, shell.Velocity, Ammo: shell.Ammo));
 
         // Barrel pushed into a rock or the ground: the shell bursts where the barrel meets it instead of spawning inside.
         if (launch.Blocked)
         {
-            _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, tank.Id, shell.Id, launch.BlockPoint, Vector3.Zero));
+            _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, tank.Id, shell.Id, launch.BlockPoint, Vector3.Zero, Ammo: shell.Ammo));
             return;
         }
         _shells[ShellCount++] = shell;
@@ -142,7 +189,7 @@ public sealed class Simulation
             ShellStep step = Ballistics.Step(ref shell, Field, out RayHit rayHit);
             if (step == ShellStep.Flying) continue;
             if (step == ShellStep.Hit)
-                _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, shell.OwnerTankId, shell.Id, rayHit.Point, Vector3.Zero));
+                _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, shell.OwnerTankId, shell.Id, rayHit.Point, Vector3.Zero, Ammo: shell.Ammo));
             _shells[i] = _shells[--ShellCount];
         }
     }

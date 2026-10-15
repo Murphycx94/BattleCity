@@ -1,4 +1,5 @@
 using System.Numerics;
+using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Terrain;
@@ -43,8 +44,8 @@ internal static class TestWorld
     public static TankState Tank(float x, float z, float yaw = 0f) =>
         new() { Id = 1, Spec = TankCatalog.Medium, Position = new Vector2(x, z), Yaw = yaw };
 
-    public static InputCmd Cmd(sbyte throttle = 0, sbyte steer = 0, float aimYaw = 0f, float aimPitch = 0f, bool fire = false) =>
-        new(0, throttle, steer, aimYaw, aimPitch, fire);
+    public static InputCmd Cmd(sbyte throttle = 0, sbyte steer = 0, float aimYaw = 0f, float aimPitch = 0f, bool fire = false, AmmoType ammo = AmmoType.AP) =>
+        new(0, throttle, steer, aimYaw, aimPitch, fire, ammo);
 
     public static void Drive(ref TankState t, Battlefield field, InputCmd cmd, int ticks, params Obb2[] obstacles)
     {
