@@ -9,18 +9,20 @@ public sealed class ArmorHitTests
 {
     private static readonly TankSpec Spec = TankCatalog.Medium;
 
-    /// <summary>A tank at (100, 100) on flat ground; yaw 0 faces north (−Z).</summary>
-    private static (OrientedBox Hull, OrientedBox Turret) Boxes(float yaw = 0, float turretYaw = 0, Tank.Sim.Terrain.HeightField? ground = null)
+    /// <summary>A tank (the medium unless <paramref name="spec"/> says otherwise) at (100, 100) on flat ground; yaw 0 faces north (−Z).</summary>
+    private static (OrientedBox Hull, OrientedBox Turret) Boxes(float yaw = 0, float turretYaw = 0, Tank.Sim.Terrain.HeightField? ground = null, TankSpec? spec = null)
     {
-        var tank = TestWorld.Tank(100, 100, yaw);
+        TankSpec s = spec ?? Spec;
+        var tank = TestWorld.Tank(100, 100, yaw) with { Spec = s };
         TankPose pose = TankPose.Compute(tank, ground ?? TestWorld.Flat());
-        return (pose.HullBox(Spec), pose.TurretBox(Spec, turretYaw));
+        return (pose.HullBox(s), pose.TurretBox(s, turretYaw));
     }
 
-    private static ArmorHit Shoot(Vector3 from, Vector3 to, float yaw = 0, float turretYaw = 0, Tank.Sim.Terrain.HeightField? ground = null)
+    private static ArmorHit Shoot(Vector3 from, Vector3 to, float yaw = 0, float turretYaw = 0, Tank.Sim.Terrain.HeightField? ground = null, TankSpec? spec = null)
     {
-        var (hull, turret) = Boxes(yaw, turretYaw, ground);
-        Assert.True(ArmorHit.Find(Spec.HullArmor, Spec.TurretArmor, hull, turret, from, to, 1f, out ArmorHit hit), "missed");
+        TankSpec s = spec ?? Spec;
+        var (hull, turret) = Boxes(yaw, turretYaw, ground, s);
+        Assert.True(ArmorHit.Find(s.HullArmor, s.TurretArmor, hull, turret, from, to, 1f, out ArmorHit hit), "missed");
         return hit;
     }
 
@@ -46,6 +48,33 @@ public sealed class ArmorHitTests
         Assert.Equal(ArmorFace.Front, hit.Face);
         Assert.Equal(120f, hit.Thickness);
         Assert.Equal(100 - Spec.TurretOffset - Spec.TurretArmor.Length / 2, hit.Point.Z, 1e-3f);
+    }
+
+    /// <summary>
+    /// The tank destroyer's casemate is its turret box, fixed over the hull origin: a level shot from 20 m ahead above the
+    /// hull box (top 1.3 m) strikes the casemate's front plate (z = 100 − 5.8 / 2) and counts as a turret hit.
+    /// </summary>
+    [Fact]
+    public void Casemate_IsHitAboveTheHullBox_AsTheTurret()
+    {
+        TankSpec td = TankCatalog.Td;
+        ArmorHit hit = Shoot(new Vector3(100, 1.9f, 80), new Vector3(100, 1.9f, 120), spec: td);
+        Assert.Equal(HitPart.Turret, hit.Part);
+        Assert.Equal(ArmorFace.Front, hit.Face);
+        Assert.Equal(td.TurretArmor.Armor.Front, hit.Thickness);
+        Assert.Equal(100 - td.TurretArmor.Length / 2, hit.Point.Z, 1e-3f);
+    }
+
+    /// <summary>The same shot at 0.8 m, under the casemate box (bottom 1.25 m), meets the hull's front plate (z = 100 − 6.8 / 2).</summary>
+    [Fact]
+    public void Casemate_LowShot_HitsTheHull()
+    {
+        TankSpec td = TankCatalog.Td;
+        ArmorHit hit = Shoot(new Vector3(100, 0.8f, 80), new Vector3(100, 0.8f, 120), spec: td);
+        Assert.Equal(HitPart.Hull, hit.Part);
+        Assert.Equal(ArmorFace.Front, hit.Face);
+        Assert.Equal(td.HullArmor.Armor.Front, hit.Thickness);
+        Assert.Equal(100 - td.HullArmor.Length / 2, hit.Point.Z, 1e-3f);
     }
 
     [Fact]

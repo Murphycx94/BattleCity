@@ -1,4 +1,5 @@
 using System.Numerics;
+using Tank.Sim.Geometry;
 using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 
@@ -23,6 +24,27 @@ public sealed class TankPoseTests
                 s.ReloadTime, s.Caliber, s.Dispersion, s.AimTime,
             }, v => Assert.True(v > 0, $"{s.Id} has a non-positive parameter"));
         }
+    }
+
+    [Fact]
+    public void CasemateBox_StaysFixedToTheHull_WhileTheGunTurns()
+    {
+        TankSpec casemate = Spec with { Id = "casemate", GunArc = Angles.Deg(12) };
+        TankPose pose = PoseOn(TestWorld.Flat(), yaw: 0.3f);
+        Assert.Equal(pose.TurretBox(casemate, 0f), pose.TurretBox(casemate, 0.2f));
+        Assert.NotEqual(pose.TurretBox(Spec, 0f), pose.TurretBox(Spec, 0.2f));
+    }
+
+    [Fact]
+    public void CasemateBox_IsCentredOverTheHullOrigin_NotTheGunPivot()
+    {
+        TankSpec td = TankCatalog.Td;
+        TankPose pose = PoseOn(TestWorld.Flat(), yaw: 0f);
+        OrientedBox box = pose.TurretBox(td, 0f);
+        Assert.Equal(100f, box.Center.X, 1e-4f);
+        Assert.Equal(100f, box.Center.Z, 1e-4f);
+        Assert.Equal((td.TurretArmor.Bottom + td.TurretArmor.Top) / 2, box.Center.Y, 1e-4f);
+        Assert.Equal(-td.TurretOffset, pose.Trunnion(td).Z - 100f, 1e-4f);   // the gun still pivots on the front plate
     }
 
     [Fact]

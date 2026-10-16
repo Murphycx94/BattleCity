@@ -63,7 +63,7 @@ public sealed class SandboxAutomation
         if (_options.CameraPreset is { } preset && !CameraPresets.IsKnown(preset))
             GD.PushWarning($"Unknown --camera-preset '{preset}'; use front, side, close, closerear, sprocket, hill, spin, orbit, bush or target.");
         if (_options.RangeDemo is { } demo && Demo is null)
-            GD.PushWarning($"Unknown --range-demo '{demo}'; use pen, ricochet, nopen, he or kill.");
+            GD.PushWarning($"Unknown --range-demo '{demo}'; use {string.Join(", ", RangeDemo.Names)}.");
     }
 
     /// <summary>Notes the first time the player fired, a tank was hit and a tank was destroyed.</summary>
@@ -94,7 +94,7 @@ public sealed class SandboxAutomation
     public (float Yaw, float Pitch)? CameraAngles(float tankYaw)
     {
         if (_options.AutoDrive) return (tankYaw + AutoCameraYaw, AutoCameraPitch);
-        if (Demo is { } demo) return (demo.PlayerYaw, DemoCameraPitch);
+        if (Demo is { } demo) return (demo.Bearing, DemoCameraPitch);
         return null;
     }
 

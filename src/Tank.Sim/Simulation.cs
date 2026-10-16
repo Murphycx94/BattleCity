@@ -8,11 +8,12 @@ using Tank.Sim.Vehicles;
 namespace Tank.Sim;
 
 /// <summary>
-/// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted; each tank drives,
-/// aims, updates its aim circle and fires (in slot order) against that snapshot, touching no other tank, so its turn
-/// doesn't depend on its slot (except that when the shell pool is full lower slots get to fire first, and shell ids
-/// follow slot order). Then the shell phase: shots that burst in a blocked barrel go off, then every shell in flight
-/// flies and resolves its hits, each group in firing order (shots of the same tick in slot order).
+/// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted; each tank drives
+/// (a casemate gun's hull turning by itself towards an aim outside the arc), aims, updates its aim circle and fires (in
+/// slot order) against that snapshot, touching no other tank, so its turn doesn't depend on its slot (except that when
+/// the shell pool is full lower slots get to fire first, and shell ids follow slot order). Then the shell phase: shots
+/// that burst in a blocked barrel go off, then every shell in flight flies and resolves its hits, each group in firing
+/// order (shots of the same tick in slot order).
 /// </summary>
 public sealed partial class Simulation
 {
@@ -53,18 +54,32 @@ public sealed partial class Simulation
     {
         if (TankCount == MaxTanks) throw new InvalidOperationException($"At most {MaxTanks} tanks.");
         int id = _nextId++;
-        _tanks[TankCount++] = new TankState
-        {
-            Id = id,
-            Spec = spec,
-            Position = Field.ClampToPlayable(position),
-            Yaw = Angles.Wrap(yaw),
-            Health = spec.MaxHealth,
-            ApLeft = spec.Ap.Capacity,
-            HeLeft = spec.He.Capacity,
-        };
+        _tanks[TankCount++] = Fresh(id, spec, position, yaw);
         return id;
     }
+
+    /// <summary>
+    /// Makes a tank another kind of vehicle where it stands (sandbox only for now). Its id, place, heading and shot count
+    /// stay (the shot count carries on, so each tank's shot index stays monotonic); everything else starts as on
+    /// <see cref="AddTank"/>, a wreck included. Shells already in flight keep their own round. No event: the caller knows.
+    /// </summary>
+    public void ChangeSpec(int tankId, TankSpec spec)
+    {
+        ref TankState tank = ref TankRef(tankId);
+        tank = Fresh(tank.Id, spec, tank.Position, tank.Yaw) with { ShotCount = tank.ShotCount };
+    }
+
+    /// <summary>A tank at rest with full health and ammunition, AP loaded.</summary>
+    private TankState Fresh(int id, TankSpec spec, Vector2 position, float yaw) => new()
+    {
+        Id = id,
+        Spec = spec,
+        Position = Field.ClampToPlayable(position),
+        Yaw = Angles.Wrap(yaw),
+        Health = spec.MaxHealth,
+        ApLeft = spec.Ap.Capacity,
+        HeLeft = spec.He.Capacity,
+    };
 
     /// <param name="inputs">One command per tank, in <see cref="Tanks"/> order.</param>
     public void Step(ReadOnlySpan<InputCmd> inputs)
@@ -80,7 +95,7 @@ public sealed partial class Simulation
         {
             ref TankState tank = ref _tanks[i];
             if (tank.IsDestroyed) continue;   // wrecks don't drive, aim or fire, but still block (see SnapshotFootprints)
-            InputCmd input = Sanitize(inputs[i], tank);
+            InputCmd input = TankMotion.TraverseHull(tank, Sanitize(inputs[i], tank), Field.Terrain);
             float yaw = tank.Yaw, turretYaw = tank.TurretYaw;
             TankMotion.Drive(ref tank, input, Field, FootprintsExcept(i));
             TankMotion.AimGun(ref tank, input, Field.Terrain);

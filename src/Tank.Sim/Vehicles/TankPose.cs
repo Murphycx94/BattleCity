@@ -45,9 +45,14 @@ public readonly record struct TankPose(Vector3 Position, Quaternion Rotation)
     public OrientedBox HullBox(TankSpec spec) =>
         new(Position + Vector3.Transform(spec.HullArmor.LocalCenter, Rotation), spec.HullArmor.HalfExtents, Rotation);
 
-    /// <summary>The turret's armour box in world space: centred over the turret ring, tilted with the hull, turned by <paramref name="turretYaw"/>.</summary>
+    /// <summary>
+    /// The turret's armour box in world space: centred over the turret ring, tilted with the hull, turned by
+    /// <paramref name="turretYaw"/>. A casemate is part of the hull: centred over the hull origin and never turning.
+    /// </summary>
     public OrientedBox TurretBox(TankSpec spec, float turretYaw)
     {
+        if (!spec.HasTurret)
+            return new OrientedBox(Position + Vector3.Transform(spec.TurretArmor.LocalCenter, Rotation), spec.TurretArmor.HalfExtents, Rotation);
         Vector3 ring = new(0, 0, -spec.TurretOffset);
         Quaternion rotation = Rotation * Quaternion.CreateFromAxisAngle(Vector3.UnitY, turretYaw);
         return new OrientedBox(Position + Vector3.Transform(ring + spec.TurretArmor.LocalCenter, Rotation), spec.TurretArmor.HalfExtents, rotation);

@@ -6,8 +6,8 @@ namespace Tank.Client.Cameras;
 /// Fixed viewpoints for repeatable screenshots and frame-time runs (<c>--camera-preset NAME</c>).
 /// front/side follow the tank in its own frame; hill is a fixed overview; spin turns a full circle every 10 s from the
 /// middle of the map, the worst case for draw distance; orbit circles the tank at 14 m every 12 s; bush starts the tank
-/// inside the bush patch nearest the spawn and looks at it from outside the patch; target looks at the first practice
-/// target from its front-right, on the side where its turret lands (pair it with --range-demo).
+/// inside the bush patch nearest the spawn and looks at it from outside the patch; target looks at a practice target (the
+/// range demo's, else the first) from its front-right, on the side where a thrown turret lands (pair it with --range-demo).
 /// </summary>
 public static class CameraPresets
 {
@@ -32,7 +32,8 @@ public static class CameraPresets
     public static System.Numerics.Vector2 Spawn(string? name) => name == "bush" ? Tank.Sim.Maps.SandboxMap.BushPatches[0] : Tank.Sim.Maps.SandboxMap.Spawn;
 
     /// <param name="groundAt">Terrain height at (x, z), used to keep fixed eyes above the ground.</param>
-    public static (Vector3 Eye, Vector3 Target) Get(string name, Vector3 tank, float tankYaw, double time, Func<float, float, float> groundAt)
+    /// <param name="targetIndex">The practice target the "target" preset looks at (index into <c>SandboxMap.TargetSpots</c>).</param>
+    public static (Vector3 Eye, Vector3 Target) Get(string name, Vector3 tank, float tankYaw, double time, Func<float, float, float> groundAt, int targetIndex)
     {
         var yaw = new Basis(Vector3.Up, tankYaw);
         switch (name)
@@ -50,7 +51,7 @@ public static class CameraPresets
             case "bush": // the tank parked inside a bush patch, seen from outside it (west, towards the lane)
                 return (tank + new Vector3(-16f, 3.4f, 6f), tank + TankFocus);
             case "target":
-                var spot = Tank.Sim.Maps.SandboxMap.TargetSpots[0];
+                var spot = Tank.Sim.Maps.SandboxMap.TargetSpots[targetIndex];
                 var at = new Vector3(spot.Position.X, groundAt(spot.Position.X, spot.Position.Y), spot.Position.Y);
                 var turn = new Basis(Vector3.Up, spot.Yaw);
                 return (at + turn * TargetEye, at + turn * TargetFocus);

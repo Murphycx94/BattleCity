@@ -7,16 +7,24 @@ namespace Tank.Client.Art.Meshes;
 /// the right-hand side of the walk. A point with radius 0 closes that end at the axis; an end with radius &gt; 0 gets a
 /// flat cap (bottom faces −Y, top faces +Y), so the result is always closed.
 /// Neighbouring profile edges that turn by at most <c>smoothAngleDeg</c> share a normal, sharper turns stay crisp.
+/// A <c>squareness</c> above 2 sweeps the profile round a <see cref="Superellipse"/> instead of a circle: a rounded block
+/// whose sides sit at the profile's radius; at most <see cref="MaxSquareness"/>.
 /// </summary>
 public static class Lathe
 {
     /// <summary>Radii below this count as lying on the axis.</summary>
     private const float AxisEpsilon = 1e-5f;
 
-    public static MeshData Build(IReadOnlyList<Vector2> profile, int segments, float smoothAngleDeg = 35f)
+    /// <summary>The squarest cross-section allowed: beyond it the corners look no squarer and the superellipse's powers overflow.</summary>
+    public const float MaxSquareness = 32f;
+
+    public static MeshData Build(IReadOnlyList<Vector2> profile, int segments, float smoothAngleDeg = 35f, float squareness = 2f)
     {
         if (profile.Count < 2) throw new ArgumentException("A profile needs at least 2 points.", nameof(profile));
         if (segments < 3) throw new ArgumentOutOfRangeException(nameof(segments), "Need at least 3 segments.");
+        if (!(squareness >= 2f)) throw new ArgumentOutOfRangeException(nameof(squareness), "2 is round; less would pinch the corners.");
+        if (squareness > MaxSquareness)
+            throw new ArgumentOutOfRangeException(nameof(squareness), "Beyond 32 the corners are square to the eye and the powers overflow.");
         smoothAngleDeg = Math.Clamp(smoothAngleDeg, 0f, 179.9f);
         for (int k = 0; k < profile.Count; k++)
         {
@@ -47,8 +55,8 @@ public static class Lathe
         {
             Vector2 n0 = EndNormal(edgeNormals, k, k - 1, smoothCos);
             Vector2 n1 = EndNormal(edgeNormals, k, k + 1, smoothCos);
-            int low = Ring(b, profile[k], n0, segments, (float)k / edges);
-            int high = Ring(b, profile[k + 1], n1, segments, (float)(k + 1) / edges);
+            int low = Ring(b, profile[k], n0, segments, (float)k / edges, squareness);
+            int high = Ring(b, profile[k + 1], n1, segments, (float)(k + 1) / edges, squareness);
             for (int j = 0; j < segments; j++)
             {
                 int a = low + j, bb = low + j + 1, c = high + j + 1, d = high + j;
@@ -57,8 +65,8 @@ public static class Lathe
                 else b.AddQuad(a, bb, c, d);
             }
         }
-        if (!OnAxis(profile[0])) Cap(b, profile[0], segments, top: false);
-        if (!OnAxis(profile[^1])) Cap(b, profile[^1], segments, top: true);
+        if (!OnAxis(profile[0])) Cap(b, profile[0], segments, top: false, squareness);
+        if (!OnAxis(profile[^1])) Cap(b, profile[^1], segments, top: true, squareness);
         return b.Build();
     }
 
@@ -73,21 +81,34 @@ public static class Lathe
             : normals[edge];
     }
 
-    private static int Ring(MeshBuilder b, Vector2 point, Vector2 normal, int segments, float v)
+    /// <summary>
+    /// One ring of the sweep. Off the circle the wall's normal is the section's normal tilted by the profile's: where the
+    /// section bulges out (k &gt; 1 at a corner) the same rise in the profile leans the wall less, so the profile normal's
+    /// vertical part is scaled by how far the section reaches along its own normal.
+    /// </summary>
+    private static int Ring(MeshBuilder b, Vector2 point, Vector2 normal, int segments, float v, float squareness)
     {
         int first = b.VertexCount;
         for (int j = 0; j <= segments; j++)
         {
             float angle = MathF.Tau * j / segments;
             float cos = MathF.Cos(angle), sin = -MathF.Sin(angle);
-            b.AddVertex(new Vector3(point.X * cos, point.Y, point.X * sin),
-                Vector3.Normalize(new Vector3(normal.X * cos, normal.Y, normal.X * sin)),
+            float k = 1f, nx = cos, nz = sin, rise = 1f;
+            if (squareness != 2f)
+            {
+                k = Superellipse.Radius(cos, sin, squareness);
+                Vector2 across = Superellipse.Normal(cos, sin, squareness);
+                (nx, nz) = (across.X, across.Y);
+                rise = k * (nx * cos + nz * sin);
+            }
+            b.AddVertex(new Vector3(point.X * k * cos, point.Y, point.X * k * sin),
+                Vector3.Normalize(new Vector3(normal.X * nx, normal.Y * rise, normal.X * nz)),
                 new Vector2((float)j / segments, v));
         }
         return first;
     }
 
-    private static void Cap(MeshBuilder b, Vector2 point, int segments, bool top)
+    private static void Cap(MeshBuilder b, Vector2 point, int segments, bool top, float squareness)
     {
         Vector3 normal = top ? Vector3.UnitY : -Vector3.UnitY;
         int center = b.AddVertex(new Vector3(0, point.Y, 0), normal, new Vector2(0.5f, 0.5f));
@@ -96,7 +117,8 @@ public static class Lathe
         {
             float angle = MathF.Tau * j / segments;
             float cos = MathF.Cos(angle), sin = -MathF.Sin(angle);
-            b.AddVertex(new Vector3(point.X * cos, point.Y, point.X * sin), normal, new Vector2(0.5f + cos * 0.5f, 0.5f + sin * 0.5f));
+            float k = squareness == 2f ? 1f : Superellipse.Radius(cos, sin, squareness);
+            b.AddVertex(new Vector3(point.X * k * cos, point.Y, point.X * k * sin), normal, new Vector2(0.5f + cos * 0.5f, 0.5f + sin * 0.5f));
         }
         for (int j = 0; j < segments; j++)
         {

@@ -34,10 +34,11 @@ public static class TankParts
         return Merge.Build(parts);
     }
 
-    /// <summary>Dome turret and its hatch in turret space (origin at the ring centre on the hull floor).</summary>
+    /// <summary>Dome (or rounded-block) turret and its hatch in turret space (origin at the ring centre on the hull floor).</summary>
     public static MeshData Turret(TankLook look)
     {
-        var parts = new List<(MeshData, M)> { (Lathe.Build(look.TurretProfile, DomeSides), M.CreateTranslation(0, look.TurretBase, 0)) };
+        MeshData shell = Lathe.Build(look.TurretProfile, DomeSides, squareness: look.TurretSquareness);
+        var parts = new List<(MeshData, M)> { (shell, M.CreateTranslation(0, look.TurretBase, 0)) };
         parts.AddRange(Details(look, onTurret: true));
         return Merge.Build(parts);
     }

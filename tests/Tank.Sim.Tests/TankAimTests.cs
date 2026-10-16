@@ -8,6 +8,9 @@ public sealed class TankAimTests
 {
     private static readonly TankSpec Spec = TankCatalog.Medium;
 
+    /// <summary>The medium tank's gun in a casemate, 12° each way like the tank destroyer's.</summary>
+    private static readonly TankSpec Casemate = Spec with { Id = "casemate", GunArc = Angles.Deg(12) };
+
     private static void Aim(ref TankState t, InputCmd cmd, int ticks)
     {
         var terrain = TestWorld.Flat();
@@ -23,6 +26,47 @@ public sealed class TankAimTests
         Assert.Equal(Spec.TurretTraverse * SimConstants.Dt, t.TurretYaw, 1e-4f);
         Aim(ref t, cmd, 300);
         Assert.Equal(MathF.PI / 2, t.TurretYaw, 1e-4f);
+    }
+
+    [Fact]
+    public void Turret_TurnsAllTheWayRound()
+    {
+        var t = TestWorld.Tank(100, 100);
+        Aim(ref t, TestWorld.Cmd(aimYaw: 3f), 300);
+        Assert.Equal(3f, t.TurretYaw, 1e-4f);
+    }
+
+    [Theory]
+    [InlineData(1.2f)]
+    [InlineData(-1.2f)]
+    [InlineData(3f)]
+    public void CasemateGun_StopsAtTheEdgeOfItsArc(float aimYaw)
+    {
+        var t = TestWorld.Tank(100, 100) with { Spec = Casemate };
+        Aim(ref t, TestWorld.Cmd(aimYaw: aimYaw), 300);
+        Assert.Equal(MathF.CopySign(Casemate.GunArc, aimYaw), t.TurretYaw, 1e-4f);
+    }
+
+    [Fact]
+    public void CasemateGun_NeverSwingsThroughTheRear()
+    {
+        TankSpec wide = Spec with { Id = "wide", GunArc = Angles.Deg(120) };
+        var t = TestWorld.Tank(100, 100) with { Spec = wide, TurretYaw = Angles.Deg(115) };
+        var cmd = TestWorld.Cmd(aimYaw: Angles.Deg(-115));
+        for (int i = 0; i < 300; i++)
+        {
+            Aim(ref t, cmd, 1);
+            Assert.True(MathF.Abs(t.TurretYaw) <= wide.GunArc + 1e-4f, $"tick {i}: gun at {t.TurretYaw} left the +-{wide.GunArc} arc");
+        }
+        Assert.Equal(Angles.Deg(-115), t.TurretYaw, 1e-4f);
+    }
+
+    [Fact]
+    public void CasemateGun_FollowsAnAimInsideItsArc()
+    {
+        var t = TestWorld.Tank(100, 100) with { Spec = Casemate };
+        Aim(ref t, TestWorld.Cmd(aimYaw: -0.1f), 300);
+        Assert.Equal(-0.1f, t.TurretYaw, 1e-4f);
     }
 
     [Fact]

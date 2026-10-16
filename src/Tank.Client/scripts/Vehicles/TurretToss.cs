@@ -1,3 +1,4 @@
+using Tank.Client.Art.Meshes;
 using SN = System.Numerics;
 
 namespace Tank.Client.Vehicles;
@@ -17,26 +18,37 @@ public sealed class TurretToss
     private const float MinSpinTurns = 1.25f;        // spins at least this much, then on to the landing yaw
     private const float Clearance = 0.3f;            // gap between the landed dome and the hull side
     private const float LandBehind = 0.8f;           // lands a little behind the turret ring
+    private const int SweepSamples = 72;             // directions each profile point is swept to when finding the lowest one
     private static readonly float LandingYaw = -110f * MathF.PI / 180f;  // gun out to the right (+X, yaw −90°), swung 20° back
     private static readonly float LandingRoll = 18f * MathF.PI / 180f;
     private static readonly float LandingPitch = 8f * MathF.PI / 180f;   // gun drooping towards the ground
     private static readonly float WobbleRoll = 25f * MathF.PI / 180f;
 
+    private readonly SN.Vector2[] _profile;
+    private readonly float _squareness;
+
     /// <param name="turretOffset">Turret ring centre ahead of the hull origin (<c>TankSpec.TurretOffset</c>).</param>
     public TurretToss(TankLook look, float turretOffset)
     {
-        DomeRadius = look.TurretProfile.Max(p => p.X);
+        _profile = look.TurretProfile;
+        _squareness = look.TurretSquareness;
+        float diagonal = MathF.Sqrt(0.5f);
+        DomeRadius = _profile.Max(p => p.X) * Superellipse.Radius(diagonal, diagonal, _squareness);
         Pivot = new SN.Vector3(0, look.TurretBase + PivotAboveRing, -turretOffset);
-        float rest = -LowestRimPoint(Landed(0f), DomeRadius);
+        float rest = -LowestPoint(Landed(0f));
         Landing = new SN.Vector3(look.UpperHullWidth / 2 + DomeRadius + Clearance, rest, -turretOffset + LandBehind);
     }
 
+    /// <summary>
+    /// How far the turret reaches from its axis at most: its widest profile point swept out to the cross-section's corners
+    /// (a rounded block's corners reach past its sides).
+    /// </summary>
     public float DomeRadius { get; }
 
     /// <summary>The pivot's place on an intact tank.</summary>
     public SN.Vector3 Pivot { get; }
 
-    /// <summary>The pivot's place once landed: beside the right side of the hull, the tilted dome's rim on the ground.</summary>
+    /// <summary>The pivot's place once landed: beside the right side of the hull, the tilted dome's lowest point on the ground.</summary>
     public SN.Vector3 Landing { get; }
 
     /// <summary>Pivot position and turret orientation <paramref name="time"/> s after the kill.</summary>
@@ -44,8 +56,8 @@ public sealed class TurretToss
     public (SN.Vector3 Position, SN.Quaternion Rotation) At(float time, float startYaw)
     {
         float s = Math.Clamp(time / FlightTime, 0f, 1f);
-        SN.Vector3 along = SN.Vector3.Lerp(Pivot, Landing, s);
-        float height = Pivot.Y + (Landing.Y - Pivot.Y) * s + 4f * Lift * s * (1f - s);
+        SN.Vector3 along = SN.Vector3.Lerp(Pivot, Landing, s);   // exact at both ends, so it starts and lands exactly
+        float height = along.Y + 4f * Lift * s * (1f - s);
         float spin = Spin(startYaw) * (1f - (1f - s) * (1f - s));
         float roll = LandingRoll * s + WobbleRoll * MathF.Sin(MathF.PI * s);
         var rotation = SN.Quaternion.CreateFromYawPitchRoll(startYaw + spin, -LandingPitch * s, roll);
@@ -63,15 +75,24 @@ public sealed class TurretToss
     /// <summary>The landed tilt without the final spin (yaw doesn't change heights).</summary>
     private static SN.Quaternion Landed(float yaw) => SN.Quaternion.CreateFromYawPitchRoll(yaw, -LandingPitch, LandingRoll);
 
-    /// <summary>Lowest point of the dome's base rim, relative to the pivot, for a turret turned by <paramref name="rotation"/>.</summary>
-    public static float LowestRimPoint(SN.Quaternion rotation, float radius)
+    /// <summary>
+    /// Lowest point of the turret's shell, relative to the pivot, for a turret turned by <paramref name="rotation"/>: every
+    /// profile point (radius, height above <c>TurretBase</c>) swept round the cross-section in <see cref="SweepSamples"/>
+    /// directions, as the lathe sweeps it. The whole profile counts, not just its widest radius: the flared lip's bottom
+    /// is narrower than the lip above it.
+    /// </summary>
+    public float LowestPoint(SN.Quaternion rotation)
     {
         float lowest = float.MaxValue;
-        for (int i = 0; i < 72; i++)
+        for (int i = 0; i < SweepSamples; i++)
         {
-            float a = MathF.Tau * i / 72;
-            var rim = new SN.Vector3(radius * MathF.Cos(a), -PivotAboveRing, radius * MathF.Sin(a));
-            lowest = MathF.Min(lowest, SN.Vector3.Transform(rim, rotation).Y);
+            float a = MathF.Tau * i / SweepSamples, cos = MathF.Cos(a), sin = MathF.Sin(a);
+            float k = Superellipse.Radius(cos, sin, _squareness);
+            foreach (SN.Vector2 p in _profile)
+            {
+                var point = new SN.Vector3(p.X * k * cos, p.Y - PivotAboveRing, p.X * k * sin);
+                lowest = MathF.Min(lowest, SN.Vector3.Transform(point, rotation).Y);
+            }
         }
         return lowest;
     }

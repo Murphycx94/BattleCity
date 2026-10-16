@@ -41,11 +41,26 @@ public sealed record TankLook
     public required float LowerHullRound { get; init; }
     public required float UpperHullRound { get; init; }
 
-    /// <summary>Hull-space height of the turret's flat bottom (a little below the roof, so no seam shows).</summary>
+    /// <summary>
+    /// Hull-space height of the turret's flat bottom (a little below the roof, so no seam shows). Without a turret, the
+    /// height where the gun mount rides the hull's nod (the trunnion's).
+    /// </summary>
     public required float TurretBase { get; init; }
 
-    /// <summary>Dome profile (radius, height above <see cref="TurretBase"/>) for <c>Lathe</c>, bottom to top, closed at the top.</summary>
+    /// <summary>
+    /// Dome profile (radius, height above <see cref="TurretBase"/>) for <c>Lathe</c>, bottom to top, closed at the top;
+    /// empty for a casemate (no turret: the upper hull is the casemate and only the mantlet and barrel turn).
+    /// </summary>
     public required SN.Vector2[] TurretProfile { get; init; }
+
+    /// <summary>False for a casemate tank (an empty <see cref="TurretProfile"/>): the upper hull is the casemate and only the mantlet and barrel turn.</summary>
+    public bool HasTurret => TurretProfile.Length > 0;
+
+    /// <summary>
+    /// The turret's cross-section (a <c>Superellipse</c> exponent): 2 sweeps <see cref="TurretProfile"/> round into a dome,
+    /// more squares it off into a rounded block whose sides sit at the profile's radius.
+    /// </summary>
+    public float TurretSquareness { get; init; } = 2f;
 
     /// <summary>
     /// Turret-space Z of the gun's visual pivot (the mantlet centre). The barrel is shortened by the same amount, so at

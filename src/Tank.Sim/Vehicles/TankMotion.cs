@@ -53,13 +53,41 @@ public static class TankMotion
         if (intendedLength > 0 && Vector2.Distance(t.Position, start) < intendedLength * StallRatio) t.Speed = 0f;
     }
 
-    /// <summary>Turns turret and gun toward the input's world aim direction at their rated speeds, within gun limits.</summary>
+    /// <summary>
+    /// A casemate gun can't follow an aim outside its arc, so with no steering input the hull turns towards it, exactly
+    /// as if steered by hand, until the aim is back inside the arc. Steering by hand always wins.
+    /// </summary>
+    /// <returns><paramref name="input"/>, with <c>Steer</c> set when the hull should turn by itself.</returns>
+    public static InputCmd TraverseHull(in TankState t, in InputCmd input, HeightField terrain)
+    {
+        TankSpec spec = t.Spec;
+        if (spec.HasTurret || input.Steer != 0) return input;
+        TankPose pose = TankPose.Compute(t, terrain);
+        float wantYaw = pose.ToHullAngles(Angles.Direction(input.AimYaw, input.AimPitch), t.TurretYaw).TurretYaw;
+        if (MathF.Abs(wantYaw) <= spec.GunArc) return input;
+        return input with { Steer = (sbyte)(wantYaw > 0 ? -1 : 1) };   // +yaw is to the left; Steer +1 turns right
+    }
+
+    /// <summary>
+    /// Turns turret and gun toward the input's world aim direction at their rated speeds, within gun limits; a turret takes
+    /// the shorter way round, a casemate gun stops at the edge of its arc and never swings round through the rear.
+    /// </summary>
     public static void AimGun(ref TankState t, in InputCmd input, HeightField terrain)
     {
         TankSpec spec = t.Spec;
         TankPose pose = TankPose.Compute(t, terrain);
         var (wantYaw, wantPitch) = pose.ToHullAngles(Angles.Direction(input.AimYaw, input.AimPitch), t.TurretYaw);
-        t.TurretYaw = Angles.MoveTowards(t.TurretYaw, wantYaw, spec.TurretTraverse * SimConstants.Dt);
+        float step = spec.TurretTraverse * SimConstants.Dt;
+        if (spec.HasTurret)
+        {
+            t.TurretYaw = Angles.MoveTowards(t.TurretYaw, wantYaw, step);
+        }
+        else
+        {
+            // No wrapping: the shorter way round the circle can lead through the rear, outside the arc.
+            wantYaw = System.Math.Clamp(wantYaw, -spec.GunArc, spec.GunArc);
+            t.TurretYaw = Scalar.MoveTowards(t.TurretYaw, wantYaw, step);
+        }
         float pitch = System.Math.Clamp(wantPitch, -spec.GunDepression, spec.GunElevation);
         t.GunPitch = Scalar.MoveTowards(t.GunPitch, pitch, spec.GunPitchSpeed * SimConstants.Dt);
     }

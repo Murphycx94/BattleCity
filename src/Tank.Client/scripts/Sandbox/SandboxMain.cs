@@ -15,10 +15,12 @@ namespace Tank.Client.Sandbox;
 
 /// <summary>
 /// Offline test drive: runs Tank.Sim locally at 30Hz and renders one tick behind, interpolated. The player's tank is slot 0;
-/// the practice targets (<see cref="TargetRange"/>) take the next slots. Keys: 1 AP, 2 HE, R restock. Scenery, HUD and
-/// scripted runs live in <see cref="SandboxWorld"/>, <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
-/// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --autodrive --camera-preset front|side|hill|spin|orbit|bush|target|...
-/// --fps-log --sniper --range-demo pen|ricochet|nopen|he|kill --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill:S --quit-after S]
+/// the practice targets (<see cref="TargetRange"/>) take the next slots. Keys: 1 AP, 2 HE, R restock, F1–F4 another tank
+/// (<c>TankCatalog.All</c> in order). Scenery, HUD and scripted runs live in <see cref="SandboxWorld"/>,
+/// <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
+/// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --tank light|medium|heavy|td --autodrive
+/// --camera-preset front|side|hill|spin|orbit|bush|target|... --fps-log --sniper --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn
+/// --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill:S --quit-after S]
 /// </summary>
 public partial class SandboxMain : Node3D
 {
@@ -62,7 +64,8 @@ public partial class SandboxMain : Node3D
 
         RangeDemo? demo = _automation.Demo;
         _sim = new Simulation(SandboxMap.Create());
-        _sim.AddTank(TankCatalog.Medium, demo?.PlayerPosition ?? CameraPresets.Spawn(_options.CameraPreset), demo?.PlayerYaw ?? SandboxMap.SpawnYaw);
+        TankSpec start = _options.Tank is { } id ? TankCatalog.ById(id) : TankCatalog.Medium;
+        _sim.AddTank(start, demo?.PlayerPosition ?? CameraPresets.Spawn(_options.CameraPreset), demo?.PlayerYaw ?? SandboxMap.SpawnYaw);
         _previous = _current = _sim.Tanks[0];
         _targets = Add(new TargetRange());
         _targets.Build(_sim);
@@ -72,11 +75,7 @@ public partial class SandboxMain : Node3D
 
         _world = Add(new SandboxWorld());
         _world.Build(_sim.Field, _current, CameraPresets.StreamsAroundCamera(_options.CameraPreset));
-        _tank = Add(new TankModel());
-        _tank.Build(TankCatalog.Medium);
-        _dust = new DustTrail();
-        _tank.AddChild(_dust);
-        _dust.Build(TankLooks.For(TankCatalog.Medium.Id).TrackX, TankCatalog.Medium.HullLength / 2f);
+        BuildTank(start);
         _shells = Add(new ShellViews());
         _fx = Add(new BattleFx());
         _camera = Add(new OrbitCamera());
@@ -154,6 +153,7 @@ public partial class SandboxMain : Node3D
     private void StepSimulation()
     {
         if (!HasPreset && _input.TakeRestock()) _sim.Restock(_current.Id);
+        if (_input.TakeTankPick() is int pick && pick < TankCatalog.All.Count) ChangeTank(TankCatalog.All[pick]);
         _targets.ReviveDue(_sim);
         var (throttle, steer, fire) = _input.Sample();
         var own = new InputCmd(_sim.Tick + 1, throttle, steer, _aimYaw, _aimPitch, fire, _input.Ammo);
@@ -164,6 +164,26 @@ public partial class SandboxMain : Node3D
         foreach (GameEvent e in _sim.Events) OnEvent(e);
         _previous = _current;
         _current = _sim.Tanks[0];
+    }
+
+    /// <summary>Makes the player's tank <paramref name="spec"/> where it stands, with a fresh model and dust trail and AP selected.</summary>
+    private void ChangeTank(TankSpec spec)
+    {
+        if (spec == _current.Spec) return;
+        _sim.ChangeSpec(_current.Id, spec);
+        _input.ResetAmmo();   // the new tank starts with AP loaded; still asking for HE would cost it a full reload
+        _previous = _current = _sim.Tanks[0];
+        _tank.QueueFree();   // the dust trail goes with it
+        BuildTank(spec);
+    }
+
+    private void BuildTank(TankSpec spec)
+    {
+        _tank = Add(new TankModel());
+        _tank.Build(spec);
+        _dust = new DustTrail();
+        _tank.AddChild(_dust);
+        _dust.Build(TankLooks.For(spec.Id).TrackX, spec.HullLength / 2f);
     }
 
     private void OnEvent(in GameEvent e)
@@ -214,7 +234,7 @@ public partial class SandboxMain : Node3D
         _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(tank.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), _sim.Field.Terrain);
         if (HasPreset)
         {
-            var (eye, target) = CameraPresets.Get(_options.CameraPreset!, pose.Position.ToGodot(), tank.Yaw, _time, _groundAt);
+            var (eye, target) = CameraPresets.Get(_options.CameraPreset!, pose.Position.ToGodot(), tank.Yaw, _time, _groundAt, targetIndex: _automation.Demo?.Target ?? 0);
             _camera.Camera.LookAtFromPosition(eye, target, Vector3.Up);
         }
         else if (_automation.Demo is null && !_input.FreeLook) UpdateAim(pose, tank.Spec);

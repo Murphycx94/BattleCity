@@ -10,8 +10,8 @@ namespace Tank.Client.Sandbox;
 
 /// <summary>
 /// The sandbox's scenery, built once from the battlefield: sky and sun, terrain, rocks, bushes, grass and the tree line.
-/// Each frame <see cref="Update"/> lays the grass flat under the player's tank, streams grass detail around the view and
-/// lets the bushes part around the hull.
+/// Each frame <see cref="Update"/> lays the grass flat under the player's tank (sized for whichever tank it is now),
+/// streams grass detail around the view and lets the bushes part around the hull.
 /// </summary>
 public partial class SandboxWorld : Node3D
 {
@@ -21,18 +21,14 @@ public partial class SandboxWorld : Node3D
     private GrassField _grass = null!;
     private BushField _bushes = null!;
     private SN.Vector2 _flatHalfExtents;
+    private TankSpec? _flatFor;
     private bool _streamsAroundCamera;
 
-    /// <param name="player">The player's tank: its size sets the patch of grass it flattens.</param>
+    /// <param name="player">The player's tank, for the first patch of grass streamed in.</param>
     /// <param name="streamsAroundCamera">The camera is a fixed far-away preset: stream detail around its eye, not the tank.</param>
     public void Build(Battlefield field, in TankState player, bool streamsAroundCamera)
     {
         _streamsAroundCamera = streamsAroundCamera;
-        TankSpec spec = player.Spec;
-        TankLook look = TankLooks.For(spec.Id);
-        float trackHalf = look.TrackX + look.TrackWidth / 2 + FootprintMargin;
-        _flatHalfExtents = new SN.Vector2(MathF.Max(spec.HullWidth / 2 + FootprintMargin, trackHalf), spec.HullLength / 2 + FootprintMargin);
-
         AddChild(Scenery.CreateEnvironment());
         AddChild(Scenery.CreateSun());
         Scenery.ConfigureViewport(GetViewport());
@@ -59,6 +55,7 @@ public partial class SandboxWorld : Node3D
     /// <param name="pose">The player's tank on the ground this frame.</param>
     public void Update(in TankState player, TankPose pose, Vector3 cameraPos, float delta)
     {
+        if (player.Spec != _flatFor) (_flatFor, _flatHalfExtents) = (player.Spec, FlatHalfExtents(player.Spec));
         _grass.SetTankFootprint(new Obb2(new SN.Vector2(pose.Position.X, pose.Position.Z), _flatHalfExtents, player.Yaw));
         // Detail streams around a point leaning from the tank toward the camera (so the ground right in front of a zoomed-out
         // camera is in the dense band); fixed far-away presets stream around their eye.
@@ -66,5 +63,13 @@ public partial class SandboxWorld : Node3D
         _grass.Update(_streamsAroundCamera ? cameraPos
             : new Vector3(Mathf.Lerp(tankPos.X, cameraPos.X, GrassCameraLean), 0f, Mathf.Lerp(tankPos.Z, cameraPos.Z, GrassCameraLean)));
         _bushes.Update(cameraPos, TankMotion.Footprint(player.Spec, player.Position, player.Yaw), delta);
+    }
+
+    /// <summary>Half-size of the patch a tank lays flat: its hull and tracks, plus a margin.</summary>
+    private static SN.Vector2 FlatHalfExtents(TankSpec spec)
+    {
+        TankLook look = TankLooks.For(spec.Id);
+        float trackHalf = look.TrackX + look.TrackWidth / 2 + FootprintMargin;
+        return new SN.Vector2(MathF.Max(spec.HullWidth / 2 + FootprintMargin, trackHalf), spec.HullLength / 2 + FootprintMargin);
     }
 }

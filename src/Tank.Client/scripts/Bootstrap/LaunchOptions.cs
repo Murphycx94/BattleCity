@@ -1,6 +1,7 @@
 using System.Globalization;
 using Tank.Core.World;
 using Tank.Net.Protocol;
+using Tank.Sim.Vehicles;
 
 namespace Tank.Client.Bootstrap;
 
@@ -11,7 +12,8 @@ namespace Tank.Client.Bootstrap;
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场：自动驾驶并开火，用于截图）
 /// --camera-preset front|side|hill|spin（试驾场：固定镜头，用于截图和测帧）  --fps-log（试驾场：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场：以狙击镜视角启动，用于截图）
-/// --range-demo pen|ricochet|nopen|he|kill（试驾场：自动对靶车开炮，用于截图）  --shot-after fire|hit|kill:SECONDS（试驾场：玩家第一次开炮、第一次命中坦克或第一次击毁坦克后再过 SECONDS 秒截图）
+/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn（试驾场：自动对靶车开炮，用于截图）  --shot-after fire|hit|kill:SECONDS（试驾场：玩家第一次开炮、第一次命中坦克或第一次击毁坦克后再过 SECONDS 秒截图）
+/// --tank light|medium|heavy|td（试驾场：开局的车型，默认中坦）
 /// A plain parser, free of the engine: values it can't read fall back to defaults and are listed in <see cref="Warnings"/>
 /// for the caller to report.
 /// </summary>
@@ -41,6 +43,9 @@ public sealed record LaunchOptions
     /// <summary>"fire", "hit" or "kill" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
     public string? ShotAfterEvent { get; init; }
     public double ShotAfterDelay { get; init; }
+
+    /// <summary>The <c>TankCatalog</c> id to start the sandbox in (<c>--tank</c>); null when not given or not a known tank.</summary>
+    public string? Tank { get; init; }
 
     /// <summary>One line per option value that couldn't be read (and was ignored or replaced by its default).</summary>
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
@@ -72,6 +77,7 @@ public sealed record LaunchOptions
                 "--fx-shot" => o with { FxShotDelay = Seconds("--fx-shot", Next(), 0.05, warnings) },
                 "--range-demo" => o with { RangeDemo = Next() },
                 "--shot-after" => ParseShotAfter(o, Next(), warnings),
+                "--tank" => ParseTank(o, Next(), warnings),
                 "--screenshot" => o with { ScreenshotPath = Next() },
                 "--screenshot-at" => o with { ScreenshotAt = Seconds("--screenshot-at", Next(), o.ScreenshotAt, warnings) },
                 "--quit-after" => o with { QuitAfter = Seconds("--quit-after", Next(), 0, warnings) },
@@ -98,6 +104,14 @@ public sealed record LaunchOptions
             return o;
         }
         return o with { ShotAfterEvent = parts[0], ShotAfterDelay = delay };
+    }
+
+    private static LaunchOptions ParseTank(LaunchOptions o, string value, List<string> warnings)
+    {
+        if (TankCatalog.All.Any(spec => spec.Id == value)) return o with { Tank = value };
+        // Tank stays null: SandboxMain applies the default (the medium tank) when no valid --tank was given.
+        warnings.Add($"Bad --tank '{value}'; use {string.Join("|", TankCatalog.All.Select(spec => spec.Id))}. Using medium.");
+        return o;
     }
 
     private static bool TryParseSeconds(string value, out double seconds) =>

@@ -15,6 +15,19 @@ public sealed record TankSpec
     public required float Braking { get; init; }
     public required float HullTraverse { get; init; }
     public required float TurretTraverse { get; init; }
+
+    /// <summary>A <see cref="GunArc"/> this wide is a full turret: the gun turns all the way round.</summary>
+    public const float FullTraverse = MathF.PI;
+
+    /// <summary>
+    /// How far the gun turns left or right of the hull's heading. <see cref="FullTraverse"/> for a turret; a casemate gun
+    /// (the tank destroyer) has a narrow arc and the hull turns for the rest (see <c>TankMotion.TraverseHull</c>).
+    /// </summary>
+    public required float GunArc { get; init; }
+
+    /// <summary>The gun sits in a turret (else in a casemate built into the hull).</summary>
+    public bool HasTurret => GunArc >= FullTraverse;
+
     public required float GunPitchSpeed { get; init; }
 
     /// <summary>How far the gun can point below the hull plane (positive number).</summary>
@@ -26,7 +39,7 @@ public sealed record TankSpec
     /// <summary>Gun pivot height above the hull origin.</summary>
     public required float TrunnionHeight { get; init; }
 
-    /// <summary>Turret ring centre ahead (+) of the hull centre.</summary>
+    /// <summary>Turret ring centre ahead (+) of the hull centre; for a casemate gun, its pivot.</summary>
     public required float TurretOffset { get; init; }
 
     public required float GunLength { get; init; }
@@ -40,7 +53,11 @@ public sealed record TankSpec
     /// <summary>Hull hit box, anchored at the hull origin.</summary>
     public required ArmorBox HullArmor { get; init; }
 
-    /// <summary>Turret hit box, anchored at the turret ring (<see cref="TurretOffset"/> ahead of the hull origin); turns with the turret.</summary>
+    /// <summary>
+    /// Turret hit box, anchored at the turret ring (<see cref="TurretOffset"/> ahead of the hull origin); turns with the
+    /// turret. Without a turret it is the casemate, part of the hull: anchored at the hull origin like the hull box, and
+    /// <see cref="TurretOffset"/> places only the gun's pivot.
+    /// </summary>
     public required ArmorBox TurretArmor { get; init; }
 
     public required ShellSpec Ap { get; init; }

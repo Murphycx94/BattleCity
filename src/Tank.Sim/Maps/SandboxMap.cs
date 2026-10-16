@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Geometry;
 using Tank.Sim.Terrain;
+using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Maps;
 
@@ -59,17 +60,18 @@ public static class SandboxMap
 
     /// <summary>
     /// Six practice targets, hand-placed on flat open ground 30–200 m from the spawn, clear of rocks, bushes and the
-    /// spawn-to-hill lane. Seen from the spawn they show, in order: the front, the side, a 45° angle, the rear, a front
-    /// half hidden behind a rock, and a front far away (180–200 m).
+    /// spawn-to-hill lane, all four kinds of tank among them. Seen from the spawn they show, in order: a medium tank's
+    /// front (most range demos shoot this one), a heavy tank's side, a light tank at 45°, a tank destroyer's rear, a medium
+    /// tank's front half hidden behind a rock, and a heavy tank's front far away (180–200 m).
     /// </summary>
     public static readonly IReadOnlyList<TargetSpot> TargetSpots = new[]
     {
-        Facing(new Vector2(160, 304), turnDegrees: 0),
-        Facing(new Vector2(248, 300), turnDegrees: 90),
-        Facing(new Vector2(216, 244), turnDegrees: 45),
-        Facing(new Vector2(140, 256), turnDegrees: 180),
-        Facing(new Vector2(280, 328), turnDegrees: 0),
-        Facing(new Vector2(380, 272), turnDegrees: 0),
+        Facing(new Vector2(160, 304), turnDegrees: 0, TankCatalog.Medium),
+        Facing(new Vector2(248, 300), turnDegrees: 90, TankCatalog.Heavy),
+        Facing(new Vector2(216, 244), turnDegrees: 45, TankCatalog.Light),
+        Facing(new Vector2(140, 256), turnDegrees: 180, TankCatalog.Td),
+        Facing(new Vector2(280, 328), turnDegrees: 0, TankCatalog.Medium),
+        Facing(new Vector2(380, 272), turnDegrees: 0, TankCatalog.Heavy),
     };
 
     private static readonly TerrainGenerator.Hill[] Hills =
@@ -190,9 +192,9 @@ public static class SandboxMap
         return true;
     }
 
-    /// <summary>A target whose hull is turned <paramref name="turnDegrees"/> to its left from facing the spawn.</summary>
-    private static TargetSpot Facing(Vector2 position, float turnDegrees) =>
-        new(position, Angles.Wrap(Angles.YawOf(Spawn - position) + Angles.Deg(turnDegrees)));
+    /// <summary>A <paramref name="spec"/> target whose hull is turned <paramref name="turnDegrees"/> to its left from facing the spawn.</summary>
+    private static TargetSpot Facing(Vector2 position, float turnDegrees, TankSpec spec) =>
+        new(position, Angles.Wrap(Angles.YawOf(Spawn - position) + Angles.Deg(turnDegrees)), spec);
 
     internal static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
     {

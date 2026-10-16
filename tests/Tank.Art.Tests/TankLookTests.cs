@@ -10,6 +10,12 @@ public class TankLookTests
 {
     public static TheoryData<string> SpecIds => new(TankCatalog.All.Select(s => s.Id));
 
+    /// <summary>Tanks whose gun sits in a turning turret (the tank destroyer's is in its casemate).</summary>
+    public static TheoryData<string> TurretIds => new(TankCatalog.All.Where(s => s.HasTurret).Select(s => s.Id));
+
+    /// <summary>Tanks whose gun sits in the casemate (no turret).</summary>
+    public static TheoryData<string> CasemateIds => new(TankCatalog.All.Where(s => !s.HasTurret).Select(s => s.Id));
+
     private static float BarrelLength(TankLook look, TankSpec spec) => spec.GunLength + look.GunPivotZ;
 
     [Theory]
@@ -21,6 +27,13 @@ public class TankLookTests
 
     [Theory]
     [MemberData(nameof(SpecIds))]
+    public void Look_has_a_turret_exactly_when_the_tank_does(string specId)
+    {
+        Assert.Equal(TankCatalog.ById(specId).HasTurret, TankLooks.For(specId).HasTurret);
+    }
+
+    [Theory]
+    [MemberData(nameof(SpecIds))]
     public void Every_part_is_a_closed_outward_solid(string specId)
     {
         TankLook look = TankLooks.For(specId);
@@ -28,7 +41,6 @@ public class TankLookTests
         var parts = new Dictionary<string, MeshData>
         {
             ["hull"] = TankParts.Hull(look),
-            ["turret"] = TankParts.Turret(look),
             ["mantlet"] = TankParts.Mantlet(look),
             ["barrel"] = TankParts.Barrel(look, BarrelLength(look, spec)),
             ["muzzle"] = TankParts.Muzzle(look, BarrelLength(look, spec)),
@@ -37,6 +49,7 @@ public class TankLookTests
             ["left sprocket"] = TankParts.Sprocket(look.Sprocket.Radius, look.RoadWheelWidth, left: true),
             ["track link"] = TankParts.TrackLink(look),
         };
+        if (look.HasTurret) parts["turret"] = TankParts.Turret(look);
         foreach (var (name, mesh) in parts)
         {
             MeshAssert.Closed(mesh);
@@ -65,19 +78,21 @@ public class TankLookTests
             float z = belt.Sample(belt.Length * i / 400f).Position.X;
             Assert.InRange(MathF.Abs(z) + look.TrackThickness / 2, 0, spec.HullLength / 2 + Slack);
         }
-        Assert.True(look.TurretProfile.Max(p => p.X) <= spec.HullWidth / 2, "turret wider than the hull");
+        if (look.HasTurret) Assert.True(look.TurretProfile.Max(p => p.X) <= spec.HullWidth / 2, "turret wider than the hull");
     }
 
-    [Fact]
-    public void Paint_is_the_orange_toy_palette()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Paint_is_the_orange_toy_palette(string specId)
     {
-        Assert.Equal(new TankPaint(Palette.TankBody, Palette.Track, Palette.TankHub), TankLooks.Medium.Paint);
+        Assert.Equal(new TankPaint(Palette.TankBody, Palette.Track, Palette.TankHub), TankLooks.For(specId).Paint);   // shapes, not colours, tell them apart
     }
 
-    [Fact]
-    public void Hull_is_soft_and_round()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Hull_is_soft_and_round(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         foreach (var (profile, width, round) in new[]
                  { (look.LowerHull, look.LowerHullWidth, look.LowerHullRound), (look.UpperHull, look.UpperHullWidth, look.UpperHullRound) })
         {
@@ -88,23 +103,43 @@ public class TankLookTests
     }
 
     [Fact]
-    public void Turret_is_a_round_dome()
+    public void Medium_turret_is_a_big_dome()
     {
-        TankLook look = TankLooks.Medium;
-        Vector2[] dome = look.TurretProfile;
-        Assert.Equal(0f, dome[^1].X);                                     // closed at the top
+        Vector2[] dome = TankLooks.Medium.TurretProfile;
         Assert.InRange(dome.Max(p => p.X), 1.35f, 1.55f);
         Assert.InRange(dome[^1].Y - dome[0].Y, 1.05f, 1.25f);
-        for (int i = 1; i < dome.Length; i++) Assert.True(dome[i].Y > dome[i - 1].Y, "the dome rises all the way up");
-        MeshData shell = Lathe.Build(dome, TankParts.DomeSides);
-        Assert.True(MeshAssert.MaxCreaseDegrees(shell, minY: 0.15f) <= 35f, $"dome crease {MeshAssert.MaxCreaseDegrees(shell, minY: 0.15f):F0}°");
     }
 
     [Fact]
-    public void Barrel_and_muzzle_bulb_end_where_the_sim_puts_the_muzzle()
+    public void Heavy_turret_is_a_rounded_block()
     {
-        TankLook look = TankLooks.Medium;
-        float length = BarrelLength(look, TankCatalog.Medium);
+        TankLook look = TankLooks.Heavy;
+        Assert.True(look.TurretSquareness >= 3f, "squared off, not a dome");
+        float side = look.TurretProfile.Max(p => p.X);
+        Assert.True(look.TurretProfile.Count(p => MathF.Abs(p.X - side) < 1e-4f) >= 2, "straight sides");
+        var (min, max) = MeshAssert.Bounds(TankParts.Turret(look));
+        Assert.Equal(side, max.X, 3);   // the block's flat sides, not its corners, set its width
+        Assert.Equal(-side, min.X, 3);
+    }
+
+    [Theory]
+    [MemberData(nameof(TurretIds))]
+    public void Turret_is_a_soft_closed_dome(string specId)
+    {
+        TankLook look = TankLooks.For(specId);
+        Vector2[] dome = look.TurretProfile;
+        Assert.Equal(0f, dome[^1].X);                                     // closed at the top
+        for (int i = 1; i < dome.Length; i++) Assert.True(dome[i].Y > dome[i - 1].Y, "the dome rises all the way up");
+        MeshData shell = Lathe.Build(dome, TankParts.DomeSides, squareness: look.TurretSquareness);   // as built, corners and all
+        Assert.True(MeshAssert.MaxCreaseDegrees(shell, minY: 0.15f) <= 35f, $"dome crease {MeshAssert.MaxCreaseDegrees(shell, minY: 0.15f):F0}°");
+    }
+
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Barrel_and_muzzle_bulb_end_where_the_sim_puts_the_muzzle(string specId)
+    {
+        TankLook look = TankLooks.For(specId);
+        float length = BarrelLength(look, TankCatalog.ById(specId));
         var (barrelMin, barrelMax) = MeshAssert.Bounds(TankParts.Barrel(look, length));
         var (muzzleMin, muzzleMax) = MeshAssert.Bounds(TankParts.Muzzle(look, length));
         Assert.Equal(-length, muzzleMin.Z, 4);
@@ -116,20 +151,22 @@ public class TankLookTests
         Assert.True(look.MuzzleRadius > look.BarrelRadius * 1.2f, "a fat round bulb");
     }
 
-    [Fact]
-    public void Wheel_hubs_face_outward_on_both_sides()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Wheel_hubs_face_outward_on_both_sides(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         var (_, rightMax) = MeshAssert.Bounds(TankParts.Wheel(look.RoadWheelRadius, look.RoadWheelWidth, left: false));
         var (leftMin, _) = MeshAssert.Bounds(TankParts.Wheel(look.RoadWheelRadius, look.RoadWheelWidth, left: true));
         Assert.True(rightMax.X > look.RoadWheelWidth / 2, "right hub sticks out to +X");
         Assert.True(leftMin.X < -look.RoadWheelWidth / 2, "left hub sticks out to −X");
     }
 
-    [Fact]
-    public void Wheels_do_not_overlap_each_other()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Wheels_do_not_overlap_each_other(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         var wheels = Enumerable.Range(0, look.RoadWheelCount)
             .Select(i => new WheelSpot(look.RoadWheelZ(i), look.RoadWheelY, look.RoadWheelRadius))
             .Append(look.Sprocket).Append(look.Idler).ToArray();
@@ -141,10 +178,11 @@ public class TankLookTests
         }
     }
 
-    [Fact]
-    public void Track_sits_on_the_ground_and_runs_over_the_road_wheels()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Track_sits_on_the_ground_and_runs_over_the_road_wheels(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         var belt = new BeltPath(TankParts.TrackLoop(look));
         float lowest = float.MaxValue;
         for (int i = 0; i < 500; i++) lowest = MathF.Min(lowest, belt.Sample(belt.Length * i / 500f).Position.Y);
@@ -161,10 +199,11 @@ public class TankLookTests
     /// skirt's rounded bottom edge has already curled up a little — so no link ever shows through a gap. It stops near
     /// the road-wheel tops, so the wheels still show below it.
     /// </summary>
-    [Fact]
-    public void Side_skirts_hide_the_upper_track_run_but_not_the_road_wheels()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Side_skirts_hide_the_upper_track_run_but_not_the_road_wheels(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         var belt = new BeltPath(TankParts.TrackLoop(look));
         const float Cover = 0.01f;
         float gearOuter = MathF.Max(look.TrackX + look.TrackWidth / 2,
@@ -186,25 +225,27 @@ public class TankLookTests
         Assert.True(look.UpperHullWidth / 2 >= gearOuter, "the skirts must reach outboard of tracks and hubs");
         float skirtBottom = look.UpperHull.Min(p => p.Y);
         Assert.InRange(skirtBottom, look.RoadWheelY + 0.2f, look.RoadWheelY + look.RoadWheelRadius);
-        Assert.InRange(look.UpperHull.Max(p => p.Y) - skirtBottom, 0.7f, 0.9f);   // a fat body, not a thin plate
+        Assert.True(look.UpperHull.Max(p => p.Y) - skirtBottom >= 0.6f, "a fat body, not a thin plate");
     }
 
-    [Fact]
-    public void Lower_hull_fits_between_the_tracks()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Lower_hull_fits_between_the_tracks(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         Assert.True(look.LowerHullWidth / 2 < look.TrackX - look.TrackWidth / 2, "lower hull rubs the tracks");
     }
 
-    [Fact]
-    public void Visible_muzzle_matches_the_sim_muzzle_across_the_pitch_range()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Visible_muzzle_matches_the_sim_muzzle_across_the_pitch_range(string specId)
     {
-        TankLook look = TankLooks.Medium;
-        TankSpec spec = TankCatalog.Medium;
+        TankLook look = TankLooks.For(specId);
+        TankSpec spec = TankCatalog.ById(specId);
         var trunnion = new Vector3(0, spec.TrunnionHeight, -spec.TurretOffset);
-        for (float deg = -7; deg <= 20; deg += 1)
+        foreach (float pitch in PitchRange(spec))
         {
-            float pitch = deg * MathF.PI / 180f;
+            float deg = pitch * 180f / MathF.PI;
             var visual = trunnion + new Vector3(0, 0, look.GunPivotZ)
                 + Vector3.Transform(new Vector3(0, 0, -BarrelLength(look, spec)), Quaternion.CreateFromAxisAngle(Vector3.UnitX, pitch));
             var sim = trunnion + Tank.Sim.Geometry.Angles.Direction(0, pitch) * spec.GunLength;
@@ -212,16 +253,17 @@ public class TankLookTests
         }
     }
 
-    [Fact]
-    public void Mantlet_back_stays_buried_in_the_dome_across_the_pitch_range()
+    [Theory]
+    [MemberData(nameof(TurretIds))]
+    public void Mantlet_back_stays_buried_in_the_dome_across_the_pitch_range(string specId)
     {
-        TankLook look = TankLooks.Medium;
-        TankSpec spec = TankCatalog.Medium;
+        TankLook look = TankLooks.For(specId);
+        TankSpec spec = TankCatalog.ById(specId);
         float r = look.MantletRadius, h = look.MantletWidth / 2 - r;   // capsule: cylinder half-length h, round ends
         Assert.True(h > 0, "a capsule, wider than tall");
-        for (float deg = -7; deg <= 20; deg += 1)
+        foreach (float pitch in PitchRange(spec))
         {
-            float pitch = deg * MathF.PI / 180f;
+            float deg = pitch * 180f / MathF.PI;
             foreach (float x in new[] { -h, 0f, h })
             foreach (float back in new[] { r, 0.5f * r })
             {
@@ -239,13 +281,17 @@ public class TankLookTests
 
     /// <summary>
     /// Depressing the gun fully while the hull rocks nose-up (a shot's nod) must not push the barrel, bulb or mantlet
-    /// into the hull top. The hull nods about (0, RoadWheelY, 0); the turret is not tilted, it only follows the ring.
+    /// into the hull top. The hull nods about (0, RoadWheelY, 0); the turret is not tilted, it only follows the ring. A
+    /// casemate's ball mount, and the stub of barrel inside the ball, sit in the front plate by design: only the barrel
+    /// beyond the ball is checked, at both ends of the gun's arc as well as dead ahead (the gun yaws about the vertical
+    /// through the ball's centre; the hull top is the side profile's, so only the barrel's z matters).
     /// </summary>
-    [Fact]
-    public void Gun_and_mantlet_clear_the_hull_top_at_full_depression_while_the_hull_nods()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Gun_and_mantlet_clear_the_hull_top_at_full_depression_while_the_hull_nods(string specId)
     {
-        TankLook look = TankLooks.Medium;
-        TankSpec spec = TankCatalog.Medium;
+        TankLook look = TankLooks.For(specId);
+        TankSpec spec = TankCatalog.ById(specId);
         const float Margin = 0.01f;
         float length = BarrelLength(look, spec);
         foreach (float nod in new[] { 0f, TankAnimator.MaxNod, -TankAnimator.MaxNod })
@@ -255,31 +301,63 @@ public class TankLookTests
             var ring = new Vector3(0, look.TurretBase, -spec.TurretOffset);
             Vector3 turretShift = pivot + Vector3.Transform(ring - pivot, bodyNod) - ring;   // TankModel.Animate
             var gunPivot = new Vector3(0, spec.TrunnionHeight, -spec.TurretOffset + look.GunPivotZ) + turretShift;
-            for (float deg = -7; deg <= 0; deg += 1)
+            foreach (float yaw in look.HasTurret ? new[] { 0f } : new[] { -spec.GunArc, 0f, spec.GunArc })
+            foreach (float down in PitchRange(spec).Where(p => p <= 0))
             {
-                Quaternion pitch = Quaternion.CreateFromAxisAngle(Vector3.UnitX, deg * MathF.PI / 180f);
-                var undersides = new List<(Vector3 Point, string Name)> { (gunPivot - new Vector3(0, look.MantletRadius, 0), "mantlet") };
-                for (float d = 0; d <= length; d += 0.05f)
+                float deg = down * 180f / MathF.PI, yawDeg = yaw * 180f / MathF.PI;
+                Quaternion pitch = Quaternion.CreateFromAxisAngle(Vector3.UnitX, down), turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw);
+                var undersides = new List<(Vector3 Point, string Name)>();
+                if (look.HasTurret) undersides.Add((gunPivot - new Vector3(0, look.MantletRadius, 0), "mantlet"));
+                for (float d = look.HasTurret ? 0f : look.MantletRadius; d <= length; d += 0.05f)
                 {
                     float radius = d >= length - look.MuzzleLength ? look.MuzzleRadius : look.BarrelRadius;
-                    undersides.Add((gunPivot + Vector3.Transform(new Vector3(0, -radius, -d), pitch), d >= length - look.MuzzleLength ? "bulb" : "barrel"));
+                    Vector3 underside = Vector3.Transform(Vector3.Transform(new Vector3(0, -radius, -d), pitch), turn);   // pitched in the gun, then yawed
+                    undersides.Add((gunPivot + underside, d >= length - look.MuzzleLength ? "bulb" : "barrel"));
                 }
                 foreach (var (point, name) in undersides)
                 {
                     Vector3 inBody = pivot + Vector3.Transform(point - pivot, undo);   // into the nodding hull's own frame
                     float top = UpperEdge(look.UpperHull, inBody.Z);
                     Assert.True(inBody.Y >= top + Margin,
-                        $"{deg}° at nod {nod * 180 / MathF.PI:F0}°: {name} underside at z={inBody.Z:F2} is {top + Margin - inBody.Y:F3} m into the hull top");
+                        $"{deg}° yawed {yawDeg:F0}° at nod {nod * 180 / MathF.PI:F0}°: {name} underside at z={inBody.Z:F2} is {top + Margin - inBody.Y:F3} m into the hull top");
                 }
             }
         }
     }
 
+    /// <summary>
+    /// The tank destroyer's ball turns about its own centre (<see cref="TankLook.GunPivotZ"/> 0), so pitch and yaw leave
+    /// it where it is: the sloped front plate runs through its middle, its front sticks out and its back is buried.
+    /// </summary>
     [Fact]
-    public void Turret_rests_on_the_hull_roof_and_the_mantlet_clears_it()
+    public void Td_ball_mount_sits_half_out_of_the_front_plate()
     {
-        TankLook look = TankLooks.Medium;
-        TankSpec spec = TankCatalog.Medium;
+        TankLook look = TankLooks.Td;
+        TankSpec spec = TankCatalog.Td;
+        Assert.Equal(0f, look.GunPivotZ);   // the ball turns about its own centre, so turning moves nothing but the barrel
+        float z = -spec.TurretOffset, y = spec.TrunnionHeight, r = look.MantletRadius;
+        Assert.True(y > UpperEdge(look.UpperHull, z - r), "the ball's front is buried in the plate");
+        Assert.True(y < UpperEdge(look.UpperHull, z + r) - r * 0.5f, "the ball's back pokes out of the casemate");
+        Assert.InRange(UpperEdge(look.UpperHull, z) - y, -r * 0.5f, r * 0.5f);   // the plate runs through the ball's middle
+    }
+
+    /// <summary>
+    /// Without a turret, <see cref="TankLook.TurretBase"/> is where the gun mount rides the hull's nod: the trunnion's
+    /// height, so the ball follows the front plate it sits in.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(CasemateIds))]
+    public void Casemate_gun_mount_rides_the_nod_at_the_trunnion(string specId)
+    {
+        Assert.Equal(TankCatalog.ById(specId).TrunnionHeight, TankLooks.For(specId).TurretBase, 1e-4f);
+    }
+
+    [Theory]
+    [MemberData(nameof(TurretIds))]
+    public void Turret_rests_on_the_hull_roof_and_the_mantlet_clears_it(string specId)
+    {
+        TankLook look = TankLooks.For(specId);
+        TankSpec spec = TankCatalog.ById(specId);
         float roof = look.UpperHull.Max(p => p.Y);
         Assert.InRange(look.TurretBase, roof - 0.1f, roof);
         Assert.True(spec.TrunnionHeight - look.MantletRadius > roof, "the mantlet sinks into the hull roof");
@@ -302,10 +380,11 @@ public class TankLookTests
         Assert.True(hatch.Position.Y + hatch.Size.Y > look.TurretBase + look.TurretProfile[^1].Y, "hatch lid hidden in the dome");
     }
 
-    [Fact]
-    public void Sprocket_has_one_tooth_per_track_link_around_the_pitch_circle()
+    [Theory]
+    [MemberData(nameof(SpecIds))]
+    public void Sprocket_has_one_tooth_per_track_link_around_the_pitch_circle(string specId)
     {
-        TankLook look = TankLooks.Medium;
+        TankLook look = TankLooks.For(specId);
         float pitchRadius = look.Sprocket.Radius + look.TrackThickness / 2;
         Assert.Equal((int)MathF.Round(MathF.Tau * pitchRadius / look.LinkPitch), TankParts.SprocketTeethCount(look));
     }
@@ -334,6 +413,14 @@ public class TankLookTests
         Assert.True(hull.HasColors);
         Assert.Contains(hull.Colors, c => c.X == 0f);
         Assert.Contains(hull.Colors, c => c.X == 1f);
+    }
+
+    /// <summary>The gun's whole pitch range in 1° steps, both limits included.</summary>
+    private static IEnumerable<float> PitchRange(TankSpec spec)
+    {
+        const float Step = MathF.PI / 180f;
+        for (float pitch = -spec.GunDepression; pitch < spec.GunElevation; pitch += Step) yield return pitch;
+        yield return spec.GunElevation;
     }
 
     /// <summary>Lowest y of a convex (z, y) profile on the vertical line at <paramref name="z"/>; +∞ outside it.</summary>

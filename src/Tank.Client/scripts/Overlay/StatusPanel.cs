@@ -8,7 +8,8 @@ namespace Tank.Client.Overlay;
 /// Bottom-left rounded panel in three rows: a capsule health bar with the hit points; a speedometer icon with the speed
 /// as a big outlined number and a shell icon with the reload state ("就绪" in the accent colour, or the seconds left);
 /// and two ammo chips, "1 穿甲 40" and "2 高爆 15", the loaded one outlined in the accent colour, an empty one greyed.
-/// Icons are drawn with primitives, no image files. Redraws only when something it shows changes.
+/// The vehicle's name ("中型坦克") sits just above the panel. Icons are drawn with primitives, no image files. Redraws
+/// only when something it shows changes.
 /// </summary>
 public partial class StatusPanel : Control
 {
@@ -22,6 +23,8 @@ public partial class StatusPanel : Control
     private const int UnitSize = 20;
     private const int HealthSize = 22;
     private const int ChipSize = 22;
+    private const int NameSize = 24;
+    private const float NameGap = 10f;   // between the name's baseline and the panel's top
     private const float HealthRow = 34f, GaugeRow = 64f, ChipRow = 40f, RowGap = 4f;
     private const float BarHeight = 16f;
     private const float ChipPad = 10f, ChipGap = 12f;
@@ -50,6 +53,7 @@ public partial class StatusPanel : Control
     private string _reloadText = "就绪";
     private int _health = -1, _maxHealth = 1;
     private string _healthText = "";
+    private string _vehicle = "";
     private AmmoType _ammo;
     private int _apLeft = -1, _heLeft = -1;
     private string _apText = "", _heText = "";
@@ -67,6 +71,14 @@ public partial class StatusPanel : Control
         _shellOffset = 28f - 14f + speedW + ColumnGap + 14f;
         _panelWidth = IconColumn + 28f - 14f + speedW + ColumnGap + 20f + 20f + reloadW + Pad;
         _chipWidth = HudStyle.TextWidth("2 高爆 88", ChipSize) + 2 * ChipPad;
+    }
+
+    /// <summary>The vehicle name drawn above the panel; redraws only when it changes.</summary>
+    public void SetVehicle(string name)
+    {
+        if (name == _vehicle) return;
+        _vehicle = name;
+        QueueRedraw();
     }
 
     /// <param name="speedKmh">Ground speed, km/h (sign ignored).</param>
@@ -92,6 +104,7 @@ public partial class StatusPanel : Control
     {
         var origin = new Vector2(Margin, Size.Y - Margin - PanelHeight);
         DrawStyleBox(_box, new Rect2(origin, new Vector2(_panelWidth, PanelHeight)));
+        HudStyle.DrawOutlined(this, new Vector2(origin.X + Pad, origin.Y - NameGap), _vehicle, NameSize, HudStyle.Text, 4);
         float y = origin.Y + Pad;
         DrawHealth(origin.X, y + HealthRow / 2);
         y += HealthRow + RowGap;

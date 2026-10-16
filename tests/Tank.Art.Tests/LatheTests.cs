@@ -50,6 +50,86 @@ public class LatheTests
     }
 
     [Fact]
+    public void Squareness_makes_a_rounded_block_inside_its_square()
+    {
+        MeshData mesh = Lathe.Build(Puck, 72, squareness: 4f);
+        MeshAssert.ConvexSolid(mesh, new Vector3(0, 0.5f, 0));
+        var (min, max) = MeshAssert.Bounds(mesh);
+        Assert.Equal(new Vector3(-1, 0, -1), min, new Vector3EqualityTolerance(1e-4f));
+        Assert.Equal(new Vector3(1, 1, 1), max, new Vector3EqualityTolerance(1e-4f));
+        // Its corners reach past the round puck's: 2^¼ out along the diagonals.
+        float corner = mesh.Positions.Max(p => (MathF.Abs(p.X) + MathF.Abs(p.Z)) / MathF.Sqrt(2));
+        Assert.Equal(MathF.Pow(2f, 0.25f), corner, 3);
+    }
+
+    [Fact]
+    public void Square_wall_normals_are_square_to_the_wall()
+    {
+        MeshData mesh = Lathe.Build(Cylinder, 48, squareness: 4f);
+        for (int i = 0; i + 1 < 49; i++)   // the bottom wall ring: neighbours along the ring span the wall's tangent
+        {
+            Vector3 along = mesh.Positions[i + 1] - mesh.Positions[i];
+            Vector3 normal = (mesh.Normals[i] + mesh.Normals[i + 1]) / 2;
+            Assert.True(MathF.Abs(Vector3.Dot(Vector3.Normalize(along), Vector3.Normalize(normal))) < 0.05f, $"normal {i} is not square to the wall");
+            Assert.Equal(0f, mesh.Normals[i].Y, 4);
+        }
+    }
+
+    /// <summary>
+    /// A leaning wall is where the profile normal's vertical part, and so its rise term, matters. The cone frustum's wall
+    /// is the surface (r(t)·k(φ)·cos φ, y(t), −r(t)·k(φ)·sin φ), k the superellipse's radius (Lathe sweeps with
+    /// sin = −sin φ); each wall vertex's normal must be that surface's, the cross product of its tangents along the
+    /// profile and round the ring, taken by finite differences.
+    /// </summary>
+    [Fact]
+    public void Sloped_square_wall_normals_are_the_surface_normals()
+    {
+        const int Segments = 48;
+        const float Squareness = 4f, H = 1e-3f;
+        Vector2 bottom = new(1, 0), top = new(0.5f, 1);
+        MeshData mesh = Lathe.Build(new[] { bottom, top, new Vector2(0, 1) }, Segments, squareness: Squareness);
+        Vector3 Surface(float t, float angle)
+        {
+            Vector2 p = Vector2.Lerp(bottom, top, t);
+            float cos = MathF.Cos(angle), sin = -MathF.Sin(angle), k = Superellipse.Radius(cos, sin, Squareness);
+            return new Vector3(p.X * k * cos, p.Y, p.X * k * sin);
+        }
+        for (int ring = 0; ring < 2; ring++)   // the wall's bottom and top rings come first, Segments + 1 vertices each
+        for (int j = 0; j <= Segments; j++)
+        {
+            int i = ring * (Segments + 1) + j;
+            float angle = MathF.Tau * j / Segments;
+            Assert.Equal(Surface(ring, angle), mesh.Positions[i], new Vector3EqualityTolerance(1e-5f));
+            Vector3 alongProfile = Surface(ring + H, angle) - Surface(ring - H, angle);   // the wall is straight: exact past its ends too
+            Vector3 alongRing = Surface(ring, angle + H) - Surface(ring, angle - H);
+            Vector3 surface = Vector3.Normalize(Vector3.Cross(alongProfile, alongRing));
+            if (Vector3.Dot(surface, mesh.Positions[i] with { Y = 0 }) < 0) surface = -surface;   // outward
+            float degrees = MathF.Acos(Math.Clamp(Vector3.Dot(surface, mesh.Normals[i]), -1f, 1f)) * 180f / MathF.PI;
+            Assert.True(degrees < 1f, $"ring {ring}, vertex {j}: normal {mesh.Normals[i]} is {degrees:F2}° off the surface's {surface}");
+        }
+    }
+
+    /// <summary>Exactly 2 takes the round fast path; just above it the general superellipse path must give the same lathe.</summary>
+    [Fact]
+    public void Squareness_two_is_the_round_lathe()
+    {
+        MeshData round = Lathe.Build(Barrel, 10), squareTwo = Lathe.Build(Barrel, 10, squareness: 2f);
+        Assert.Equal(round.Positions, squareTwo.Positions);
+        Assert.Equal(round.Normals, squareTwo.Normals);
+        MeshData nearlyRound = Lathe.Build(Barrel, 10, squareness: 2.001f);
+        Assert.Equal(round.Positions, nearlyRound.Positions, new Vector3EqualityTolerance(1e-3f));
+        Assert.Equal(round.Normals, nearlyRound.Normals, new Vector3EqualityTolerance(1e-3f));
+    }
+
+    [Fact]
+    public void Squareness_is_capped_at_32()
+    {
+        MeshData squarest = Lathe.Build(Puck, 72, squareness: Lathe.MaxSquareness);
+        Assert.All(squarest.Positions.Concat(squarest.Normals), v => Assert.True(float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z), $"{v}"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Lathe.Build(Puck, 72, squareness: 33f));
+    }
+
+    [Fact]
     public void Ring_vertices_sit_at_the_profile_radius()
     {
         MeshData mesh = Lathe.Build(Barrel, 10);
@@ -103,4 +183,12 @@ public class LatheTests
         }
         return normals.Count;
     }
+}
+
+/// <summary>Component-wise comparison within a tolerance.</summary>
+internal sealed class Vector3EqualityTolerance(float tolerance) : IEqualityComparer<Vector3>
+{
+    public bool Equals(Vector3 a, Vector3 b) => MathF.Abs(a.X - b.X) <= tolerance && MathF.Abs(a.Y - b.Y) <= tolerance && MathF.Abs(a.Z - b.Z) <= tolerance;
+
+    public int GetHashCode(Vector3 v) => 0;
 }

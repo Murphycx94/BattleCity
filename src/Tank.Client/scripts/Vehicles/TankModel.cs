@@ -12,6 +12,8 @@ namespace Tank.Client.Vehicles;
 /// Body (visual nod) → Hull; Turret (a sibling of Body, so nod never tilts the gun) → Toss (pivot in the dome, moved only
 /// when the tank is wrecked) → TurretBody → TurretShell, Gun → Mantlet, Barrel (recoil: tube and bulb), Muzzle;
 /// Running gear → Wheels, Tracks. A wreck chars black and throws its turret (<see cref="TurretToss"/>) until <see cref="Restore"/>.
+/// A casemate tank (no turret) keeps the same nodes, but "Turret" carries only the gun, which turns in its ball mount,
+/// and nothing is thrown.
 /// </summary>
 public partial class TankModel : Node3D
 {
@@ -42,18 +44,21 @@ public partial class TankModel : Node3D
     private Vector3 _nodPivot;
     private Vector3 _turretBase;
     private TankPaint _paint;
-    private TurretToss _tossPath = null!;
+    private TurretToss? _tossPath;   // null without a turret
     private float _wreckTime = -1f;   // seconds since the kill; negative while intact
     private float _tossYaw;
     private float _charShown;
+
+    /// <summary>The toss pivot's height in the dome: Toss sits there and TurretBody undoes it. 0 without a turret.</summary>
+    private float TossPivotHeight => _tossPath?.Pivot.Y ?? 0f;
 
     public TankAnimator Animator { get; private set; } = null!;
 
     /// <summary>Barrel tip in world space, for muzzle effects.</summary>
     public Transform3D MuzzleTransform => _muzzle.GlobalTransform;
 
-    /// <summary>Middle of the turret ring on the hull roof, in hull space (where a wreck's smoke pours out).</summary>
-    public Vector3 TurretRing => _turretBase + Vector3.Up * _look.TurretBase;
+    /// <summary>Middle of the turret ring on the hull roof (or of a casemate's roof), in hull space: where a wreck's smoke pours out.</summary>
+    public Vector3 TurretRing => _look.HasTurret ? _turretBase + Vector3.Up * _look.TurretBase : Vector3.Up * _look.UpperHull.Max(p => p.Y);
 
     /// <param name="paint">Overrides the look's paint (the practice targets are blue-grey).</param>
     public void Build(TankSpec spec, TankPaint? paint = null)
@@ -61,7 +66,7 @@ public partial class TankModel : Node3D
         _look = TankLooks.For(spec.Id);
         _paint = paint ?? _look.Paint;
         Animator = new TankAnimator(_look.TrackX);
-        _tossPath = new TurretToss(_look, spec.TurretOffset);
+        _tossPath = _look.HasTurret ? new TurretToss(_look, spec.TurretOffset) : null;
         _nodPivot = new Vector3(0, _look.RoadWheelY, 0);
         ShaderMaterial paintMaterial = ToonMaterial(PaintMode);
         // Same paint on the gun; its origin is the trunnion, so lift it by that height for the bottom-to-top shading.
@@ -74,12 +79,12 @@ public partial class TankModel : Node3D
         _turret.Position = _turretBase;
         AddChild(_turret); // sibling of Body: the hull nods under it, but the gun line stays exactly the sim's
         // The toss pivot sits in the dome; TurretBody undoes its height, so intact the turret is exactly where it was.
-        float pivotHeight = _tossPath.Pivot.Y;
-        _toss.Position = new Vector3(0, pivotHeight, 0);
+        _toss.Position = new Vector3(0, TossPivotHeight, 0);
         _turret.AddChild(_toss);
-        _turretBody.Position = new Vector3(0, -pivotHeight, 0);
+        _turretBody.Position = new Vector3(0, -TossPivotHeight, 0);
         _toss.AddChild(_turretBody);
-        _turretBody.AddChild(new MeshInstance3D { Name = "TurretShell", Mesh = TankParts.Turret(_look).ToArrayMesh(), MaterialOverride = paintMaterial });
+        if (_look.HasTurret)
+            _turretBody.AddChild(new MeshInstance3D { Name = "TurretShell", Mesh = TankParts.Turret(_look).ToArrayMesh(), MaterialOverride = paintMaterial });
 
         _gun.Position = new Vector3(0, spec.TrunnionHeight, _look.GunPivotZ);
         _turretBody.AddChild(_gun);
@@ -99,7 +104,7 @@ public partial class TankModel : Node3D
 
     public bool IsWrecked => _wreckTime >= 0f;
 
-    /// <summary>Knocks the tank out: the turret flies off and the paint chars black over <see cref="CharSeconds"/>.</summary>
+    /// <summary>Knocks the tank out: the turret (if any) flies off and the paint chars black over <see cref="CharSeconds"/>.</summary>
     public void Wreck(float turretYaw)
     {
         _wreckTime = 0f;
@@ -110,7 +115,7 @@ public partial class TankModel : Node3D
     public void Restore()
     {
         _wreckTime = -1f;
-        _toss.Transform = new Transform3D(Basis.Identity, new Vector3(0, _tossPath.Pivot.Y, 0));
+        _toss.Transform = new Transform3D(Basis.Identity, new Vector3(0, TossPivotHeight, 0));
         SetChar(0f);
     }
 
@@ -152,9 +157,12 @@ public partial class TankModel : Node3D
     private void AnimateWreck(float delta)
     {
         _wreckTime += delta;
-        var (position, rotation) = _tossPath.At(_wreckTime, _tossYaw);
-        _turret.Transform = Transform3D.Identity;   // the toss path already includes the turret's yaw and ring offset
-        _toss.Transform = new Transform3D(new Basis(rotation.ToGodot()), position.ToGodot());
+        if (_tossPath is not null)
+        {
+            var (position, rotation) = _tossPath.At(_wreckTime, _tossYaw);
+            _turret.Transform = Transform3D.Identity;   // the toss path already includes the turret's yaw and ring offset
+            _toss.Transform = new Transform3D(new Basis(rotation.ToGodot()), position.ToGodot());
+        }
         SetChar(Mathf.Clamp(_wreckTime / CharSeconds, 0f, 1f));
     }
 

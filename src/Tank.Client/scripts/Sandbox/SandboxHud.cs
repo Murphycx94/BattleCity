@@ -59,6 +59,7 @@ public partial class SandboxHud : CanvasLayer
     public void Refresh(in TankState player)
     {
         UpdateSight(player);
+        _status.SetVehicle(player.Spec.Name);
         _status.UpdateState(player.Speed * KmhPerMs, player.Reload, player.Health, player.Spec.MaxHealth, player.Ammo, player.ApLeft, player.HeLeft);
         _vignette.Visible = _camera.Sniper;
         for (int i = 0; i < _targets.Count; i++)

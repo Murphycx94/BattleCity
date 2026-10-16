@@ -12,9 +12,9 @@ using SN = System.Numerics;
 namespace Tank.Client.Sandbox;
 
 /// <summary>
-/// The six practice targets on <see cref="SandboxMap.TargetSpots"/>: blue-grey medium tanks that sit still with their
-/// guns straight ahead. A knocked-out target blows up, throws its turret, chars and smokes; ten seconds later it is
-/// revived where it stands. Each <see cref="Sync"/> also notes every target's head point and health for the HUD.
+/// The six practice targets on <see cref="SandboxMap.TargetSpots"/>: blue-grey tanks of every kind that sit still with
+/// their guns straight ahead. A knocked-out target blows up, throws its turret (a tank destroyer has none), chars and
+/// smokes; ten seconds later it is revived where it stands. Each <see cref="Sync"/> also notes every target's head point and health for the HUD.
 /// </summary>
 public partial class TargetRange : Node3D
 {
@@ -46,13 +46,13 @@ public partial class TargetRange : Node3D
         foreach (TargetSpot spot in SandboxMap.TargetSpots)
         {
             int slot = sim.TankCount;
-            int id = sim.AddTank(TankCatalog.Medium, spot.Position, spot.Yaw);
+            int id = sim.AddTank(spot.Spec, spot.Position, spot.Yaw);
             var model = new TankModel();
             AddChild(model);
-            model.Build(TankCatalog.Medium, Paint);
+            model.Build(spot.Spec, Paint);
             var smoke = new WreckSmoke();
             model.AddChild(smoke);
-            smoke.Build(model.TurretRing);   // pours from the open turret ring
+            smoke.Build(model.TurretRing);   // pours from the open turret ring (a casemate's roof)
             var target = new Target { Id = id, Slot = slot, Spot = spot, Model = model, Smoke = smoke };
             Observe(target, sim.Tanks[slot], sim.Field.Terrain);   // heads are known before the first Sync
             _targets.Add(target);

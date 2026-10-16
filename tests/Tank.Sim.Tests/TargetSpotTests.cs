@@ -15,7 +15,7 @@ public sealed class TargetSpotTests
 
     public static TheoryData<int> Indices() => new() { 0, 1, 2, 3, 4, 5 };
 
-    private static Obb2 Hull(TargetSpot s) => TankMotion.Footprint(TankCatalog.Medium, s.Position, s.Yaw);
+    private static Obb2 Hull(TargetSpot s) => TankMotion.Footprint(s.Spec, s.Position, s.Yaw);
 
     private static IEnumerable<Vector2> Corners(Obb2 b)
     {
@@ -26,6 +26,15 @@ public sealed class TargetSpotTests
 
     [Fact]
     public void ThereAreSix() => Assert.Equal(6, Spots.Count);
+
+    [Fact]
+    public void AllFourKindsOfTankStandThere()
+    {
+        Assert.Equal(TankCatalog.All.Select(s => s.Id).Order(), Spots.Select(s => s.Spec.Id).Distinct().Order());
+    }
+
+    [Fact]
+    public void TheFrontTarget_IsAMediumTank() => Assert.Same(TankCatalog.Medium, Spots[0].Spec);   // the range demos aim at its armour
 
     [Theory]
     [MemberData(nameof(Indices))]
@@ -113,7 +122,8 @@ public sealed class TargetSpotTests
     {
         Vector2 toSpawn = Vector2.Normalize(SandboxMap.Spawn - spot.Position);
         Vector2 across = new(-toSpawn.Y, toSpawn.X);
-        foreach (float side in new[] { -1.6f, 0f, 1.6f })
+        float half = spot.Spec.HullWidth / 2;
+        foreach (float side in new[] { -half, 0f, half })
             yield return Field.Raycast(Eye(), Plate(spot.Position + across * side), out RayHit hit) ? hit : null;
     }
 
