@@ -36,6 +36,12 @@ public sealed record TankSpec
     public required float GunElevation { get; init; }
     public required float MaxClimb { get; init; }
 
+    /// <summary>
+    /// Above this speed (m/s, either way) the hull drives straight through brick walls, turning them to rubble and losing
+    /// half its speed (design §4.2: only the heavy tank, above 15 km/h). <see cref="float.PositiveInfinity"/>: it can't.
+    /// </summary>
+    public required float BrickWallRamSpeed { get; init; }
+
     /// <summary>Gun pivot height above the hull origin.</summary>
     public required float TrunnionHeight { get; init; }
 

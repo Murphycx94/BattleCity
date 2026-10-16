@@ -20,9 +20,10 @@ public static class Ballistics
 
     /// <summary>
     /// Where and how a shot of the loaded round fired now would leave the barrel, before dispersion. <see cref="Blocked"/>
-    /// when the barrel is inside a prop or the ground.
+    /// when the barrel is inside a rock, a standing wall or the ground: <see cref="BlockPoint"/> is where it goes in, and
+    /// <see cref="BlockPropId"/> what it hit (<see cref="RayHit.TerrainId"/> for the ground).
     /// </summary>
-    public readonly record struct Launch(Vector3 Origin, Vector3 Velocity, bool Blocked, Vector3 BlockPoint);
+    public readonly record struct Launch(Vector3 Origin, Vector3 Velocity, bool Blocked, Vector3 BlockPoint, int BlockPropId);
 
     public static Launch Aim(in TankState tank, Battlefield field)
     {
@@ -31,7 +32,7 @@ public static class Ballistics
         Vector3 muzzle = pose.Muzzle(tank.Spec, tank.TurretYaw, tank.GunPitch);
         Vector3 velocity = pose.GunDirection(tank.TurretYaw, tank.GunPitch) * tank.Spec.Round(tank.Ammo).Speed;
         bool blocked = field.Raycast(trunnion, muzzle, out RayHit hit);
-        return new Launch(muzzle, velocity, blocked, blocked ? hit.Point : Vector3.Zero);
+        return new Launch(muzzle, velocity, blocked, blocked ? hit.Point : Vector3.Zero, blocked ? hit.PropId : RayHit.TerrainId);
     }
 
     /// <summary>

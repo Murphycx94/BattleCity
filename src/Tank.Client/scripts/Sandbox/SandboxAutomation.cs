@@ -14,8 +14,9 @@ namespace Tank.Client.Sandbox;
 /// with --range-demo (lay the gun on a target and fire), --autodrive (drive loops, always firing) or a fixed
 /// --camera-preset (stand still). Timed steps wait for a <see cref="Moment"/>, each noted the first time it happens:
 /// the screenshot is taken a delay after the run's start (--screenshot-at), the player's first shot (--fx-shot, or
-/// --shot-after fire) or the first tank hit or kill (--shot-after hit|kill), and a range demo that fires once stops
-/// after the player's first shot. With --fx-shot, nothing before a warm-up counts. Also --fps-log and --quit-after.
+/// --shot-after fire), the first tank hit or kill (--shot-after hit|kill), or the first wall hurt or prop destroyed
+/// (--shot-after prop|down), and a range demo that fires once stops after the player's first shot. With --fx-shot,
+/// nothing before a warm-up counts. Also --fps-log and --quit-after.
 /// Moments and the delays after them are wall-clock seconds (the screenshot is of what is on screen); only a range
 /// demo's first shot is timed in simulation ticks (<see cref="RangeDemo.FireTick"/>), so the shot itself is repeatable.
 /// </summary>
@@ -30,13 +31,13 @@ public sealed class SandboxAutomation
     private const double AutoTurnThreshold = 0.5;
 
     /// <summary>What a timed step waits for.</summary>
-    private enum Moment { Start, Fire, Hit, Kill }
+    private enum Moment { Start, Fire, Hit, Kill, Prop, Down }
 
     private readonly LaunchOptions _options;
     private readonly Node _host;
     private readonly bool _standStill;
     private readonly double _countFrom;
-    private readonly double[] _firstSeen = { 0, -1, -1, -1 };   // per Moment: when it first happened, s; -1 not yet
+    private readonly double[] _firstSeen = NotSeenYet();   // per Moment: when it first happened, s; -1 not yet
     private readonly Moment _shotAfter;
     private readonly double _shotDelay;
     private readonly FrameTimeLog _frameLog = new();
@@ -61,12 +62,12 @@ public sealed class SandboxAutomation
     {
         foreach (string warning in _options.Warnings) GD.PushWarning(warning);
         if (_options.CameraPreset is { } preset && !CameraPresets.IsKnown(preset))
-            GD.PushWarning($"Unknown --camera-preset '{preset}'; use front, side, close, closerear, sprocket, hill, spin, orbit, bush or target.");
+            GD.PushWarning($"Unknown --camera-preset '{preset}'; use {string.Join(", ", CameraPresets.Names)}.");
         if (_options.RangeDemo is { } demo && Demo is null)
             GD.PushWarning($"Unknown --range-demo '{demo}'; use {string.Join(", ", RangeDemo.Names)}.");
     }
 
-    /// <summary>Notes the first time the player fired, a tank was hit and a tank was destroyed.</summary>
+    /// <summary>Notes the first time the player fired, a tank was hit or destroyed, a wall was hurt and a prop destroyed.</summary>
     public void OnEvent(in GameEvent e, int playerId, double time)
     {
         Moment? moment = e.Type switch
@@ -74,6 +75,8 @@ public sealed class SandboxAutomation
             GameEventType.ShellFired when e.TankId == playerId => Moment.Fire,
             GameEventType.TankHit => Moment.Hit,
             GameEventType.TankDestroyed => Moment.Kill,
+            GameEventType.PropDamaged => Moment.Prop,
+            GameEventType.PropDestroyed => Moment.Down,
             _ => null,
         };
         if (moment is { } m && time >= _countFrom && _firstSeen[(int)m] < 0) _firstSeen[(int)m] = time;
@@ -83,7 +86,7 @@ public sealed class SandboxAutomation
     public InputCmd Command(in InputCmd player, in TankState tank, Battlefield field, double time)
     {
         InputCmd command = player;
-        if (Demo is { } demo) command = DemoCommand(demo, player, tank, field);
+        if (Demo is { } demo) command = demo.Command(player, tank, field, hasFired: _firstSeen[(int)Moment.Fire] >= 0);
         else if (_options.AutoDrive) command = AutoDrive(player, time);
         else if (_standStill) command = player with { Throttle = 0, Steer = 0, Fire = false };
         if (_options.AutoDrive && _options.FxShotDelay is not null) command = command with { AimPitch = FxShotPitch };   // shells land in view
@@ -115,7 +118,15 @@ public sealed class SandboxAutomation
     private static (Moment After, double Delay) PlanScreenshot(LaunchOptions options)
     {
         if (options.ShotAfterEvent is { } awaited)
-            return (awaited switch { "fire" => Moment.Fire, "hit" => Moment.Hit, _ => Moment.Kill }, options.ShotAfterDelay);
+            return (awaited switch
+            {
+                "fire" => Moment.Fire,
+                "hit" => Moment.Hit,
+                "kill" => Moment.Kill,
+                "prop" => Moment.Prop,
+                "down" => Moment.Down,
+                _ => throw new InvalidOperationException($"--shot-after '{awaited}' got past LaunchOptions."),
+            }, options.ShotAfterDelay);
         if (options.FxShotDelay is { } fxDelay) return (Moment.Fire, fxDelay);
         return (Moment.Start, options.ScreenshotAt);
     }
@@ -126,15 +137,13 @@ public sealed class SandboxAutomation
         return since >= 0 && time >= since + _shotDelay;
     }
 
-    /// <summary>--range-demo: stand still, lay the gun on the demo's aim point, fire once (or keep firing) from <see cref="RangeDemo.FireTick"/> on.</summary>
-    private InputCmd DemoCommand(RangeDemo demo, in InputCmd player, in TankState tank, Battlefield field)
+    /// <summary>Every moment unseen (-1), but the start, which is at 0.</summary>
+    private static double[] NotSeenYet()
     {
-        TankPose pose = TankPose.Compute(tank, field.Terrain);
-        SN.Vector2 spot = demo.Spot.Position;
-        SN.Vector3 aim = demo.AimPoint(field.Terrain.HeightAt(spot.X, spot.Y));
-        var (yaw, pitch) = Angles.AimAngles(aim - pose.Trunnion(tank.Spec), player.AimYaw);
-        bool fire = player.Tick >= RangeDemo.FireTick && (demo.KeepFiring || _firstSeen[(int)Moment.Fire] < 0);
-        return player with { Throttle = 0, Steer = 0, AimYaw = yaw, AimPitch = pitch, Fire = fire, Ammo = demo.Ammo };
+        var seen = new double[Enum.GetValues<Moment>().Length];
+        Array.Fill(seen, -1);
+        seen[(int)Moment.Start] = 0;
+        return seen;
     }
 
     /// <summary>--autodrive: full throttle, steering right part of the time (so it drives loops), always firing.</summary>

@@ -100,3 +100,40 @@ public sealed class GeometryTests
     public void SegmentPrism_ParallelOutsideTheBox_Misses() =>
         Assert.False(Intersect.SegmentPrism(Square(0, 0), 0, 2, new Vector3(-5, 1, 3), new Vector3(5, 1, 3), out _));
 }
+
+public sealed class SegmentCylinderTests
+{
+    private static readonly Vector2 Center = new(10, 20);
+
+    [Fact]
+    public void Finds_where_a_level_segment_enters_the_side()
+    {
+        Assert.True(Intersect.SegmentCylinder(Center, 1f, 0f, 2f, new Vector3(5, 1, 20), new Vector3(15, 1, 20), out float t));
+        Assert.Equal(0.4f, t, 1e-5f);
+    }
+
+    [Theory]
+    [InlineData(1, 22)]   // beside it
+    [InlineData(3, 20)]   // over it
+    public void Misses_a_segment_that_passes_by(float y, float z) =>
+        Assert.False(Intersect.SegmentCylinder(Center, 1f, 0f, 2f, new Vector3(5, y, z), new Vector3(15, y, z), out _));
+
+    [Fact]
+    public void Misses_a_vertical_segment_outside_the_circle() =>
+        Assert.False(Intersect.SegmentCylinder(Center, 1f, 0f, 2f, new Vector3(11.5f, 6, 20), new Vector3(11.5f, -2, 20), out _));
+
+    [Fact]
+    public void Starts_at_zero_inside() =>
+        Assert.True(Intersect.SegmentCylinder(Center, 1f, 0f, 2f, new Vector3(10, 1, 20), new Vector3(15, 1, 20), out float t) && t == 0f);
+
+    [Fact]
+    public void Enters_through_the_top()
+    {
+        Assert.True(Intersect.SegmentCylinder(Center, 1f, 0f, 2f, new Vector3(10, 6, 20), new Vector3(10, -2, 20), out float t));
+        Assert.Equal(0.5f, t, 1e-5f);
+    }
+
+    [Fact]
+    public void A_short_segment_that_stops_short_misses() =>
+        Assert.False(Intersect.SegmentCylinder(Center, 1f, 0f, 2f, new Vector3(5, 1, 20), new Vector3(8.9f, 1, 20), out _));
+}

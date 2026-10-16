@@ -1,5 +1,6 @@
 using Godot;
 using Tank.Client.Cameras;
+using Tank.Client.Combat;
 using Tank.Client.Overlay;
 using Tank.Client.World;
 using Tank.Sim;
@@ -11,13 +12,17 @@ using SN = System.Numerics;
 namespace Tank.Client.Sandbox;
 
 /// <summary>
-/// The sandbox's HUD layer, back to front: the sniper vignette, hit popups, the targets' health bars (over the popups,
-/// so a bar stays in sight while it drops), the reticle and the status panel. <see cref="OnEvent"/> spawns hit verdicts
-/// and damage numbers; <see cref="Refresh"/> updates the rest once per frame.
+/// The sandbox's HUD layer, back to front: the sniper vignette, hit popups, the targets' and the damaged walls' health
+/// bars (over the popups, so a bar stays in sight while it drops), the reticle and the status panel.
+/// <see cref="OnEvent"/> spawns hit verdicts and damage numbers (over targets and walls); <see cref="Refresh"/> updates
+/// the rest once per frame. A wall's bar, smaller than a tank's and drawn on its face, shows only while it is standing
+/// and short of full hit points.
 /// </summary>
 public partial class SandboxHud : CanvasLayer
 {
     private const float KmhPerMs = 3.6f;
+    private const float WallBarBelowTop = 1f;    // a wall's bar sits on its face, this far under the top, clear of any tank's bar behind it
+    private const float WallBarWidth = 44f, WallBarHeight = 8f;   // smaller than a tank's, so the two don't read alike
 
     private OrbitCamera _camera = null!;
     private TargetRange _targets = null!;
@@ -25,6 +30,8 @@ public partial class SandboxHud : CanvasLayer
     private SniperVignette _vignette = null!;
     private CombatPopups _popups = null!;
     private HealthBars _bars = null!;
+    private HealthBars _wallBars = null!;
+    private Prop[] _walls = Array.Empty<Prop>();
     private Reticle _reticle = null!;
     private StatusPanel _status = null!;
 
@@ -36,11 +43,17 @@ public partial class SandboxHud : CanvasLayer
         _popups.SetCamera(camera.Camera);
         _bars = Add(new HealthBars());
         _bars.Setup(camera.Camera, targets.Count);
+        _walls = field.Props.Where(p => p.IsWall).ToArray();
+        _wallBars = Add(new HealthBars());
+        _wallBars.Setup(camera.Camera, _walls.Length, WallBarWidth, WallBarHeight);
         _reticle = Add(new Reticle());
         _status = Add(new StatusPanel());
     }
 
-    /// <summary>A verdict where a shell strikes a tank, and damage numbers over a target's head (other tanks are skipped).</summary>
+    /// <summary>
+    /// A verdict where a shell strikes a tank, and damage numbers over a target's head (other tanks are skipped) or on the
+    /// face of a wall that took a shell or a splash (<see cref="PropFx.IsDirectHit"/> tells them apart).
+    /// </summary>
     public void OnEvent(in GameEvent e)
     {
         switch (e.Type)
@@ -52,8 +65,15 @@ public partial class SandboxHud : CanvasLayer
             case GameEventType.SplashDamage when _targets.TryGetHead(e.TargetTankId, out Vector3 splashed):
                 _popups.Damage(splashed, e.Damage, splash: true);
                 break;
+            case GameEventType.PropDamaged:
+                Prop wall = _field.PropById(e.PropId);
+                _popups.Damage(WallHead(wall), e.Damage, splash: !e.IsDirectHit());
+                break;
         }
     }
+
+    /// <summary>Where a wall's bar and damage numbers go: on the middle of its face, a little under the top.</summary>
+    private static Vector3 WallHead(in Prop wall) => wall.Footprint.Center.Ground(wall.Top - WallBarBelowTop);
 
     /// <summary>Once per frame, after the targets have been synced: reticle, status panel, vignette and health bars.</summary>
     public void Refresh(in TankState player)
@@ -66,6 +86,11 @@ public partial class SandboxHud : CanvasLayer
         {
             var (head, health, alive) = _targets.Status(i);
             _bars.Set(i, head, health, alive);
+        }
+        for (int i = 0; i < _walls.Length; i++)
+        {
+            int left = _field.Durability(_walls[i].Id), full = _walls[i].MaxDurability;
+            _wallBars.Set(i, WallHead(_walls[i]), left / (float)full, shown: left > 0 && left < full);
         }
     }
 

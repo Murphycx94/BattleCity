@@ -6,8 +6,9 @@ using Tank.Sim.Vehicles;
 namespace Tank.Sim.Maps;
 
 /// <summary>
-/// 400m × 400m test ground: rolling noise, four hills, 80-odd big rocks, twelve wide patches of tall bushes and six
-/// practice targets. The spawn faces the big hill (north); the nearest bush patch sits beside that lane about 40 m out.
+/// 400m × 400m test ground: rolling noise, four hills, 80-odd big rocks, twelve wide patches of tall bushes, a walled
+/// yard about 40 m west of the spawn, a few walls and fences near the spawn and seven practice targets. The spawn faces
+/// the big hill (north); the nearest bush patch sits beside that lane about 40 m out.
 /// </summary>
 public static class SandboxMap
 {
@@ -29,7 +30,7 @@ public static class SandboxMap
     /// <summary>Faces the big hill to the north.</summary>
     public const float SpawnYaw = 0f;
 
-    /// <summary>Rocks, bushes and targets keep this far from the straight lane between the spawn and the big hill.</summary>
+    /// <summary>Rocks, bushes, targets, walls and fences keep this far from the straight lane between the spawn and the big hill.</summary>
     internal const float LaneHalfWidth = 6f;
     internal static readonly Vector2 BigHill = new(200, 150);
 
@@ -59,10 +60,11 @@ public static class SandboxMap
     private const int BushAttemptsPerPatch = 200;
 
     /// <summary>
-    /// Six practice targets, hand-placed on flat open ground 30–200 m from the spawn, clear of rocks, bushes and the
-    /// spawn-to-hill lane, all four kinds of tank among them. Seen from the spawn they show, in order: a medium tank's
+    /// Seven practice targets, hand-placed on flat open ground 30–200 m from the spawn, clear of rocks, bushes, walls and
+    /// the spawn-to-hill lane, all four kinds of tank among them. Seen from the spawn they show, in order: a medium tank's
     /// front (most range demos shoot this one), a heavy tank's side, a light tank at 45°, a tank destroyer's rear, a medium
-    /// tank's front half hidden behind a rock, and a heavy tank's front far away (180–200 m).
+    /// tank's front half hidden behind a rock, a heavy tank's front far away (180–200 m), and a medium tank's front
+    /// inside the yard, out of sight behind its stone wall (<see cref="YardTarget"/>).
     /// </summary>
     public static readonly IReadOnlyList<TargetSpot> TargetSpots = new[]
     {
@@ -72,7 +74,47 @@ public static class SandboxMap
         Facing(new Vector2(140, 256), turnDegrees: 180, TankCatalog.Td),
         Facing(new Vector2(280, 328), turnDegrees: 0, TankCatalog.Medium),
         Facing(new Vector2(380, 272), turnDegrees: 0, TankCatalog.Heavy),
+        Facing(new Vector2(160, 340), turnDegrees: 0, TankCatalog.Medium),
     };
+
+    /// <summary>The index in <see cref="TargetSpots"/> of the target inside the yard.</summary>
+    public const int YardTarget = 6;
+
+    /// <summary>
+    /// Hand-placed walls and fences (stage 2C design §3.6). The yard, 18 × 12.8 m inside around (160, 340): a stone wall
+    /// on the east side, facing the spawn; brick on the north and south; brick on the west with a gate of three fence
+    /// panels in the middle. The east and west walls run the full z 333–347; the north and south walls fit between them,
+    /// 1 cm short of their inner faces. Then cover near the spawn: a brick wall north-north-west of it, a stone wall to
+    /// the east and two rows of fence panels, one north-east of it and one on the way to the yard. Seen from the spawn
+    /// none of them hides the first six targets.
+    /// </summary>
+    public static readonly IReadOnlyList<WallLine> WallLines = LayWallLines();
+
+    // The yard's edges. Consts, not static readonly fields: WallLines is initialised first, and would see those as 0.
+    private const float YardWest = 151f, YardEast = 169f;     // where the north and south walls end
+    private const float YardNorth = 333f, YardSouth = 347f;   // where the side walls end: the north and south walls' outer faces (−Z is north)
+    private const float GateNorth = 337f, GateSouth = 343f;   // the fence gate in the west wall
+    private const float CornerGap = 0.01f;                    // from the north and south walls' ends to the side walls
+
+    private static WallLine[] LayWallLines()
+    {
+        float brick = WallLine.Thickness(PropKind.BrickWall) / 2, stone = WallLine.Thickness(PropKind.StoneWall) / 2;
+        float east = YardEast + CornerGap + stone, west = YardWest - CornerGap - brick;   // x 169.51 and 150.69
+        float north = YardNorth + brick, south = YardSouth - brick;                       // z 333.3 and 346.7
+        return new WallLine[]
+        {
+            new(PropKind.StoneWall, new Vector2(east, YardNorth), new Vector2(east, YardSouth)),
+            new(PropKind.BrickWall, new Vector2(YardWest, north), new Vector2(YardEast, north)),
+            new(PropKind.BrickWall, new Vector2(YardWest, south), new Vector2(YardEast, south)),
+            new(PropKind.BrickWall, new Vector2(west, YardNorth), new Vector2(west, GateNorth)),
+            new(PropKind.Fence, new Vector2(west, GateNorth), new Vector2(west, GateSouth)),
+            new(PropKind.BrickWall, new Vector2(west, GateSouth), new Vector2(west, YardSouth)),
+            new(PropKind.BrickWall, new Vector2(186, 302), new Vector2(192, 302)),   // about 30 m NNW of the spawn
+            new(PropKind.StoneWall, new Vector2(243, 320), new Vector2(247, 320)),   // about 45 m E
+            new(PropKind.Fence, new Vector2(210, 318), new Vector2(216, 318)),       // the fence row NE of the spawn
+            new(PropKind.Fence, new Vector2(182, 330), new Vector2(182, 336)),       // the fence row on the way to the yard
+        };
+    }
 
     private static readonly TerrainGenerator.Hill[] Hills =
     {
@@ -87,6 +129,7 @@ public static class SandboxMap
         HeightField terrain = GenerateTerrain();
         List<Prop> props = ScatterRocks(terrain);
         props.AddRange(PlantBushes(terrain, props));   // after the rocks, so rock ids (and their shapes) don't change
+        foreach (WallLine line in WallLines) props.AddRange(line.Segments(terrain, props.Count + 1));   // and the walls after both
         return new Battlefield(terrain, props, Border);
     }
 

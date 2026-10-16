@@ -37,4 +37,23 @@ public class LaunchOptionsTests
         string warning = Assert.Single(options.Warnings);
         Assert.Contains("''", warning);
     }
+
+    [Theory]
+    [InlineData("prop:1.5", "prop", 1.5)]
+    [InlineData("down:0", "down", 0)]
+    [InlineData("kill:2", "kill", 2)]
+    public void Shot_after_waits_for_a_wall_hurt_or_a_prop_down_too(string value, string moment, double delay)
+    {
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--shot-after", value });
+        Assert.Equal((moment, delay), (options.ShotAfterEvent, options.ShotAfterDelay));
+        Assert.Empty(options.Warnings);
+    }
+
+    [Fact]
+    public void Shot_after_an_unknown_moment_is_ignored_with_a_warning_naming_the_known_ones()
+    {
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--shot-after", "wall:1" });
+        Assert.Null(options.ShotAfterEvent);
+        Assert.Contains("fire|hit|kill|prop|down", Assert.Single(options.Warnings));
+    }
 }

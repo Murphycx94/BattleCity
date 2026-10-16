@@ -7,13 +7,13 @@ namespace Tank.Sim.Tests;
 
 public sealed class TargetSpotTests
 {
-    private const int RockSpot = 4, FarSpot = 5;
+    private const int RockSpot = 4, FarSpot = 5, YardSpot = SandboxMap.YardTarget;
     private const float GunHeight = 2.1f;   // the spawn tank's trunnion
     private const float PlateHeight = 1.0f;
     private static readonly Battlefield Field = SandboxMap.Create();
     private static readonly IReadOnlyList<TargetSpot> Spots = SandboxMap.TargetSpots;
 
-    public static TheoryData<int> Indices() => new() { 0, 1, 2, 3, 4, 5 };
+    public static TheoryData<int> Indices() => new(Enumerable.Range(0, SandboxMap.TargetSpots.Count));
 
     private static Obb2 Hull(TargetSpot s) => TankMotion.Footprint(s.Spec, s.Position, s.Yaw);
 
@@ -25,7 +25,10 @@ public sealed class TargetSpotTests
     }
 
     [Fact]
-    public void ThereAreSix() => Assert.Equal(6, Spots.Count);
+    public void ThereAreSeven() => Assert.Equal(7, Spots.Count);
+
+    [Fact]
+    public void TheYardTarget_IsAMediumTank() => Assert.Same(TankCatalog.Medium, Spots[YardSpot].Spec);
 
     [Fact]
     public void AllFourKindsOfTankStandThere()
@@ -60,13 +63,13 @@ public sealed class TargetSpotTests
 
     [Theory]
     [MemberData(nameof(Indices))]
-    public void IsClearOfRocksBushesAndTheLane(int i)
+    public void IsClearOfRocksBushesWallsAndTheLane(int i)
     {
         Obb2 hull = Hull(Spots[i]);
         foreach (Prop p in Field.Props)
         {
             if (p.Kind == PropKind.Bush) Assert.False(hull.IntersectsCircle(p.Footprint.Center, p.Footprint.HalfExtents.X), $"spot {i} in bush {p.Id}");
-            else Assert.False(Obb2.TryGetPenetration(hull, p.Footprint, out _), $"spot {i} on rock {p.Id}");
+            else Assert.False(Obb2.TryGetPenetration(hull, p.Footprint, out _), $"spot {i} on {p.Kind} {p.Id}");
         }
         float lane = SandboxMap.DistanceToSegment(hull.Center, SandboxMap.Spawn, SandboxMap.BigHill) - hull.HalfExtents.Length();
         Assert.True(lane >= SandboxMap.LaneHalfWidth, $"spot {i} is {lane:F1} m from the lane");
@@ -83,6 +86,7 @@ public sealed class TargetSpotTests
     [InlineData(3, 180f)]
     [InlineData(4, 0f)]
     [InlineData(5, 0f)]
+    [InlineData(6, 0f)]
     public void ShowsTheSpawnTheRightFace(int i, float degreesOffFront)
     {
         Vector2 toSpawn = Vector2.Normalize(SandboxMap.Spawn - Spots[i].Position);
@@ -92,18 +96,22 @@ public sealed class TargetSpotTests
 
     [Theory]
     [MemberData(nameof(Indices))]
-    public void CanBeSeenFromTheSpawn_ExceptTheRockOneIsHalfHidden(int i)
+    public void CanBeSeenFromTheSpawn_ExceptTheRockOneIsHalfHidden_AndTheYardOneIsWalledIn(int i)
     {
-        int clear = 0, rock = 0;
+        int clear = 0, rock = 0, wall = 0, stone = 0;
         foreach (RayHit? hit in SightLines(Spots[i]))
         {
             if (hit is null) clear++;
-            else if (hit.Value.PropId != RayHit.TerrainId) rock++;
+            else if (hit.Value.PropId == RayHit.TerrainId) continue;
+            else if (Field.PropById(hit.Value.PropId) is { IsWall: true } struck)
+            {
+                wall++;
+                if (struck.Kind == PropKind.StoneWall) stone++;
+            }
+            else rock++;
         }
-        if (i == RockSpot)
-        {
-            Assert.True(clear >= 1 && rock >= 1, $"rock spot: {clear} clear, {rock} behind a rock");
-        }
+        if (i == RockSpot) Assert.True(clear >= 1 && rock >= 1 && wall == 0, $"rock spot: {clear} clear, {rock} behind a rock, {wall} behind a wall");
+        else if (i == YardSpot) Assert.Equal(3, stone);   // all three end on the yard's stone wall
         else Assert.Equal(3, clear);
     }
 

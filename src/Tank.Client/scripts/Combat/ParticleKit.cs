@@ -4,8 +4,9 @@ using Tank.Client.Art;
 namespace Tank.Client.Combat;
 
 /// <summary>
-/// Shared building blocks for the cartoon effects: one low-poly ball mesh drawn with the toon puff shader (opaque, coloured
-/// per particle), glowing materials for flashes, and "pop" scale curves (swell past full size, settle, shrink to nothing).
+/// Shared building blocks for the cartoon effects: one low-poly ball mesh and one cube drawn with the toon puff shader
+/// (opaque, coloured per particle), glowing materials for flashes, and "pop" scale curves (swell past full size, settle,
+/// shrink to nothing).
 /// </summary>
 public static class ParticleKit
 {
@@ -18,10 +19,14 @@ public static class ParticleKit
     public static SphereMesh Ball(Material material) => new() { Radius = 0.5f, Height = 1f, RadialSegments = 12, Rings = 6, Material = material };
 
     private static readonly Lazy<SphereMesh> SharedPuffBall = new(() => Ball(Puff));
+    private static readonly Lazy<BoxMesh> SharedPuffBox = new(() => new BoxMesh { Size = Vector3.One, Material = Puff });
     private static readonly Dictionary<(Color, float), SphereMesh> GlowBalls = new();
 
     /// <summary>One shared puff ball mesh for every smoke, dust and debris emitter.</summary>
     public static SphereMesh PuffBall => SharedPuffBall.Value;
+
+    /// <summary>One shared unit cube with the puff material, for every debris emitter's chunks (bricks, stones, wood, leaves).</summary>
+    public static BoxMesh PuffBox => SharedPuffBox.Value;
 
     /// <summary>One shared ball mesh (with its glow material) per colour and energy.</summary>
     public static SphereMesh GlowBall(Color color, float energy)

@@ -6,7 +6,8 @@ namespace Tank.Client.Sandbox;
 /// <summary>
 /// Registers the sandbox's own input actions at runtime (so project.godot and the old game's bindings stay untouched)
 /// and samples them once per sim tick. A fire click shorter than a tick is latched so it is never lost. 1 and 2 pick
-/// AP or HE (kept until changed); R asks for a restock and F1–F4 for another tank, each consumed once by the next tick.
+/// AP or HE (kept until changed); R asks for a restock, T to restore the walls, fences and bushes, and F1–F4 for another
+/// tank, each consumed once by the next tick.
 /// </summary>
 public sealed class SandboxInput
 {
@@ -15,7 +16,7 @@ public sealed class SandboxInput
     private static readonly StringName DriveForward = "drive_forward", DriveBack = "drive_back";
     private static readonly StringName DriveLeft = "drive_left", DriveRight = "drive_right";
     private static readonly StringName FreeLookAction = "free_look";
-    private static readonly StringName AmmoAp = "ammo_ap", AmmoHe = "ammo_he", Restock = "restock";
+    private static readonly StringName AmmoAp = "ammo_ap", AmmoHe = "ammo_he", Restock = "restock", RestoreProps = "restore_props";
 
     // The tank-pick keys, one row per action so the action and its key can't drift apart; the row index is the
     // TankCatalog.All index that TakeTankPick returns.
@@ -30,6 +31,7 @@ public sealed class SandboxInput
     private bool _fireLatched;
     private bool _fireHeld;
     private bool _restock;
+    private bool _restoreProps;
     private int _pickedTank = -1;
 
     public static void RegisterActions()
@@ -44,6 +46,7 @@ public sealed class SandboxInput
         AddKey(AmmoAp, Key.Key1);
         AddKey(AmmoHe, Key.Key2);
         AddKey(Restock, Key.R);
+        AddKey(RestoreProps, Key.T);
         foreach ((StringName action, Key key) in PickTank) AddKey(action, key);
     }
 
@@ -56,14 +59,19 @@ public sealed class SandboxInput
     {
         if (e.IsActionPressed(FireGun)) _fireLatched = _fireHeld = true;
         else if (e.IsActionReleased(FireGun)) _fireHeld = false;
-        else if (e.IsActionPressed(AmmoAp)) Ammo = AmmoType.AP;
-        else if (e.IsActionPressed(AmmoHe)) Ammo = AmmoType.HE;
-        else if (e.IsActionPressed(Restock)) _restock = true;
         else if (e is InputEventKey)
         {
-            // Keyboard events only: mouse motion (about one per frame while aiming) must not pay four action lookups.
-            for (int i = 0; i < PickTank.Length; i++)
-                if (e.IsActionPressed(PickTank[i].Action)) _pickedTank = i;
+            // Keyboard events only (every action below is bound to a key): mouse motion, about one per frame while aiming,
+            // must not pay their eight lookups.
+            if (e.IsActionPressed(AmmoAp)) Ammo = AmmoType.AP;
+            else if (e.IsActionPressed(AmmoHe)) Ammo = AmmoType.HE;
+            else if (e.IsActionPressed(Restock)) _restock = true;
+            else if (e.IsActionPressed(RestoreProps)) _restoreProps = true;
+            else
+            {
+                for (int i = 0; i < PickTank.Length; i++)
+                    if (e.IsActionPressed(PickTank[i].Action)) _pickedTank = i;
+            }
         }
     }
 
@@ -83,6 +91,14 @@ public sealed class SandboxInput
         bool restock = _restock;
         _restock = false;
         return restock;
+    }
+
+    /// <summary>True once after T was pressed.</summary>
+    public bool TakeRestoreProps()
+    {
+        bool restore = _restoreProps;
+        _restoreProps = false;
+        return restore;
     }
 
     /// <summary>Once after F1–F4 was pressed: the tank asked for, as an index into <c>TankCatalog.All</c>.</summary>

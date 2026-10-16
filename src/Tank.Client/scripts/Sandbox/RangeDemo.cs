@@ -16,6 +16,8 @@ public enum DemoAim
     TurretFront,
     /// <summary>The turret box's rear face (a casemate's box is the hull's, centred on the hull origin).</summary>
     TurretRear,
+    /// <summary>The hull box's rear face.</summary>
+    HullRear,
 }
 
 /// <summary>
@@ -24,9 +26,11 @@ public enum DemoAim
 /// ahead of it, its hull <see cref="PlayerTurn"/> degrees to the left of facing the target, lays its gun on the
 /// <see cref="Aim"/> face of that target's own armour (<see cref="AimLocal"/>, worked out from <see cref="Spot"/>'s
 /// <see cref="TankSpec"/>, so it can't drift from the kind of tank standing there) and pulls the trigger from
-/// <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded.
+/// <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded. A demo with <see cref="DriveSeconds"/>
+/// fires nothing: from <see cref="FireTick"/> it drives at full throttle for that long, then stops.
 /// </summary>
-public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, DemoAim Aim, AmmoType Ammo, bool KeepFiring, float PlayerTurn = 0f)
+public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, DemoAim Aim, AmmoType Ammo, bool KeepFiring,
+    float PlayerTurn = 0f, float DriveSeconds = 0f)
 {
     public const double FireAfter = 3.0;
 
@@ -40,15 +44,19 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
     public static readonly int FireTick = (int)Math.Ceiling(FireAfter * SimConstants.TickRate);
 
     /// <summary>The demos' names, in the order <see cref="Find"/> documents them.</summary>
-    public static IReadOnlyList<string> Names { get; } = new[] { "pen", "ricochet", "nopen", "he", "kill", "nopen-heavy", "kill-td", "turn" };
+    public static IReadOnlyList<string> Names { get; } =
+        new[] { "pen", "ricochet", "nopen", "he", "kill", "nopen-heavy", "kill-td", "turn", "wall", "breach", "fence", "ram", "bush" };
 
     /// <summary>
     /// pen, ricochet, nopen, he or kill (at target 0, a medium tank); nopen-heavy (the far heavy tank's 200 mm turret
     /// front, head-on from the spawn's side, on the sight line the target tests keep clear: no light tank gets through;
     /// 52 m out, where even the heavy tank parks clear of the rocks); kill-td (the tank
     /// destroyer's rear until it is knocked out); turn (target 0 again, the hull starting 60° off: a tank destroyer has to
-    /// turn its hull to bring the gun round); null for any other name. Each shoots with whatever tank --tank gives the
-    /// player.
+    /// turn its hull to bring the gun round). At the yard target (stage 2C): wall (one AP shot from 30 m in front, into
+    /// the stone wall between), breach (HE from there until the wall is down and the target behind it), fence (AP at its
+    /// rear from 30 m west by north-west, in through a panel of the fence gate), ram (from 17 m north of it, 2.6 s at full throttle into the
+    /// north wall: a heavy tank breaks through, the others are stopped); bush (target 0's rear from 50 m, through a bush
+    /// patch); null for any other name. Each shoots, or drives, with whatever tank --tank gives the player.
     /// </summary>
     public static RangeDemo? Find(string? name) => name switch
     {
@@ -60,8 +68,55 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
         "nopen-heavy" => new RangeDemo(5, 0f, 52f, DemoAim.TurretFront, AmmoType.AP, false),
         "kill-td" => new RangeDemo(3, 180f, 45f, DemoAim.TurretRear, AmmoType.AP, true),
         "turn" => new RangeDemo(0, 0f, 45f, DemoAim.HullFront, AmmoType.AP, false, PlayerTurn: 60f),
+        "wall" => new RangeDemo(SandboxMap.YardTarget, 0f, 30f, DemoAim.HullFront, AmmoType.AP, false),
+        "breach" => new RangeDemo(SandboxMap.YardTarget, 0f, 30f, DemoAim.HullFront, AmmoType.HE, true),
+        "fence" => new RangeDemo(SandboxMap.YardTarget, YardGateOffFront, 30f, DemoAim.HullRear, AmmoType.AP, false),
+        "ram" => new RangeDemo(SandboxMap.YardTarget, YardNorthOffFront, 17f, DemoAim.HullFront, AmmoType.AP, false, DriveSeconds: 2.6f),
+        "bush" => new RangeDemo(0, 210f, 50f, DemoAim.HullRear, AmmoType.AP, false),
         _ => null,
     };
+
+    private const float DegreesPerRadian = 180f / MathF.PI;
+
+    /// <summary>
+    /// Degrees round from the yard target's front to west by north-west: the line from its rear in through the middle of
+    /// the gate's north panel (straight west would park the player, and the camera behind it, against the rocks there).
+    /// </summary>
+    private static float YardGateOffFront => YardOffFront(new SN.Vector2(-1, -0.35f));
+
+    /// <summary>Degrees round from the yard target's front to due north (−Z), square on to the yard's north wall.</summary>
+    private static float YardNorthOffFront => YardOffFront(new SN.Vector2(0, -1));
+
+    /// <summary>Degrees round from the yard target's front to the ground direction <paramref name="direction"/>.</summary>
+    private static float YardOffFront(SN.Vector2 direction) =>
+        Angles.Wrap(Angles.YawOf(direction) - SandboxMap.TargetSpots[SandboxMap.YardTarget].Yaw) * DegreesPerRadian;
+
+    /// <summary>Ticks of full throttle for a driving demo, starting at <see cref="FireTick"/>.</summary>
+    public int DriveTicks => (int)MathF.Round(DriveSeconds * SimConstants.TickRate);
+
+    /// <summary>A driving demo (<see cref="DriveSeconds"/>): it drives into something instead of shooting at it.</summary>
+    public bool IsDriving => DriveTicks > 0;
+
+    /// <summary>The throttle on sim tick <paramref name="tick"/>: full for a driving demo's <see cref="DriveTicks"/> from <see cref="FireTick"/>, else none.</summary>
+    public sbyte Throttle(int tick) => (sbyte)(tick >= FireTick && tick < FireTick + DriveTicks ? 1 : 0);
+
+    /// <summary>
+    /// The player's command for <paramref name="player"/>'s tick, in place of its own (the tests drive the sim with it
+    /// too). Never steers. A shooting demo stands still, lays the gun on its aim point and pulls the trigger from
+    /// <see cref="FireTick"/> on, once (until <paramref name="hasFired"/>) or, with <see cref="KeepFiring"/>, whenever
+    /// loaded. A driving demo keeps the gun level and straight ahead (so a tank destroyer's hull doesn't turn after an
+    /// aim outside its arc) and drives at <see cref="Throttle"/>.
+    /// </summary>
+    public InputCmd Command(in InputCmd player, in TankState tank, Battlefield field, bool hasFired)
+    {
+        if (IsDriving)
+            return player with { Throttle = Throttle(player.Tick), Steer = 0, AimYaw = tank.Yaw, AimPitch = 0f, Fire = false, Ammo = Ammo };
+        TankPose pose = TankPose.Compute(tank, field.Terrain);
+        SN.Vector3 aim = AimPoint(field.Terrain.HeightAt(Spot.Position.X, Spot.Position.Y));
+        var (yaw, pitch) = Angles.AimAngles(aim - pose.Trunnion(tank.Spec), player.AimYaw);
+        bool fire = player.Tick >= FireTick && (KeepFiring || !hasFired);
+        return player with { Throttle = 0, Steer = 0, AimYaw = yaw, AimPitch = pitch, Fire = fire, Ammo = Ammo };
+    }
 
     public TargetSpot Spot => SandboxMap.TargetSpots[Target];
 
@@ -90,6 +145,7 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
                 DemoAim.HullFront => FaceMiddle(spec.HullArmor, 0f, front: true),
                 DemoAim.TurretFront => FaceMiddle(spec.TurretArmor, turretAhead, front: true),
                 DemoAim.TurretRear => FaceMiddle(spec.TurretArmor, turretAhead, front: false),
+                DemoAim.HullRear => FaceMiddle(spec.HullArmor, 0f, front: false),
                 _ => throw new InvalidOperationException($"Unknown {nameof(DemoAim)} {Aim}."),
             };
         }

@@ -16,7 +16,8 @@ namespace Tank.Client.World;
 ///   your own view; the shader does it with screen-door dithering, so nothing needs sorting;
 /// - push: while the tank overlaps a bush its leaves part around the hull; after it leaves they spring back over
 ///   <see cref="ReboundSeconds"/> (the shader pushes away from the last overlapping tank position).
-/// Only instances whose values changed are re-uploaded.
+/// Only instances whose values changed are re-uploaded. A bush shot away is scaled to nothing until it is restored
+/// (<see cref="SyncStanding"/>), and skipped meanwhile: its fade and push stay where they were.
 /// </summary>
 public partial class BushField : Node3D
 {
@@ -34,8 +35,10 @@ public partial class BushField : Node3D
 
     private sealed class Bush
     {
+        public required int Id { get; init; }
         public required MultiMesh Multimesh { get; init; }
         public required int Index { get; init; }
+        public required Transform3D Transform { get; init; }
         public required SN.Vector2 Center { get; init; }
         public required float Radius { get; init; }
         public required float Bottom { get; init; }
@@ -44,6 +47,7 @@ public partial class BushField : Node3D
         public float Push;
         public SN.Vector2 PushFrom;
         public Color Uploaded = new(1f, 0f, 0f, 0f);
+        public bool Shown = true;
     }
 
     public int Count => _bushes.Count;
@@ -71,9 +75,14 @@ public partial class BushField : Node3D
                 float radius = prop.Footprint.HalfExtents.X;
                 float yaw = (prop.Id * 0.6180339f % 1f) * Mathf.Tau;
                 var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(radius, prop.Top - ground, radius));
-                multimesh.SetInstanceTransform(i, new Transform3D(basis, prop.Footprint.Center.Ground(ground)));
+                var transform = new Transform3D(basis, prop.Footprint.Center.Ground(ground));
+                multimesh.SetInstanceTransform(i, transform);
                 multimesh.SetInstanceCustomData(i, new Color(1f, 0f, 0f, 0f));
-                _bushes.Add(new Bush { Multimesh = multimesh, Index = i, Center = prop.Footprint.Center, Radius = radius, Bottom = ground, Top = prop.Top });
+                _bushes.Add(new Bush
+                {
+                    Id = prop.Id, Multimesh = multimesh, Index = i, Transform = transform,
+                    Center = prop.Footprint.Center, Radius = radius, Bottom = ground, Top = prop.Top,
+                });
             }
             // Two views of the same instances: the visible one never casts shadows (its dithering would speckle them), the
             // shadow one is drawn only into shadow maps, undithered, so a see-through bush still casts a solid shadow.
@@ -103,6 +112,7 @@ public partial class BushField : Node3D
         var eye = new SN.Vector2(camera.X, camera.Z);
         foreach (Bush bush in _bushes)
         {
+            if (!bush.Shown) continue;   // shot away: nothing to fade or push, nothing to upload
             bool clear = DistanceToBush(camera, bush) < NearCamera || own.IntersectsCircle(bush.Center, bush.Radius)
                 || SegmentDistance(bush.Center, eye, hull.Center) <= bush.Radius;
             float target = clear ? SeeThrough : 1f;
@@ -119,6 +129,18 @@ public partial class BushField : Node3D
             if (data == bush.Uploaded) continue;
             bush.Multimesh.SetInstanceCustomData(bush.Index, data);
             bush.Uploaded = data;
+        }
+    }
+
+    /// <summary>Hides the bushes that have been shot away (scaled to nothing) and shows restored ones again.</summary>
+    public void SyncStanding(Battlefield field)
+    {
+        foreach (Bush bush in _bushes)
+        {
+            bool standing = field.IsStanding(bush.Id);
+            if (standing == bush.Shown) continue;
+            bush.Shown = standing;
+            bush.Multimesh.SetInstanceTransform(bush.Index, standing ? bush.Transform : bush.Transform.ScaledLocal(Vector3.Zero));
         }
     }
 

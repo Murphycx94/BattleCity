@@ -12,7 +12,7 @@ using SN = System.Numerics;
 namespace Tank.Client.Sandbox;
 
 /// <summary>
-/// The six practice targets on <see cref="SandboxMap.TargetSpots"/>: blue-grey tanks of every kind that sit still with
+/// The practice targets on <see cref="SandboxMap.TargetSpots"/>: blue-grey tanks of every kind that sit still with
 /// their guns straight ahead. A knocked-out target blows up, throws its turret (a tank destroyer has none), chars and
 /// smokes; ten seconds later it is revived where it stands. Each <see cref="Sync"/> also notes every target's head point and health for the HUD.
 /// </summary>

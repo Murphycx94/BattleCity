@@ -12,15 +12,19 @@ public enum PuffColor { White, Grey }
 /// each swelling past full size, settling and shrinking away (~0.8 s).
 /// Impact: an orange fireball that balloons and collapses, 6–10 puffs rolling outward (<see cref="PuffColor"/>: white
 /// smoke, or grey dust off rock and armour) and 8 small stones thrown up under gravity.
-/// Pool sizes (4 muzzle, 6 impact slots) are an estimate: highest fire rate (one shell per reload, ~4 s, plus a few
-/// other tanks) times the longest particle life (1.3 s) stays well under the slot count. If every slot is busy anyway,
-/// the one that started playing longest ago is reused (idle slots always win, being the oldest). Nothing allocates per
-/// shot: no tweens, no closures; each slot advances its own flash animation from <see cref="_Process"/>.
+/// Debris (<see cref="Debris"/>): chunks thrown up and along a push (bricks, stones, wood chips, leaves), with an
+/// optional cloud of dust puffs; sized for a chip off a wall up to a whole wall coming down.
+/// Pool sizes (4 muzzle, 6 impact, 12 debris slots) are an estimate: highest fire rate (one shell per reload, ~4 s, plus
+/// a few other tanks) times the longest particle life (1.6 s) stays well under the slot count; debris comes in bursts,
+/// up to a dozen at once when an HE shell lands in a bush patch. If every slot is busy anyway, the one that started
+/// playing longest ago is reused (idle slots always win, being the oldest). Nothing allocates per shot: no tweens, no closures; each slot
+/// advances its own flash animation from <see cref="_Process"/>.
 /// </summary>
 public partial class BattleFx : Node3D
 {
     private const int MuzzleSlots = 4;
     private const int ImpactSlots = 6;
+    private const int DebrisSlots = 12;
     private const float MuzzleFlashTime = 0.08f;
     private const float MuzzleFlashSize = 1.3f;
     private const float FireballGrowTime = 0.1f;
@@ -32,11 +36,13 @@ public partial class BattleFx : Node3D
 
     private readonly List<MuzzleSlot> _muzzles = new();
     private readonly List<ImpactSlot> _impacts = new();
+    private readonly List<DebrisSlot> _debris = new();
 
     public override void _Ready()
     {
         for (int i = 0; i < MuzzleSlots; i++) _muzzles.Add(new MuzzleSlot(this));
         for (int i = 0; i < ImpactSlots; i++) _impacts.Add(new ImpactSlot(this));
+        for (int i = 0; i < DebrisSlots; i++) _debris.Add(new DebrisSlot(this));
     }
 
     public override void _Process(double delta)
@@ -44,6 +50,7 @@ public partial class BattleFx : Node3D
         float dt = (float)delta;
         foreach (MuzzleSlot slot in _muzzles) slot.Advance(dt);
         foreach (ImpactSlot slot in _impacts) slot.Advance(dt);
+        foreach (DebrisSlot slot in _debris) slot.Advance(dt);
     }
 
     /// <summary>The slot that has been idle or playing for the longest time.</summary>
@@ -66,6 +73,16 @@ public partial class BattleFx : Node3D
     public void Explosion(Vector3 at, PuffColor puffs, float size = 1f)
     {
         Oldest(_impacts).Play(at, puffs == PuffColor.Grey ? Palette.RockDust.ToColor() : Palette.Smoke.ToColor(), size);
+    }
+
+    /// <summary>
+    /// Chunks of <paramref name="chunks"/> colour thrown up from <paramref name="at"/> and along <paramref name="push"/>
+    /// (level; zero for straight up), with puffs of <paramref name="dust"/> if given. <paramref name="size"/> 1 is a chip
+    /// off a wall: about five small chunks; a collapsing wall is about 2, with twice the chunks, bigger and faster.
+    /// </summary>
+    public void Debris(Vector3 at, Vector3 push, Color chunks, Color? dust, float size)
+    {
+        Oldest(_debris).Play(at, push, chunks, dust, size);
     }
 
     private interface ISlot
@@ -257,6 +274,86 @@ public partial class BattleFx : Node3D
             _puffs.Restart();
             _stones.GlobalPosition = at + Vector3.Up * 0.3f;
             _stones.Restart();
+        }
+    }
+
+    private sealed class DebrisSlot : ISlot
+    {
+        private const int Chunks = 18, Puffs = 12;
+        private const float ChunkScale = 0.22f, ChunkSpeed = 4.5f, PuffScale = 1.1f, PuffSpeed = 2.5f;
+        private const float Lifetime = 1.6f;
+        private const float AgeCap = 10f;
+
+        private readonly GpuParticles3D _chunks;
+        private readonly ParticleProcessMaterial _chunkProcess;
+        private readonly GpuParticles3D _puffs;
+        private readonly ParticleProcessMaterial _puffProcess;
+        private float _age = float.MaxValue;
+
+        public DebrisSlot(Node parent)
+        {
+            _chunkProcess = new ParticleProcessMaterial
+            {
+                EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
+                EmissionSphereRadius = 0.4f,
+                Direction = Vector3.Up,
+                Spread = 55f,
+                Gravity = new Vector3(0, -9.8f, 0),
+                AngularVelocityMin = -540f,
+                AngularVelocityMax = 540f,
+                ScaleCurve = ParticleKit.Pop(start: 1f, overshoot: 1f, peakAt: 0.1f, shrinkFrom: 0.75f),
+            };
+            _chunks = ParticleKit.OneShot(Chunks, Lifetime, 1f, _chunkProcess, ParticleKit.PuffBox);
+            _puffProcess = new ParticleProcessMaterial
+            {
+                EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+                Direction = Vector3.Up,
+                Spread = 80f,
+                DampingMin = 3f,
+                DampingMax = 5f,
+                Gravity = new Vector3(0, 0.5f, 0),
+                ScaleCurve = ParticleKit.Pop(start: 0.3f, overshoot: 1.15f, peakAt: 0.2f, shrinkFrom: 0.45f),
+            };
+            _puffs = ParticleKit.OneShot(Puffs, Lifetime, 0.85f, _puffProcess, ParticleKit.PuffBall);
+            parent.AddChild(_chunks);
+            parent.AddChild(_puffs);
+        }
+
+        public float Age => _age;
+
+        public void Advance(float dt)
+        {
+            if (_age < Lifetime + AgeCap) _age += dt;
+        }
+
+        public void Play(Vector3 at, Vector3 push, Color chunks, Color? dust, float size)
+        {
+            _age = 0f;
+            Vector3 level = new(push.X, 0, push.Z);
+            _chunkProcess.Direction = (Vector3.Up + (level.LengthSquared() > 1e-6f ? level.Normalized() * 0.7f : Vector3.Zero)).Normalized();
+            _chunkProcess.Color = chunks;
+            _chunkProcess.ScaleMin = ChunkScale * MathF.Sqrt(size);
+            _chunkProcess.ScaleMax = ChunkScale * 1.8f * MathF.Sqrt(size);
+            _chunkProcess.InitialVelocityMin = ChunkSpeed * 0.6f * MathF.Sqrt(size);
+            _chunkProcess.InitialVelocityMax = ChunkSpeed * 1.4f * MathF.Sqrt(size);
+            _chunkProcess.EmissionSphereRadius = 0.3f * size;
+            _chunks.GlobalPosition = at;
+            _chunks.AmountRatio = Math.Clamp(0.28f * size, 0.2f, 1f);
+            _chunks.Restart();
+            if (dust is not { } puffColor)
+            {
+                _puffs.Emitting = false;
+                return;
+            }
+            _puffProcess.Color = puffColor;
+            _puffProcess.EmissionBoxExtents = new Vector3(0.9f, 0.6f, 0.9f) * size;
+            _puffProcess.ScaleMin = PuffScale * 0.7f * size;
+            _puffProcess.ScaleMax = PuffScale * 1.3f * size;
+            _puffProcess.InitialVelocityMin = PuffSpeed * 0.5f * size;
+            _puffProcess.InitialVelocityMax = PuffSpeed * size;
+            _puffs.GlobalPosition = at;
+            _puffs.AmountRatio = Math.Clamp(0.25f * size * size, 0.15f, 1f);
+            _puffs.Restart();
         }
     }
 }

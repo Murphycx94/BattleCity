@@ -24,11 +24,23 @@ public static class TankMotion
     /// <summary>If collisions leave less than this fraction of the intended step, the hull was blocked head-on and stalls.</summary>
     private const float StallRatio = 0.25f;
 
+    /// <summary>Top speed on rubble, as a share of the usual (design §3.2).</summary>
+    public const float RubbleSpeedFactor = 0.7f;
+
+    /// <summary>Breaking through brick walls costs this share of the hull's speed (once a tick, however many it breaks).</summary>
+    private const float RamSpeedKept = 0.5f;
+
     public static Obb2 Footprint(TankSpec spec, Vector2 center, float yaw) =>
         new(center, new Vector2(spec.HullWidth / 2, spec.HullLength / 2), yaw);
 
-    /// <summary>Applies throttle and steering, then moves the hull and pushes it out of solid props and <paramref name="obstacles"/>.</summary>
-    public static void Drive(ref TankState t, in InputCmd input, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+    /// <summary>
+    /// Applies throttle and steering, knocks down what gives way where the hull is going (any fence it touches, and brick
+    /// walls when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, at the cost of half its speed; their ids
+    /// are added to <paramref name="felled"/> if given), then moves the hull and pushes it out of standing solid props and
+    /// <paramref name="obstacles"/>. Knocking props down changes <paramref name="field"/> for everyone using it, so only
+    /// the simulation stepping the battle should drive on it (a client predicting its own tank must not).
+    /// </summary>
+    public static void Drive(ref TankState t, in InputCmd input, Battlefield field, ReadOnlySpan<Obb2> obstacles, List<int>? felled = null)
     {
         TankSpec spec = t.Spec;
         const float dt = SimConstants.Dt;
@@ -37,17 +49,18 @@ public static class TankMotion
         float turnRate = spec.HullTraverse * (MathF.Abs(t.Speed) > MovingThreshold ? MovingTurnFactor : 1f);
         t.Yaw = Angles.Wrap(t.Yaw - System.Math.Sign(input.Steer) * turnRate * dt);
 
-        float target = TargetSpeed(t, input.Throttle, field.Terrain);
+        float target = TargetSpeed(t, input.Throttle, field);
         bool accelerating = target * t.Speed >= 0 && MathF.Abs(target) > MathF.Abs(t.Speed);
         t.Speed = Scalar.MoveTowards(t.Speed, target, (accelerating ? spec.Acceleration : spec.Braking) * dt);
 
         Vector2 start = t.Position;
         Vector2 intended = Angles.Forward(t.Yaw) * (t.Speed * dt);
+        KnockDown(ref t, Footprint(spec, start + intended, t.Yaw), field, felled);
         Vector2 dest = field.ClampToPlayable(Resolve(Footprint(spec, start + intended, t.Yaw), field, obstacles));
         if (IsTooSteepToEnter(spec, field.Terrain, start, dest)) dest = start;
         (t.Position, t.Yaw) = SettleWithoutOverlap(spec, dest, t.Yaw, oldYaw, start, field, obstacles);
 
-        // Pushed almost straight back (head-on into a rock, a tank or the map edge): stall.
+        // Pushed almost straight back (head-on into a rock, a standing wall or fence, a tank or the map edge): stall.
         // A glancing contact keeps its speed so the hull slides along the obstacle.
         float intendedLength = intended.Length();
         if (intendedLength > 0 && Vector2.Distance(t.Position, start) < intendedLength * StallRatio) t.Speed = 0f;
@@ -101,10 +114,48 @@ public static class TankMotion
         return MathF.Atan2(front - back, t.Spec.HullLength);
     }
 
-    private static float TargetSpeed(in TankState t, sbyte throttle, HeightField terrain)
+    /// <summary>
+    /// What gives way to a hull about to stand on <paramref name="hull"/> (design §4.2): any fence, and brick walls when it
+    /// is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, which then costs it half its speed (once, however many
+    /// it breaks). They go down before the hull is pushed out of what still stands, so it drives on through.
+    /// </summary>
+    private static void KnockDown(ref TankState t, in Obb2 hull, Battlefield field, List<int>? felled)
+    {
+        bool ramming = MathF.Abs(t.Speed) > t.Spec.BrickWallRamSpeed;
+        bool broke = false;
+        foreach (int i in field.Blockers)
+        {
+            ref readonly Prop prop = ref field.PropAt(i);
+            bool givesWay = prop.Kind == PropKind.Fence || (ramming && prop.Kind == PropKind.BrickWall);
+            if (!givesWay || !field.StandingAt(i) || !Overlaps(hull, prop.Footprint)) continue;
+            field.Destroy(i);
+            felled?.Add(prop.Id);
+            broke |= prop.Kind == PropKind.BrickWall;
+        }
+        if (broke) t.Speed *= RamSpeedKept;
+    }
+
+    /// <summary>The hull lies partly on the rubble of a wall.</summary>
+    private static bool OnRubble(in Obb2 hull, Battlefield field)
+    {
+        foreach (int i in field.Walls)
+            if (!field.StandingAt(i) && Overlaps(hull, field.PropAt(i).RubbleFootprint)) return true;
+        return false;
+    }
+
+    private static bool Overlaps(in Obb2 a, in Obb2 b)
+    {
+        float reach = a.HalfExtents.Length() + b.HalfExtents.Length();
+        return Vector2.DistanceSquared(a.Center, b.Center) <= reach * reach && Obb2.TryGetPenetration(a, b, out _);
+    }
+
+    /// <summary>The speed the throttle asks for: lower on rubble (<see cref="RubbleSpeedFactor"/>) and uphill.</summary>
+    private static float TargetSpeed(in TankState t, sbyte throttle, Battlefield field)
     {
         TankSpec spec = t.Spec;
         float target = throttle > 0 ? spec.MaxForwardSpeed : throttle < 0 ? -spec.MaxReverseSpeed : 0f;
+        if (target != 0 && OnRubble(Footprint(spec, t.Position, t.Yaw), field)) target *= RubbleSpeedFactor;
+        HeightField terrain = field.Terrain;
         float uphill = ForwardSlope(t, terrain) * MathF.Sign(target);
         if (uphill <= 0) return target;
         if (uphill >= spec.MaxClimb) return 0f;
@@ -125,8 +176,9 @@ public static class TankMotion
     }
 
     /// <summary>
-    /// Picks the first pose that is clear of every prop and obstacle: new heading at the resolved position, old heading there,
-    /// then the old pose. If none is clear (a wedged hull) the least-penetrating one wins, so the tank can still drive out (ties go to the earlier candidate).
+    /// Picks the first pose that is clear of every standing solid prop and obstacle: new heading at the resolved position,
+    /// old heading there, then the old pose. If none is clear (a wedged hull) the least-penetrating one wins, so the tank
+    /// can still drive out (ties go to the earlier candidate).
     /// </summary>
     private static (Vector2 Position, float Yaw) SettleWithoutOverlap(
         TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, Battlefield field, ReadOnlySpan<Obb2> obstacles)
@@ -143,13 +195,12 @@ public static class TankMotion
         return best;
     }
 
-    /// <summary>Deepest overlap of <paramref name="box"/> with any solid prop or obstacle; 0 when clear.</summary>
+    /// <summary>Deepest overlap of <paramref name="box"/> with any standing solid prop or obstacle; 0 when clear.</summary>
     private static float PenetrationDepth(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
     {
         float deepest = 0f;
-        IReadOnlyList<Prop> props = field.Props;
-        for (int i = 0; i < props.Count; i++)
-            if (props[i].IsSolid && Obb2.TryGetPenetration(box, props[i].Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
+        foreach (int i in field.Blockers)
+            if (field.StandingAt(i) && Obb2.TryGetPenetration(box, field.PropAt(i).Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         foreach (Obb2 other in obstacles)
             if (Obb2.TryGetPenetration(box, other, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         return deepest;
@@ -157,12 +208,11 @@ public static class TankMotion
 
     private static Vector2 Resolve(Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
     {
-        IReadOnlyList<Prop> props = field.Props;
         for (int iteration = 0; iteration < CollisionIterations; iteration++)
         {
             bool pushed = false;
-            for (int i = 0; i < props.Count; i++)
-                if (props[i].IsSolid) pushed |= PushOut(ref box, props[i].Footprint);   // bushes don't block
+            foreach (int i in field.Blockers)
+                if (field.StandingAt(i)) pushed |= PushOut(ref box, field.PropAt(i).Footprint);   // rubble, fallen fences and bushes don't block
             foreach (Obb2 other in obstacles) pushed |= PushOut(ref box, other);
             if (!pushed) break;
         }

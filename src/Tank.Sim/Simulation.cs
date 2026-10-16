@@ -9,11 +9,12 @@ namespace Tank.Sim;
 
 /// <summary>
 /// Advances the battle by one fixed 30Hz tick. Order inside a tick: tank footprints are snapshotted; each tank drives
-/// (a casemate gun's hull turning by itself towards an aim outside the arc), aims, updates its aim circle and fires (in
-/// slot order) against that snapshot, touching no other tank, so its turn doesn't depend on its slot (except that when
-/// the shell pool is full lower slots get to fire first, and shell ids follow slot order). Then the shell phase: shots
-/// that burst in a blocked barrel go off, then every shell in flight flies and resolves its hits, each group in firing
-/// order (shots of the same tick in slot order).
+/// (a casemate gun's hull turning by itself towards an aim outside the arc, knocking down fences and, rammed fast
+/// enough, brick walls in its way), aims, updates its aim circle and fires (in slot order) against that snapshot,
+/// touching no other tank, so its turn doesn't depend on its slot (except that when the shell pool is full lower slots
+/// get to fire first, shell ids follow slot order, and a prop one tank knocks down is already down for the next). Then
+/// the shell phase: shots that burst in a blocked barrel go off, then every shell in flight flies and resolves its hits,
+/// each group in firing order (shots of the same tick in slot order).
 /// </summary>
 public sealed partial class Simulation
 {
@@ -28,8 +29,11 @@ public sealed partial class Simulation
     private readonly Obb2[] _footprints = new Obb2[MaxTanks];
     private readonly Obb2[] _others = new Obb2[MaxTanks];
 
-    /// <summary>Sized for a busy tick (every tank firing, plus some hits) so a normal step never grows it.</summary>
-    private readonly List<GameEvent> _events = new(MaxTanks * 2);
+    /// <summary>
+    /// Sized for a busy tick (every tank firing, plus hits, and an HE burst in a bush patch, which alone can report a dozen
+    /// props down) so a normal step never grows it.
+    /// </summary>
+    private readonly List<GameEvent> _events = new(MaxTanks * 4);
 
     /// <summary>Events raised between steps (<see cref="Revive"/>); the next <see cref="Step"/> reports them.</summary>
     private readonly List<GameEvent> _pending = new(4);
@@ -97,7 +101,8 @@ public sealed partial class Simulation
             if (tank.IsDestroyed) continue;   // wrecks don't drive, aim or fire, but still block (see SnapshotFootprints)
             InputCmd input = TankMotion.TraverseHull(tank, Sanitize(inputs[i], tank), Field.Terrain);
             float yaw = tank.Yaw, turretYaw = tank.TurretYaw;
-            TankMotion.Drive(ref tank, input, Field, FootprintsExcept(i));
+            TankMotion.Drive(ref tank, input, Field, FootprintsExcept(i), _felled);
+            ReportFelled(tank);
             TankMotion.AimGun(ref tank, input, Field.Terrain);
             UpdateBloom(ref tank, yaw, turretYaw);
             TryFire(ref tank, input);
@@ -215,11 +220,12 @@ public sealed partial class Simulation
         else tank.ApLeft--;
         _events.Add(new GameEvent(GameEventType.ShellFired, Tick, tank.Id, shell.Id, shell.Position, shell.Velocity, Ammo: shell.Ammo));
 
-        // Barrel pushed into a rock or the ground: the shell bursts where the barrel meets it instead of spawning inside.
-        // It goes off in the shell phase, so every tank has had its turn before the splash, whatever the slots.
+        // Barrel pushed into a rock, a wall or the ground: the shell bursts where the barrel meets it instead of spawning
+        // inside (a wall takes it as a direct hit). It goes off in the shell phase, so every tank has had its turn before
+        // the splash, whatever the slots.
         if (launch.Blocked)
         {
-            _barrelBursts[_barrelBurstCount++] = new BarrelBurst(shell, launch.BlockPoint);
+            _barrelBursts[_barrelBurstCount++] = new BarrelBurst(shell, launch.BlockPoint, launch.BlockPropId);
             return;
         }
         _shells[ShellCount++] = shell;

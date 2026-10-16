@@ -11,6 +11,8 @@ public enum GameEventType : byte
     SplashDamage,
     TankDestroyed,
     TankRevived,
+    PropDamaged,
+    PropDestroyed,
 }
 
 /// <summary>What a shell did to the armour it struck. <see cref="None"/> on events that aren't hits.</summary>
@@ -27,14 +29,23 @@ public enum HitResult : byte
 /// A shell that leaves the map or times out emits no event; clients key any per-shell visuals by <c>Shell.Id</c> and retire them when it disappears.
 /// <list type="bullet">
 /// <item><see cref="GameEventType.ShellFired"/>: <see cref="TankId"/> fired <see cref="ShellId"/> from <see cref="Position"/> at <see cref="Velocity"/>.</item>
-/// <item><see cref="GameEventType.ShellExploded"/>: an HE burst, or any shell striking the ground, a rock or a wreck, at <see cref="Position"/>.</item>
+/// <item><see cref="GameEventType.ShellExploded"/>: an HE burst, or any shell striking the ground, a rock, a wall or a wreck, at <see cref="Position"/>.</item>
 /// <item><see cref="GameEventType.TankHit"/>: a shell from <see cref="TankId"/> struck <see cref="TargetTankId"/> at <see cref="Position"/>;
 /// <see cref="Velocity"/> holds the struck face's outward normal.</item>
 /// <item><see cref="GameEventType.SplashDamage"/>: an HE burst at <see cref="Position"/> hurt <see cref="TargetTankId"/>.</item>
 /// <item><see cref="GameEventType.TankDestroyed"/>: <see cref="TargetTankId"/> was knocked out by <see cref="TankId"/>; <see cref="Position"/> is the wreck.</item>
 /// <item><see cref="GameEventType.TankRevived"/>: <see cref="TargetTankId"/> (also <see cref="TankId"/>) is back at full health.</item>
+/// <item><see cref="GameEventType.PropDamaged"/>: shell <see cref="ShellId"/> from <see cref="TankId"/> did <see cref="Damage"/>
+/// to wall <see cref="PropId"/> (the shell's damage, as on <see cref="GameEventType.TankHit"/>: the wall may have had fewer
+/// hit points left). A direct hit: <see cref="Position"/> is where it struck and <see cref="Velocity"/> the shell's;
+/// a splash: <see cref="Position"/> is the burst and <see cref="Velocity"/> zero.</item>
+/// <item><see cref="GameEventType.PropDestroyed"/>: <see cref="TankId"/> destroyed prop <see cref="PropId"/> (a wall turned to rubble,
+/// a fence knocked flat, a bush shot away) with shell <see cref="ShellId"/> (<see cref="Ammo"/> its round), or, when that is
+/// 0, by driving into it. <see cref="Position"/> is where: the point the shell struck or entered it, the burst, or for a
+/// tank the prop's centre on the ground. <see cref="Velocity"/> is the level unit direction it was pushed (the shell's
+/// flight, outward from the burst, the hull's travel): a fence falls that way.</item>
 /// </list>
 /// </summary>
 public readonly record struct GameEvent(
     GameEventType Type, int Tick, int TankId, int ShellId, Vector3 Position, Vector3 Velocity,
-    int TargetTankId = 0, HitResult Result = HitResult.None, int Damage = 0, AmmoType Ammo = AmmoType.AP);
+    int TargetTankId = 0, HitResult Result = HitResult.None, int Damage = 0, AmmoType Ammo = AmmoType.AP, int PropId = 0);

@@ -15,12 +15,13 @@ namespace Tank.Client.Sandbox;
 
 /// <summary>
 /// Offline test drive: runs Tank.Sim locally at 30Hz and renders one tick behind, interpolated. The player's tank is slot 0;
-/// the practice targets (<see cref="TargetRange"/>) take the next slots. Keys: 1 AP, 2 HE, R restock, F1–F4 another tank
-/// (<c>TankCatalog.All</c> in order). Scenery, HUD and scripted runs live in <see cref="SandboxWorld"/>,
+/// the practice targets (<see cref="TargetRange"/>) take the next slots. Keys: 1 AP, 2 HE, R restock, T restore the walls,
+/// fences and bushes, F1–F4 another tank (<c>TankCatalog.All</c> in order). Scenery, HUD and scripted runs live in <see cref="SandboxWorld"/>,
 /// <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
 /// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --tank light|medium|heavy|td --autodrive
-/// --camera-preset front|side|hill|spin|orbit|bush|target|... --fps-log --sniper --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn
-/// --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill:S --quit-after S]
+/// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|... --fps-log --sniper
+/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush
+/// --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill|prop|down:S --quit-after S]
 /// </summary>
 public partial class SandboxMain : Node3D
 {
@@ -153,6 +154,7 @@ public partial class SandboxMain : Node3D
     private void StepSimulation()
     {
         if (!HasPreset && _input.TakeRestock()) _sim.Restock(_current.Id);
+        if (!HasPreset && _input.TakeRestoreProps()) _sim.RestoreProps();
         if (_input.TakeTankPick() is int pick && pick < TankCatalog.All.Count) ChangeTank(TankCatalog.All[pick]);
         _targets.ReviveDue(_sim);
         var (throttle, steer, fire) = _input.Sample();
@@ -210,6 +212,8 @@ public partial class SandboxMain : Node3D
         }
         _hud.OnEvent(e);
         _targets.OnEvent(e, _sim, _fx);
+        _world.OnEvent(e);
+        PropFx.OnEvent(e, _sim.Field, _fx);
     }
 
     /// <summary>Poses and animates the player's tank, with the muzzle blast of a shot fired this frame; hidden in the sniper sight.</summary>

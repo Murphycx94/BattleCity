@@ -43,6 +43,18 @@ public class PaletteTests
     }
 
     [Fact]
+    public void Wall_colours_keep_stone_apart_from_the_rocks_and_brick_apart_from_the_tanks()
+    {
+        Assert.True(Vector3.Distance(Palette.Stone, Palette.Rock) > 0.08f, "stone walls read as built, not as boulders");
+        Assert.True(Vector3.Distance(Palette.Brick, Palette.TankBody) > 0.2f, "brick is redder than the orange tanks");
+        Assert.True(Luminance(Palette.BrickMortar) - Luminance(Palette.Brick) > 0.15f, "cream joints show up on the bricks");
+        Assert.True(Luminance(Palette.Stone) - Luminance(Palette.StoneMortar) > 0.15f, "dark joints show up on the stones");
+    }
+
+    /// <summary>Relative luminance (Rec. 709 weights on the linear colour) of an sRGB palette entry.</summary>
+    private static float Luminance(Vector3 srgb) => Vector3.Dot(Palette.Linear(srgb), new Vector3(0.2126f, 0.7152f, 0.0722f));
+
+    [Fact]
     public void Linear_follows_the_srgb_curve()
     {
         Assert.Equal(0f, Palette.Linear(Vector3.Zero).X);

@@ -6,33 +6,34 @@ using Tank.Sim.Vehicles;
 
 namespace Tank.Sim;
 
-/// <summary>Shell flight and everything a shell can do when it lands: strike armour, burst, splash, wreck a tank.</summary>
+/// <summary>Shell flight and everything a shell can do when it lands: strike armour or a wall, burst, splash, wreck a tank.</summary>
 public sealed partial class Simulation
 {
     private readonly OrientedBox[] _hullBoxes = new OrientedBox[MaxTanks];
     private readonly OrientedBox[] _turretBoxes = new OrientedBox[MaxTanks];
 
-    /// <summary>Shots fired this tick into a rock or the ground, in firing order. A tank fires at most once a tick.</summary>
+    /// <summary>Shots fired this tick into a rock, a wall or the ground, in firing order. A tank fires at most once a tick.</summary>
     private readonly BarrelBurst[] _barrelBursts = new BarrelBurst[MaxTanks];
     private int _barrelBurstCount;
 
-    /// <summary>A shell that bursts where its barrel meets a rock or the ground, instead of leaving the muzzle.</summary>
-    private readonly record struct BarrelBurst(Shell Shell, Vector3 At);
+    /// <summary>
+    /// A shell that bursts where its barrel meets a rock, a wall (<see cref="PropId"/>; a direct hit on it) or the ground
+    /// (<see cref="RayHit.TerrainId"/>), instead of leaving the muzzle.
+    /// </summary>
+    private readonly record struct BarrelBurst(Shell Shell, Vector3 At, int PropId);
 
     /// <summary>
     /// The shell phase of a tick, in two groups, each in firing order. This tick's shots that burst in a blocked barrel go
     /// off first (as the gun fires, before anything in flight can land), so they come before shells fired on earlier
-    /// ticks. Then every shell in flight flies one tick; its path stops at whichever comes first: the ground or a rock, or
-    /// a tank's hull or turret box (never the shooter's own). Shells that leave the map or time out vanish without an
-    /// event. Those still flying keep their order for the next tick.
+    /// ticks. Then every shell in flight flies one tick; its path stops at whichever comes first: the ground, a rock or a
+    /// standing wall, or a tank's hull or turret box (never the shooter's own). Fences and bushes it passes on the way are
+    /// knocked down. Shells that leave the map or time out vanish without an event. Those still flying keep their order
+    /// for the next tick. A wall a shell brings down no longer stops the shells after it, nor a barrel pushed into it
+    /// (<see cref="GoOff"/>).
     /// </summary>
     private void StepShells()
     {
-        for (int i = 0; i < _barrelBurstCount; i++)
-        {
-            ref readonly BarrelBurst burst = ref _barrelBursts[i];
-            Explode(burst.Shell, burst.At, directSlot: -1);
-        }
+        for (int i = 0; i < _barrelBurstCount; i++) GoOff(_barrelBursts[i]);
         _barrelBurstCount = 0;
         if (ShellCount == 0) return;
         SnapshotHitBoxes();
@@ -43,15 +44,50 @@ public sealed partial class Simulation
             Vector3 from = shell.Position;
             ShellStep step = Ballistics.Step(ref shell, Field, out RayHit rayHit);
             float groundT = step == ShellStep.Hit ? rayHit.T : 1f;
-            if (FindTankHit(shell.OwnerTankId, from, shell.Position, groundT, out int slot, out ArmorHit hit))
+            bool hitTank = FindTankHit(shell.OwnerTankId, from, shell.Position, groundT, out int slot, out ArmorHit hit);
+            KnockThrough(shell, from, shell.Position, hitTank ? hit.T : groundT);
+            if (hitTank)
                 StrikeTank(shell, slot, hit, shell.Position - from);
             else if (step == ShellStep.Hit)
-                Explode(shell, rayHit.Point, directSlot: -1);
+                StrikeProp(shell, IndexOfHit(rayHit.PropId), rayHit.Point, shell.Position - from);
             else if (step == ShellStep.Flying)
                 _shells[kept++] = shell;   // still flying: compact in place (kept <= i), keeping firing order
         }
         ShellCount = kept;
     }
+
+    /// <summary>
+    /// A shot fired into a blocked barrel. Usually it bursts where the barrel goes in. But if what blocked it was a wall
+    /// that has come down since the gun fired (shot down by an earlier burst, or rammed by a tank in a later slot), the
+    /// rest of the barrel decides: the shell bursts on whatever else is in it, or else leaves the muzzle and flies this
+    /// tick like any other shot (after this tick's other shots, if a slot is free; if not, it bursts in the rubble).
+    /// </summary>
+    private void GoOff(in BarrelBurst burst)
+    {
+        int index = IndexOfHit(burst.PropId);
+        if (index < 0 || !Field.PropAt(index).IsWall || Field.StandingAt(index))
+        {
+            StrikeProp(burst.Shell, index, burst.At, burst.Shell.Velocity);
+            return;
+        }
+        if (Field.Raycast(burst.At, burst.Shell.Position, out RayHit next)) StrikeProp(burst.Shell, IndexOfHit(next.PropId), next.Point, burst.Shell.Velocity);
+        else if (ShellCount < MaxShells) _shells[ShellCount++] = burst.Shell;
+        else Explode(burst.Shell, burst.At, directSlot: -1);
+    }
+
+    /// <summary>
+    /// The shell stops at <paramref name="at"/> on the ground (<paramref name="index"/> −1), a rock, or wall
+    /// <paramref name="index"/> (still standing: rays only stop at standing walls, and <see cref="GoOff"/> checks again),
+    /// flying along <paramref name="direction"/>.
+    /// </summary>
+    private void StrikeProp(in Shell shell, int index, Vector3 at, Vector3 direction)
+    {
+        if (index >= 0 && Field.PropAt(index).IsWall) StrikeWall(shell, index, at, direction);
+        else Explode(shell, at, directSlot: -1);
+    }
+
+    /// <summary>The index of the prop a ray stopped at, or −1 for the ground (<see cref="RayHit.TerrainId"/>).</summary>
+    private int IndexOfHit(int propId) => propId == RayHit.TerrainId ? -1 : Field.IndexOf(propId);
 
     /// <summary>Tanks don't move while shells fly, so their boxes are worked out once per tick.</summary>
     private void SnapshotHitBoxes()
@@ -110,9 +146,10 @@ public sealed partial class Simulation
 
     /// <summary>
     /// The shell bursts at <paramref name="at"/>. A round with a splash radius (HE) hurts every other live tank in range,
-    /// except the shooter and <paramref name="directSlot"/> (the tank it struck directly, already dealt with).
+    /// except the shooter and <paramref name="directSlot"/> (the tank it struck directly, already dealt with), then the
+    /// props around it (<see cref="SplashProps"/>; <paramref name="directProp"/> is the wall it struck, if any).
     /// </summary>
-    private void Explode(in Shell shell, Vector3 at, int directSlot)
+    private void Explode(in Shell shell, Vector3 at, int directSlot, int directProp = -1)
     {
         _events.Add(new GameEvent(GameEventType.ShellExploded, Tick, shell.OwnerTankId, shell.Id, at, Vector3.Zero, Ammo: shell.Ammo));
         if (shell.Round.SplashRadius <= 0) return;
@@ -130,6 +167,7 @@ public sealed partial class Simulation
                 target.Id, HitResult.None, damage, shell.Ammo));
             Damage(ref target, damage, shell.OwnerTankId, shell.Id);
         }
+        SplashProps(shell, at, directProp);
     }
 
     /// <summary>

@@ -58,8 +58,14 @@ public static class Penetration
     private static bool Pierces(ShellSpec round, float armor, float angle, uint seed) =>
         round.Penetration * ShotRandom.Range(seed, ShotRandom.PenetrationRoll, MinRoll, MaxRoll) >= EffectiveArmor(armor, angle);
 
-    private static int RolledDamage(ShellSpec round, uint seed) =>
-        RoundHalfUp(round.Damage * ShotRandom.Range(seed, ShotRandom.DamageRoll, MinRoll, MaxRoll));
+    private static int RolledDamage(ShellSpec round, uint seed) => RoundHalfUp(round.Damage * DamageRoll(seed));
 
-    private static int RoundHalfUp(float value) => (int)MathF.Round(value, MidpointRounding.AwayFromZero);
+    /// <summary>
+    /// The shot's ±25% damage roll, a factor on the round's damage. Shared with <see cref="WallDamage.Direct"/>, so a
+    /// direct hit on a wall rolls exactly like a piercing hit on a tank.
+    /// </summary>
+    internal static float DamageRoll(uint seed) => ShotRandom.Range(seed, ShotRandom.DamageRoll, MinRoll, MaxRoll);
+
+    /// <summary>Damage to whole hit points, halves rounded up; for tanks and walls alike.</summary>
+    internal static int RoundHalfUp(float value) => (int)MathF.Round(value, MidpointRounding.AwayFromZero);
 }

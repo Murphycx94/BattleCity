@@ -55,6 +55,8 @@ public sealed class SandboxMapTests
             highest = MathF.Max(highest, sim.Field.Terrain.HeightAt(p.X, p.Y));
         }
         Assert.True(highest > 18f, $"only reached {highest}m");
+        Assert.All(sim.Field.Props.Where(p => p.IsWall || p.Kind == PropKind.Fence),
+            p => Assert.True(sim.Field.IsStanding(p.Id), $"{p.Kind} {p.Id} was knocked down on the way"));
     }
 
     [Fact]

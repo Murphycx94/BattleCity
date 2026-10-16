@@ -45,6 +45,12 @@ public static class Palette
     public static readonly Vector3 HitBlocked = Hex("B9BDC8");   // "未击穿" ("跳弹！" uses UiAccent)
     public static readonly Vector3 Health = Hex("6CD45A");       // a healthy health bar
     public static readonly Vector3 WreckSmoke = Hex("4A4650");   // dark smoke from a wreck
+    public static readonly Vector3 Brick = Hex("C4553A");        // brick walls and their rubble
+    public static readonly Vector3 BrickMortar = Hex("E8C9A8");  // cream joints between the bricks
+    public static readonly Vector3 Stone = Hex("B4B8BF");        // stone walls: a cool grey, apart from the warm rocks
+    public static readonly Vector3 StoneMortar = Hex("7E838C");  // darker joints between the stones
+    public static readonly Vector3 Wood = Hex("B9844F");         // fences, and the chips off them
+    public static readonly Vector3 BrickDust = Hex("E0A88C");    // dust off a brick wall
 
     /// <summary>"RRGGBB" (an optional leading '#') to sRGB 0–1.</summary>
     public static Vector3 Hex(string hex)

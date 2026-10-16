@@ -12,7 +12,7 @@ uniform float toon_wrap = 0.5;
 uniform float toon_shadow_mix = 0.5;      // how far the unlit colour moves towards toon_shadow_color
 uniform float toon_shadow_level = 0.55;   // brightness of the sun's fill on the unlit side (0 = only ambient)
 uniform vec3 toon_rim_color : source_color = vec3(0.867, 0.949, 0.984);     // Palette.SkyHorizon
-uniform float toon_rim_strength = 0.0;    // 0.25 on tanks and rocks
+uniform float toon_rim_strength = 0.0;    // 0.25 on tanks, rocks and walls
 
 vec3 toon_rim(vec3 normal, vec3 view) {
 	return toon_rim_color * toon_rim_strength * pow(1.0 - clamp(dot(normal, view), 0.0, 1.0), 3.0);
