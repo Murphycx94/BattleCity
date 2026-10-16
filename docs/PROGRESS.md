@@ -6,12 +6,9 @@
 
 ## 当前位置
 
-- **阶段**：2B 车型（轻坦、重坦、坦克歼击车）
-- **分支 / 工作目录**：`feat/stage2b-vehicles`，位于 `/Users/murphy/Desktop/dev/BattleCity-stage2b`。从 main 的 `94f6ecb` 拉出
-- **设计**：[docs/superpowers/specs/2026-10-15-stage2b-vehicles-design.md](superpowers/specs/2026-10-15-stage2b-vehicles-design.md)
-- **计划**：[docs/superpowers/plans/2026-10-15-stage2b-vehicles.md](superpowers/plans/2026-10-15-stage2b-vehicles.md)（10 个任务，分 A～E 五批）
-- **下一步**：继续 Task 10 用户试玩（已按反馈缩短 TD 炮管），按反馈调整，用户确认后 squash 合入 main（草稿：`/Users/murphy/Desktop/dev/BattleCity-stage2b-draft`，分支 `draft/stage2b-vehicles`，Task 1～8 依次是 `d2159df` `834ecb1` `41546d9` `bb17999` `32f0348` `7846d61` `cfb3ad4` `c2ba4a1`；合入 main 时删掉草稿目录和分支，备份分支 `draft-2b-backup` 一起删）
-- **上一阶段**：2A 战斗核心已 squash 合入 main（`81bbead`）。分支 `feat/stage2a-combat` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage2a` 还在（`build/shots/` 有验收截图），不再需要时可删
+- **阶段**：2C 可破坏物（砖墙、石墙、栅栏、草丛被毁，瓦砾；重坦撞倒砖墙），未开始
+- **下一步**：先做 2C 的设计（头脑风暴 → 设计文档 → 用户确认），再照 2A、2B 的做法：草稿实现并截图验证、审查，脚本导出实施计划，逐批派子代理执行。依据：总体设计 [§3.2 地图文件、§4.2 碰撞、§5.5 对物件的伤害](superpowers/specs/2026-10-13-third-person-tank-design.md)，以及 2A 设计里 2C 的范围
+- **上一阶段**：2B 车型已 squash 合入 main（`1160ad6`），节点记录见下方“2B 节点记录”。分支 `feat/stage2b-vehicles` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage2b` 还在（`build/shots/` 有验收截图），不再需要时可删。草稿目录和分支已删
 
 ## 阶段总览
 
@@ -20,8 +17,8 @@
 | 1 单机试驾场 | ✅ 已合入 main（`b0daefb`） | |
 | 1.5 画面（卡通风格、玩具坦克、高草丛、更多掩体） | ✅ 已合入 main（`cd70856`，squash） | 用户已试玩确认 |
 | 2A 战斗核心 | ✅ 已合入 main（`81bbead`，squash） | 用户已试玩确认；中坦装填改为 4 秒；跳弹规则保持 70° |
-| 2B 车型（轻坦、重坦、坦克歼击车） | 🚧 进行中 | 本文件“当前位置” |
-| 2C 可破坏物（墙、栅栏、草丛、瓦砾、撞墙） | ⏳ 未开始 | |
+| 2B 车型（轻坦、重坦、坦克歼击车） | ✅ 已合入 main（`1160ad6`，squash） | 用户已试玩确认；TD 炮管缩短为伸出车头 2.8 m |
+| 2C 可破坏物（墙、栅栏、草丛、瓦砾、撞墙） | ⏳ 下一个 | 本文件“当前位置” |
 | 3 点亮 | ⏳ 未开始 | |
 | 4 联网 | ⏳ 未开始 | |
 | 5 5v5 | ⏳ 未开始 | |
@@ -41,7 +38,7 @@
 | 4 | 帧率检查、最终截图 | ✅ | | 全部测试通过：Sim 323、Art 342、Core 62、Net 50、Update 42；客户端 0 警告。验收截图（`build/shots/final-*.png`）逐张看过：四种车近景、TD 自动转向前后、轻坦打重坦炮塔正面“未击穿”、重坦击毁中坦炮塔飞起（-293）、TD 被击毁焦黑冒烟无炮塔、2A 的击穿照常。帧率（关垂直同步）：spin 220～280 帧（中间一段窗口被挡、限在 60 帧，最后一段 145 帧）；orbit 150～310 帧，有两秒掉到 63、72 帧。2A 时的“稳定 145 帧”看来是当时的显示设置限住的 |
 | 5 | 用户试玩、按反馈调整 | ✅ | | 用户确认没问题。反馈只有一条：TD 炮管缩短（5a） |
 | 5a | TD 炮管缩短：炮口伸出车头 3.4 → 2.8 m | ✅ | `cb6764d` | 炮长（从炮盾算）4.1 → 3.5 m；TD 车型测试固定“炮口伸出车头 2.8 m”。截图确认 |
-| 6 | squash 合入 main | ⏳ | | |
+| 6 | squash 合入 main | ✅ | `1160ad6` | 合入后 main 上全部测试通过；草稿 worktree 和分支已删 |
 
 ## 2A 节点记录
 
