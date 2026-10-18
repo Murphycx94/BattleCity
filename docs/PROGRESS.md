@@ -9,8 +9,8 @@
 - **阶段**：4 联网，分 4A 联网核心（无画面）、4B 客户端对局、4C 清理。设计已确认：[阶段 4 联网设计](superpowers/specs/2026-10-18-stage4-networking-design.md)（在 `feat/stage4a-netcore` 上，工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4a`）
 - **用户的要求**：设计确认后一路做完三个小阶段（含审查、验收、squash 合入 main），中途不再询问，做完再汇报。不推送远程
 - **用户的选择**：三种模式都做（团队对战可复活、团队歼灭不复活、各自为战最后存活者赢）；简单的服务器端机器人；主菜单加试驾场；一局最多 10 辆车；各自为战不缩圈、限时 10 分钟；用试驾场地图去掉靶车
-- **进度**：4A 草稿 8 个提交（Task 1～8）已在 `/Users/murphy/Desktop/dev/BattleCity-stage4a-draft`（分支 `draft/stage4a-netcore`，从设计提交 `5440a0b` 拉出）做完，每个提交单独检出：客户端 / 服务器 / soak 编译 0 警告，Sim、Net 测试全过（最终 Sim 616、Net 80）；soak 4 种链路全 PASS。草稿审查（两个子代理，仿真侧和网络侧）进行中
-- **下一步**：按审查意见跟进（fixup 进对应任务的提交）→ 重跑逐提交校验（`scratchpad/counts4a.sh`）→ 脚本导出计划（`scratchpad/export_plan_4a.py`，parts 在 `scratchpad/plan4a/`）→ 重放核对 → 逐批派子代理执行（提示 `scratchpad/implementer_prompt4a.sh N`）→ 每批审查 → 验收 → squash 合入 main，然后 4B、4C
+- **进度**：4A 草稿完成、审查跟进完成，计划已导出到 `feat/stage4a-netcore`（`docs/superpowers/plans/2026-10-19-stage4a-netcore.md`，工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4a`）。正在逐批派子代理执行（提示 `scratchpad/implementer_prompt4a.sh N`；批 A = Task 1～4，批 B = Task 5～6，批 C = Task 7～8）
+- **下一步**：每批做完做规格审查 + 质量审查 → 跟进提交 → 验收（全部测试、soak）→ squash 合入 main，然后 4B、4C
 - **上一阶段**：3 点亮已 squash 合入 main（`cf0d593`），节点记录见下方“3 节点记录”。分支 `feat/stage3-spotting` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage3` 还在，不再需要时可删
 
 ## 阶段总览
@@ -32,7 +32,7 @@
 | # | 节点 | 状态 | 提交 | 说明 |
 |---|---|---|---|---|
 | 1 | 设计确认，写成文档 | ✅ | `5440a0b` | 阶段 4 拆成 4A 联网核心 / 4B 客户端对局 / 4C 清理；三种模式；服务器端简单机器人；10 辆车；大乱斗限时 10 分钟不缩圈；试驾场地图去靶车。用户要求之后不再询问，做完汇报 |
-| 2 | 草稿实现 + 审查，导出实施计划 | ⏳ | | 草稿 8 个提交：T1 坦克来去（RemoveTank / Respawn / 保护 / 16 队 / 视野表跟槽位）、T2 TankStep.Advance + 不撞倒物件 + SetDurability + MapData、T3 三种模式的规则 + 出生点 + 路点、T4 机器人 + 共用转向、T5 对战协议（输入、增量快照、消息）、T6 对战服务器（房间、对局、可见性、事件过滤）+ 传输层密钥、T7 对战客户端（预测、对账、插值、炮弹）+ 集成测试台、T8 服务器入口新模式 + soak。每个提交单独检出全过：Sim 依次 590、596、610、616、616、616、616、616，Net 50、50、50、50、61、67、80、80。soak：有线 / WiFi / 移动 / 糟糕四种链路都 PASS，下行 1.8～2.3 KB/s（预算 20），平均修正 ≤ 0.1 m、最大 ≤ 1.1 m。草稿写作中修过：Protect 差一的边界；撞砖墙每 tick 减半改为进入时一次；`Modes` 类名与命名空间冲突改 `ModeRules`；出生点轮询改为先挑空位；集成测试里两处测试本身的错（空集合上的 Assert.Contains；俯仰 −0.1 的炮弹第一步就入地） |
+| 2 | 草稿实现 + 审查，导出实施计划 | ✅ | 计划 `feat/stage4a-netcore` 上 | 草稿 8 个提交：T1 坦克来去（RemoveTank / Respawn / 保护 / 16 队 / 视野表跟槽位）、T2 TankStep.Advance + 不撞倒物件 + SetDurability + MapData、T3 三种模式的规则 + 出生点 + 路点、T4 机器人 + 共用转向、T5 对战协议、T6 对战服务器 + 传输层密钥、T7 对战客户端 + 集成测试台、T8 服务器入口新模式 + soak。两个审查子代理（仿真侧 / 网络侧）各给出 15 / 11 条意见，无 CRITICAL；按意见改了并 fixup 进对应任务（队伍得分离队丢失；客户端预测中速撞砖墙卡住；复活位置泄露 2 秒；`Protected` 标志永远为真；复活瞬移算成修正；看不见的射手车号从爆炸 / 物件 / 命中事件泄露；机器人原地转向被当成卡住、没弹后发呆、250 m 测试没测到；受保护的车挨溅射要报事件；平局按击杀；残骸占出生点；RequestMatchState 接通；插值下限 100 ms；局外座位可改队伍车型；自己的开炮事件先到不画两发；迟到计数；若干分配）。改后每个提交单独检出全过：Sim 591、598、614、622、622、622、622、622，Net 50、50、50、50、61、67、80、80；soak 四种链路 PASS（下行 1.7～2.3 KB/s，修正 有线 8.8 / WiFi 27.8 / 移动 3.0 / 糟糕 3.0 次每分钟，平均 ≤ 0.12 m，最大 ≤ 1.09 m，插值 100 ms）。计划由脚本导出（`scratchpad/export_plan_4a.py`），干净目录重放与草稿 0 差异。设计文档同步：出生点 283 m、挑法、`SetDurability`、移除 / 复活与视野、机器人卡住与没弹、事件射手车号统一规则 |
 
 ## 3 节点记录
 
