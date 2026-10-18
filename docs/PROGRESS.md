@@ -7,8 +7,8 @@
 ## 当前位置
 
 - **阶段**：3 点亮，计划已写好，下一步逐批执行
-- **工作目录**：`/Users/murphy/Desktop/dev/BattleCity-stage3`，分支 `feat/stage3-spotting`。设计 `032b443`，计划 `e26c42b`：[阶段 3 计划](superpowers/plans/2026-10-18-stage3-spotting.md)（在 feat 分支上；设计文档同一提交里按草稿的发现同步过）
-- **下一步**：按计划逐批派子代理执行。批次 A（Task 1～3，点亮规则）→ B（Task 4，AI 靶车）→ C（Task 5～7，试驾场）→ D（验收截图和帧率）→ 用户试玩 → squash 合入 main。用 `scratchpad/plan_step.py` 从计划逐字取代码。每个任务做完和草稿对应提交核对：`git diff <草稿提交> HEAD -- src tests` 应为空，只差 .uid
+- **工作目录**：`/Users/murphy/Desktop/dev/BattleCity-stage3`，分支 `feat/stage3-spotting`。设计 `032b443`，计划 `58b84c7`：[阶段 3 计划](superpowers/plans/2026-10-18-stage3-spotting.md)（在 feat 分支上；设计文档同一提交里按草稿的发现同步过）
+- **下一步**：批次 A 已完成（见“3 节点记录”）。接着 B（Task 4，AI 靶车）→ C（Task 5～7，试驾场）→ D（验收截图和帧率）→ 用户试玩 → squash 合入 main。用 `scratchpad/plan_step.py` 从计划逐字取代码。每个任务做完和草稿对应提交核对：`git diff <草稿提交> HEAD -- src tests` 应为空，只差 .uid
 - **草稿**：`/Users/murphy/Desktop/dev/BattleCity-stage3-draft`，分支 `draft/stage3-spotting`，审查前的版本在 `draft-v1`。审查后的草稿提交：T1 `8508343`、T2 `542edde`、T3 `0eac296`、T4 `eba92ec`、T5 `08bd742`、T6 `2959142`、T7 `a504f5e`。核对用的临时目录 `/Users/murphy/Desktop/dev/BattleCity-stage3-counts`。合并时一起删
 - **上一阶段**：2C 可破坏物已 squash 合入 main（`7d398b6`），节点记录见下方“2C 节点记录”。分支 `feat/stage2c-destructibles` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage2c` 还在，不再需要时可删
 
@@ -32,6 +32,8 @@
 |---|---|---|---|---|
 | 1 | 设计确认，写成文档 | ✅ | `032b443` | 用户确认：没点亮的敌车完全不画（血条、命中字也不显示）；AI 靶车绕圈、进草丛停、朝玩家前方开炮（不伤人）；7 辆固定靶车按点亮规则但不看人；加“被点亮”灯，只看 AI 靶车 |
 | 2 | 草稿实现 + 截图验证 + 审查，导出实施计划 | ✅ | `e26c42b` | 草稿 7 个提交（Task 1～7），每个单独检出编译 0 警告、测试全过，最终 Sim 575、Art 510。截图逐张看过（AI 在空地上看得见、进草丛消失、开炮后出现、“保持中”；TD 打穿石墙前后院里靶车看不见 / 看得见；灯演示开炮前灭、开炮后亮；`fence`、`pen` 演示和以前一样）。帧率 orbit 145、spin 118～120。草稿审查无严重问题，按意见改了：队伍编号越界检查；“在草丛里”0.75 倍半径原来不起作用，改为车所在的那丛只在视线经过它中心 0.75 倍半径以内时才算（设计同步）；复活的车不再闪一下；`fence` 演示原来看不见靶车（视线打在门边砖墙上），站位西移约 4°；停着的 AI 不看人（旧演示的灯不亮）；隔墙看不见的截图固定用 TD；补地面挡视线、坦克不挡视线、真实地图上不分配内存等测试。与设计不同而有意为之：AI 瞄准玩家前方 25 m、偏左 8 m（15 m 实测会打中玩家），50 m 内不开炮；急转弯路点停稳再转；`patrol` 机位玩家在观察点 (224,352)；灯演示站 (38,306)、第 8 秒开炮，只适用中坦。计划由脚本从草稿导出，在干净目录重放后与草稿逐字一致（只差 3 个 .uid） |
+| 3 | 按计划逐批实现 + 每批审查 | ⏳ | | 逐任务派子代理，用 `scratchpad/plan_step.py` 从计划逐字取代码（提示由 `scratchpad/implementer_prompt3.sh N` 生成），每个任务做完和草稿对应提交核对。`scratchpad/later_patches3.sh N` 在临时目录里把 Task N～7 的补丁打在当前提交上并跑测试 |
+| 3A | 批次 A：Task 1～3（视野与队伍、一次观察、汇总） | ✅ | `5cac234` `510c239` `c8a9018`，审查跟进 `b8d8673` | 三个任务都和草稿逐字一致。规格审查通过。质量审查批准，跟进：`VisionTracker` 改用快速判定 `Spotting.Sees`（距离已定输赢时不数草丛、不打视线，第一条视线通就停；和 `Look` 在试驾场上逐点比对结论相同），实测 32 辆车时每次计算从 0.73 ms 降到约 0.34 ms；同一 tick 再调用 `Update` 不再把车当成静止；补测试：直线开车算行进、转完停下变回静止、草丛只在视线离目标 15 m 以内擦过时才算；`Spotting.Camo(...)` 改名 `EffectiveCamo`；几处注释。Sim 509 → 515。Task 4～7 的补丁在跟进提交之上照样能打上（Sim 依次应为 579、579、579、581，Art 445、448、454、510） |
 
 ## 2C 节点记录
 
