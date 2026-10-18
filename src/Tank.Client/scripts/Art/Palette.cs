@@ -27,6 +27,7 @@ public static class Palette
     public static readonly Vector3 UiPanel = Hex("1E2333");
     public const float UiPanelAlpha = 0.7f;
     public static readonly Vector3 UiAccent = Hex("FFC93C");
+    public static readonly Vector3 UiLampOff = Hex("4A4F5E");   // the spotted lamp while nobody sees the player
     public static readonly Vector3 TargetBody = Hex("6F8FB5");   // blue-grey practice targets (stage 2A design)
     public static readonly Vector3 Charred = Hex("2B2622");      // a knocked-out tank's scorched paint
 

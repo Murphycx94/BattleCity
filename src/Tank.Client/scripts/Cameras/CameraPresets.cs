@@ -1,4 +1,6 @@
 using Godot;
+using SandboxMap = Tank.Sim.Maps.SandboxMap;
+using SN = System.Numerics;
 
 namespace Tank.Client.Cameras;
 
@@ -9,7 +11,9 @@ namespace Tank.Client.Cameras;
 /// inside the bush patch nearest the spawn and looks at it from outside the patch; target looks at a practice target (the
 /// range demo's, else the first) from its front-right, on the side where a thrown turret lands (pair it with --range-demo);
 /// yard looks down on the walled yard and the cover beside the spawn from the south-east; gate looks at the yard's fence
-/// gate from just outside it (pair it with --range-demo fence).
+/// gate from just outside it (pair it with --range-demo fence); patrol starts the tank at <c>SandboxMap.PatrolWatch</c> and
+/// looks at the patrolling target's first bush patch from beside it, to watch it drive in, vanish and give itself away
+/// when it fires.
 /// </summary>
 public static class CameraPresets
 {
@@ -30,18 +34,29 @@ public static class CameraPresets
     private const float GateEyeHeight = 3f;
     private static readonly Vector3 TargetEye = new(7f, 4.5f, -13f);    // front-right of the target (its forward is −Z)
     private static readonly Vector3 TargetFocus = new(1.5f, 1.6f, 0f);  // between the hull and where the turret lands
+    private const float PatrolEyeOut = 32f;     // the patrol eye stands this far from its focus, towards the watch point
+    private const float PatrolEyeHeight = 7f;
+    private const float PatrolFocusAlong = 0.8f;   // the focus lies this share of the way from the patrol's start to its first bush patch
 
     /// <summary>Presets whose eye is far from the tank: world detail (grass) should then stream around the eye, not the tank.</summary>
-    public static bool StreamsAroundCamera(string? name) => name is "hill" or "spin";
+    public static bool StreamsAroundCamera(string? name) => name is "hill" or "spin" or "patrol";
 
     /// <summary>Every preset's name.</summary>
     public static IReadOnlyList<string> Names { get; } =
-        new[] { "front", "side", "close", "closerear", "sprocket", "hill", "spin", "orbit", "bush", "target", "yard", "gate" };
+        new[] { "front", "side", "close", "closerear", "sprocket", "hill", "spin", "orbit", "bush", "target", "yard", "gate", "patrol" };
 
     public static bool IsKnown(string? name) => name is not null && Names.Contains(name);
 
-    /// <summary>Where the tank starts for this preset: "bush" parks it in the bush patch nearest the spawn, the rest use the normal spawn.</summary>
-    public static System.Numerics.Vector2 Spawn(string? name) => name == "bush" ? Tank.Sim.Maps.SandboxMap.BushPatches[0] : Tank.Sim.Maps.SandboxMap.Spawn;
+    /// <summary>
+    /// Where the tank starts for this preset: "bush" parks it in the bush patch nearest the spawn, "patrol" at
+    /// <c>SandboxMap.PatrolWatch</c>, the rest use the normal spawn.
+    /// </summary>
+    public static SN.Vector2 Spawn(string? name) => name switch
+    {
+        "bush" => SandboxMap.BushPatches[0],
+        "patrol" => SandboxMap.PatrolWatch,
+        _ => SandboxMap.Spawn,
+    };
 
     /// <param name="groundAt">Terrain height at (x, z), used to keep fixed eyes above the ground.</param>
     /// <param name="targetIndex">The practice target the "target" preset looks at (index into <c>SandboxMap.TargetSpots</c>).</param>
@@ -63,7 +78,7 @@ public static class CameraPresets
             case "bush": // the tank parked inside a bush patch, seen from outside it (west, towards the lane)
                 return (tank + new Vector3(-16f, 3.4f, 6f), tank + TankFocus);
             case "target":
-                var spot = Tank.Sim.Maps.SandboxMap.TargetSpots[targetIndex];
+                var spot = SandboxMap.TargetSpots[targetIndex];
                 var at = new Vector3(spot.Position.X, groundAt(spot.Position.X, spot.Position.Y), spot.Position.Y);
                 var turn = new Basis(Vector3.Up, spot.Yaw);
                 return (at + turn * TargetEye, at + turn * TargetFocus);
@@ -72,6 +87,11 @@ public static class CameraPresets
                     YardTarget + Vector3.Up * groundAt(YardTarget.X, YardTarget.Z));
             case "gate":
                 return (new Vector3(GateEye.X, groundAt(GateEye.X, GateEye.Y) + GateEyeHeight, GateEye.Y), GateFocus + Vector3.Up * groundAt(GateFocus.X, GateFocus.Z));
+            case "patrol": // the patrol's drive from its start into its first bush patch, from the watch point's side
+                SN.Vector2 focus = SN.Vector2.Lerp(SandboxMap.PatrolStart, SandboxMap.PatrolRoute[0].Position, PatrolFocusAlong);
+                SN.Vector2 stand = focus + SN.Vector2.Normalize(SandboxMap.PatrolWatch - focus) * PatrolEyeOut;
+                return (new Vector3(stand.X, groundAt(stand.X, stand.Y) + PatrolEyeHeight, stand.Y),
+                    new Vector3(focus.X, groundAt(focus.X, focus.Y) + 1.5f, focus.Y));
             case "hill":
                 return (new Vector3(HillEye.X, groundAt(HillEye.X, HillEye.Y) + 28f, HillEye.Y), HillTarget);
             case "orbit": // circles the parked tank at 14 m, level with the turret: stresses anything keyed to the camera

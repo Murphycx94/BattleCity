@@ -77,6 +77,12 @@ public sealed record TankSpec
 
     public required BloomFactors Bloom { get; init; }
 
+    /// <summary>How far the crew spots an enemy that has no concealment at all, m (design §6).</summary>
+    public required float ViewRange { get; init; }
+
+    /// <summary>How hard the tank is to spot, moving and standing still (design §6).</summary>
+    public required Concealment Camo { get; init; }
+
     /// <summary>The stats of this gun's round of type <paramref name="ammo"/>.</summary>
     public ShellSpec Round(AmmoType ammo) => ammo == AmmoType.HE ? He : Ap;
 }

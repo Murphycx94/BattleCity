@@ -6,8 +6,14 @@ namespace Tank.Sim.Vehicles;
 /// <summary>Everything that persists between ticks for one tank. Height and tilt are derived (see <see cref="TankPose"/>).</summary>
 public struct TankState
 {
+    /// <summary><see cref="LastFired"/> of a tank that hasn't fired: far enough back that no "recently" window reaches it.</summary>
+    public const int NeverFired = int.MinValue / 2;
+
     public int Id;
     public TankSpec Spec;
+
+    /// <summary>Which side the tank is on; tanks of one team share what they see (design §6).</summary>
+    public byte Team;
 
     /// <summary>Ground position: X is world X, Y is world Z.</summary>
     public Vector2 Position;
@@ -27,6 +33,9 @@ public struct TankState
     public float Reload;
 
     public int ShotCount;
+
+    /// <summary>The tick the gun last fired, or <see cref="NeverFired"/> (firing gives away a hidden tank for a while).</summary>
+    public int LastFired;
 
     public int Health;
 

@@ -15,8 +15,9 @@ namespace Tank.Client.Sandbox;
 /// --camera-preset (stand still). Timed steps wait for a <see cref="Moment"/>, each noted the first time it happens:
 /// the screenshot is taken a delay after the run's start (--screenshot-at), the player's first shot (--fx-shot, or
 /// --shot-after fire), the first tank hit or kill (--shot-after hit|kill), or the first wall hurt or prop destroyed
-/// (--shot-after prop|down), and a range demo that fires once stops after the player's first shot. With --fx-shot,
-/// nothing before a warm-up counts. Also --fps-log and --quit-after.
+/// (--shot-after prop|down), each by the player (the patrolling target's shots and fences it drives into don't
+/// count), and a range demo that fires once stops after the player's first shot. With --fx-shot, nothing before a
+/// warm-up counts. Also --fps-log and --quit-after.
 /// Moments and the delays after them are wall-clock seconds (the screenshot is of what is on screen); only a range
 /// demo's first shot is timed in simulation ticks (<see cref="RangeDemo.FireTick"/>), so the shot itself is repeatable.
 /// </summary>
@@ -67,12 +68,13 @@ public sealed class SandboxAutomation
             GD.PushWarning($"Unknown --range-demo '{demo}'; use {string.Join(", ", RangeDemo.Names)}.");
     }
 
-    /// <summary>Notes the first time the player fired, a tank was hit or destroyed, a wall was hurt and a prop destroyed.</summary>
+    /// <summary>Notes the first time the player fired, hit or destroyed a tank, hurt a wall and destroyed a prop.</summary>
     public void OnEvent(in GameEvent e, int playerId, double time)
     {
+        if (e.TankId != playerId) return;
         Moment? moment = e.Type switch
         {
-            GameEventType.ShellFired when e.TankId == playerId => Moment.Fire,
+            GameEventType.ShellFired => Moment.Fire,
             GameEventType.TankHit => Moment.Hit,
             GameEventType.TankDestroyed => Moment.Kill,
             GameEventType.PropDamaged => Moment.Prop,

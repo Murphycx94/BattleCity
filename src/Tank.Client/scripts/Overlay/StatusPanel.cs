@@ -8,8 +8,9 @@ namespace Tank.Client.Overlay;
 /// Bottom-left rounded panel in three rows: a capsule health bar with the hit points; a speedometer icon with the speed
 /// as a big outlined number and a shell icon with the reload state ("就绪" in the accent colour, or the seconds left);
 /// and two ammo chips, "1 穿甲 40" and "2 高爆 15", the loaded one outlined in the accent colour, an empty one greyed.
-/// The vehicle's name ("中型坦克") sits just above the panel. Icons are drawn with primitives, no image files. Redraws
-/// only when something it shows changes.
+/// The vehicle's name ("中型坦克") sits just above the panel, and the "被点亮" lamp on its top-right corner: dark, or
+/// lit warm yellow with a glow, rays and the words "被点亮" while an enemy sees the player (stage 3 design §4.3). Icons are
+/// drawn with primitives, no image files. Redraws only when something it shows changes.
 /// </summary>
 public partial class StatusPanel : Control
 {
@@ -30,6 +31,10 @@ public partial class StatusPanel : Control
     private const float ChipPad = 10f, ChipGap = 12f;
     private const int ChipRadius = 10;
     private const float PanelHeight = Pad + HealthRow + RowGap + GaugeRow + RowGap + ChipRow + Pad;
+    private const float LampRadius = 12f;
+    private const float LampRise = 10f;   // the lamp's centre sits this far above the panel's top edge, level with the name
+    private const int LampRays = 8;
+    private const int SpottedSize = 22;
 
     // Shell icon, centred on the origin; the outline is the same polygon scaled up. Built once.
     private static readonly Vector2[] ShellBody =
@@ -60,6 +65,7 @@ public partial class StatusPanel : Control
     private float _panelWidth;
     private float _shellOffset;   // x of the shell column relative to the speedometer centre
     private float _chipWidth;
+    private bool _spotted;
 
     public override void _Ready()
     {
@@ -78,6 +84,14 @@ public partial class StatusPanel : Control
     {
         if (name == _vehicle) return;
         _vehicle = name;
+        QueueRedraw();
+    }
+
+    /// <summary>Lights the lamp while an enemy sees the player; redraws only when that changes.</summary>
+    public void SetSpotted(bool spotted)
+    {
+        if (spotted == _spotted) return;
+        _spotted = spotted;
         QueueRedraw();
     }
 
@@ -105,6 +119,7 @@ public partial class StatusPanel : Control
         var origin = new Vector2(Margin, Size.Y - Margin - PanelHeight);
         DrawStyleBox(_box, new Rect2(origin, new Vector2(_panelWidth, PanelHeight)));
         HudStyle.DrawOutlined(this, new Vector2(origin.X + Pad, origin.Y - NameGap), _vehicle, NameSize, HudStyle.Text, 4);
+        DrawLamp(new Vector2(origin.X + _panelWidth - Pad - LampRadius, origin.Y - LampRise));
         float y = origin.Y + Pad;
         DrawHealth(origin.X, y + HealthRow / 2);
         y += HealthRow + RowGap;
@@ -174,6 +189,29 @@ public partial class StatusPanel : Control
         box.BorderColor = HudStyle.Accent;
         box.SetBorderWidthAll(3);
         return box;
+    }
+
+    /// <summary>The "被点亮" lamp: a round bulb, dark; or lit with a soft glow, short rays and the words to its left.</summary>
+    private void DrawLamp(Vector2 c)
+    {
+        Color lit = HudStyle.Accent;
+        if (_spotted)
+        {
+            DrawCircle(c, LampRadius * 2.3f, new Color(lit, 0.16f), true, -1f, true);
+            DrawCircle(c, LampRadius * 1.65f, new Color(lit, 0.3f), true, -1f, true);
+            for (int i = 0; i < LampRays; i++)
+            {
+                float a = Mathf.Tau * i / LampRays;
+                var dir = new Vector2(MathF.Cos(a), MathF.Sin(a));
+                DrawLine(c + dir * LampRadius * 1.45f, c + dir * LampRadius * 2.05f, HudStyle.OutlineColor, 6f, true);
+                DrawLine(c + dir * LampRadius * 1.45f, c + dir * LampRadius * 2.05f, lit, 3f, true);
+            }
+            float textX = c.X - LampRadius * 2.2f - HudStyle.TextWidth("被点亮", SpottedSize);
+            HudStyle.DrawOutlined(this, new Vector2(textX, HudStyle.Baseline(c.Y, SpottedSize)), "被点亮", SpottedSize, lit, 4);
+        }
+        DrawCircle(c, LampRadius + 2.5f, HudStyle.OutlineColor, true, -1f, true);
+        DrawCircle(c, LampRadius, _spotted ? lit : Palette.UiLampOff.ToColor(), true, -1f, true);
+        DrawCircle(c + new Vector2(-0.35f, -0.35f) * LampRadius, LampRadius * 0.3f, new Color(1f, 1f, 1f, _spotted ? 0.85f : 0.25f), true, -1f, true);
     }
 
     /// <summary>A half-dial with a needle.</summary>

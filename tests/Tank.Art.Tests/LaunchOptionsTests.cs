@@ -13,6 +13,15 @@ public class LaunchOptionsTests
     }
 
     [Fact]
+    public void Spot_debug_is_off_unless_asked_for()
+    {
+        Assert.False(LaunchOptions.Parse(Array.Empty<string>()).SpotDebug);
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--spot-debug", "--camera-preset", "patrol" });
+        Assert.True(options.SpotDebug);
+        Assert.Equal("patrol", options.CameraPreset);
+    }
+
+    [Fact]
     public void No_tank_by_default()
     {
         Assert.Null(LaunchOptions.Parse(Array.Empty<string>()).Tank);

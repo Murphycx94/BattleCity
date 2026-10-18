@@ -42,6 +42,8 @@ public static class TankCatalog
         Dispersion = 0.40f,
         AimTime = 1.8f,
         Bloom = new BloomFactors(Moving: 1.5f, HullTurn: 1.2f, TurretTurn: 0.8f, Fire: 3.0f),
+        ViewRange = 300,
+        Camo = new Concealment(Moving: 0.30f, Still: 0.40f),
     };
 
     public static readonly TankSpec Medium = new()
@@ -75,6 +77,8 @@ public static class TankCatalog
         Dispersion = 0.36f,
         AimTime = 2.1f,
         Bloom = new BloomFactors(Moving: 2.0f, HullTurn: 1.5f, TurretTurn: 1.0f, Fire: 3.0f),
+        ViewRange = 270,
+        Camo = new Concealment(Moving: 0.18f, Still: 0.25f),
     };
 
     public static readonly TankSpec Heavy = new()
@@ -108,6 +112,8 @@ public static class TankCatalog
         Dispersion = 0.44f,
         AimTime = 2.9f,
         Bloom = new BloomFactors(Moving: 2.5f, HullTurn: 2.0f, TurretTurn: 1.2f, Fire: 3.5f),
+        ViewRange = 250,
+        Camo = new Concealment(Moving: 0.08f, Still: 0.12f),
     };
 
     /// <summary>
@@ -145,6 +151,8 @@ public static class TankCatalog
         Dispersion = 0.32f,
         AimTime = 1.9f,
         Bloom = new BloomFactors(Moving: 2.5f, HullTurn: 2.0f, TurretTurn: 0.8f, Fire: 3.0f),
+        ViewRange = 260,
+        Camo = new Concealment(Moving: 0.25f, Still: 0.45f),
     };
 
     /// <summary>Light to heavy, then the tank destroyer; F1–F4 in the sandbox pick them in this order.</summary>

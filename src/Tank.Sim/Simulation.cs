@@ -52,32 +52,35 @@ public sealed partial class Simulation
     /// <summary>Events produced by the most recent <see cref="Step"/>.</summary>
     public ReadOnlySpan<GameEvent> Events => CollectionsMarshal.AsSpan(_events);
 
-    /// <summary>Adds a tank with full health and ammunition, AP loaded.</summary>
+    /// <summary>Adds a tank of team <paramref name="team"/> (below <see cref="SimConstants.MaxTeams"/>) with full health and ammunition, AP loaded.</summary>
     /// <returns>The new tank's id. It occupies the next slot in <see cref="Tanks"/>.</returns>
-    public int AddTank(TankSpec spec, Vector2 position, float yaw)
+    public int AddTank(TankSpec spec, Vector2 position, float yaw, byte team = 0)
     {
         if (TankCount == MaxTanks) throw new InvalidOperationException($"At most {MaxTanks} tanks.");
+        if (team >= SimConstants.MaxTeams) throw new ArgumentOutOfRangeException(nameof(team), team, $"Teams are 0 … {SimConstants.MaxTeams - 1}.");
         int id = _nextId++;
-        _tanks[TankCount++] = Fresh(id, spec, position, yaw);
+        _tanks[TankCount++] = Fresh(id, spec, position, yaw, team);
         return id;
     }
 
     /// <summary>
-    /// Makes a tank another kind of vehicle where it stands (sandbox only for now). Its id, place, heading and shot count
-    /// stay (the shot count carries on, so each tank's shot index stays monotonic); everything else starts as on
-    /// <see cref="AddTank"/>, a wreck included. Shells already in flight keep their own round. No event: the caller knows.
+    /// Makes a tank another kind of vehicle where it stands (sandbox only for now). Its id, team, place, heading and shot
+    /// count stay (the shot count carries on, so each tank's shot index stays monotonic); everything else starts as on
+    /// <see cref="AddTank"/>, a wreck included, and it has not fired yet. Shells already in flight keep their own round. No event: the caller knows.
     /// </summary>
     public void ChangeSpec(int tankId, TankSpec spec)
     {
         ref TankState tank = ref TankRef(tankId);
-        tank = Fresh(tank.Id, spec, tank.Position, tank.Yaw) with { ShotCount = tank.ShotCount };
+        tank = Fresh(tank.Id, spec, tank.Position, tank.Yaw, tank.Team) with { ShotCount = tank.ShotCount };
     }
 
-    /// <summary>A tank at rest with full health and ammunition, AP loaded.</summary>
-    private TankState Fresh(int id, TankSpec spec, Vector2 position, float yaw) => new()
+    /// <summary>A tank at rest with full health and ammunition, AP loaded, that hasn't fired.</summary>
+    private TankState Fresh(int id, TankSpec spec, Vector2 position, float yaw, byte team) => new()
     {
         Id = id,
         Spec = spec,
+        Team = team,
+        LastFired = TankState.NeverFired,
         Position = Field.ClampToPlayable(position),
         Yaw = Angles.Wrap(yaw),
         Health = spec.MaxHealth,
@@ -215,6 +218,7 @@ public sealed partial class Simulation
         };
         tank.Reload = tank.Spec.ReloadTime;
         tank.ShotCount++;
+        tank.LastFired = Tick;
         tank.Bloom += tank.Spec.Bloom.Fire;
         if (tank.Ammo == AmmoType.HE) tank.HeLeft--;
         else tank.ApLeft--;

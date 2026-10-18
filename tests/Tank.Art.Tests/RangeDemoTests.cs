@@ -1,8 +1,10 @@
 using Tank.Client.Sandbox;
 using Tank.Sim;
+using Tank.Sim.Ai;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Vehicles;
+using Tank.Sim.Vision;
 
 using SN = System.Numerics;
 
@@ -36,7 +38,7 @@ public class RangeDemoTests
     }
 
     /// <summary>The demos whose shots must reach their target with nothing solid in the way.</summary>
-    private static readonly string[] OpenDemos = { "pen", "ricochet", "nopen", "he", "kill", "nopen-heavy", "kill-td", "turn", "fence", "bush" };
+    private static readonly string[] OpenDemos = { "pen", "ricochet", "nopen", "he", "kill", "nopen-heavy", "kill-td", "turn", "fence", "bush", "lamp" };
 
     public static TheoryData<string, string> OpenDemosAndTanks()
     {
@@ -112,7 +114,7 @@ public class RangeDemoTests
         var sim = new Simulation(SandboxMap.Create());
         sim.AddTank(TankCatalog.ById(tank), d.PlayerPosition, d.PlayerYaw);
         var down = new List<int>();
-        for (int tick = 1; tick < RangeDemo.FireTick + d.DriveTicks + SimConstants.TickRate; tick++)
+        for (int tick = 1; tick < d.FireTick + d.DriveTicks + SimConstants.TickRate; tick++)
         {
             sim.Step(new[] { d.Command(new InputCmd(tick, 0, 0, d.PlayerYaw, 0f, false), sim.Tanks[0], sim.Field, hasFired: false) });   // as SandboxAutomation sends it
             foreach (GameEvent e in sim.Events)
@@ -192,16 +194,112 @@ public class RangeDemoTests
         Assert.True(RangeDemo.Find("bush")!.AimLocal.Z > 0);
     }
 
+    /// <summary>The demos that shoot at a target the player can see (the rest aim at, or drive into, the wall in front of it).</summary>
+    public static TheoryData<string, string> SightedDemosAndTanks()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (string name in RangeDemo.Names.Except(new[] { "wall", "breach", "ram" }))
+        foreach (TankSpec spec in TankCatalog.All)
+            data.Add(name, spec.Id);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(SightedDemosAndTanks))]
+    public void The_target_is_in_sight_when_the_demo_fires(string demo, string tank)
+    {
+        RangeDemo d = RangeDemo.Find(demo)!;
+        var sim = new Simulation(SandboxMap.Create());
+        sim.AddTank(TankCatalog.ById(tank), d.PlayerPosition, d.PlayerYaw, team: 0);
+        sim.AddTank(d.Spot.Spec, d.Spot.Position, d.Spot.Yaw, team: 1);
+        Sighting look = Spotting.Look(sim.Tanks[0], sim.Tanks[1], sim.Field, d.FireTick, targetMoving: false);
+        Assert.True(look.Seen, $"{look}");   // hidden, it would get no verdict or damage number on screen
+    }
+
+    [Fact]
+    public void The_breach_demo_in_a_tank_destroyer_shows_the_yard_target_only_once_the_wall_is_down()
+    {
+        RangeDemo demo = RangeDemo.Find("breach")!;
+        var sim = new Simulation(SandboxMap.Create());
+        sim.AddTank(TankCatalog.Td, demo.PlayerPosition, demo.PlayerYaw, team: 0);
+        int target = sim.AddTank(demo.Spot.Spec, demo.Spot.Position, demo.Spot.Yaw, team: 1);
+        var vision = new VisionTracker(sim);
+        bool fired = false;
+        int down = -1;
+        for (int tick = 1; tick <= 22 * SimConstants.TickRate; tick++)
+        {
+            var inputs = new[]
+            {
+                demo.Command(new InputCmd(tick, 0, 0, demo.PlayerYaw, 0f, false), sim.Tanks[0], sim.Field, fired),
+                new InputCmd(tick, 0, 0, demo.Spot.Yaw, 0f, false),
+            };
+            sim.Step(inputs);
+            vision.Update();
+            foreach (GameEvent e in sim.Events)
+            {
+                fired |= e.Type == GameEventType.ShellFired;
+                if (e.Type == GameEventType.PropDestroyed && sim.Field.PropById(e.PropId).Kind == PropKind.StoneWall && down < 0) down = tick;
+            }
+            if (down < 0) Assert.False(vision.IsVisible(target, 0), $"seen through the wall at tick {tick}");
+            else if (tick >= down + VisionTracker.UpdateInterval) Assert.True(vision.IsVisible(target, 0), $"unseen {tick - down} ticks after the breach");
+        }
+        Assert.True(down > 0, "the wall never came down");
+    }
+
+    [Fact]
+    public void Only_the_lamp_demo_lets_the_patrol_drive()
+    {
+        Assert.Equal(new[] { "lamp" }, RangeDemo.Names.Where(n => RangeDemo.Find(n)!.PatrolDrives));
+    }
+
+    /// <summary>
+    /// The lamp demo as the sandbox runs it: the player commanded by the demo, the still targets watching nobody, the
+    /// patrol driving its route. The patrol doesn't see the player until the shot, then does within a vision update
+    /// and for at least two seconds after.
+    /// </summary>
+    [Fact]
+    public void The_lamp_demo_is_unseen_until_its_shot_then_seen()
+    {
+        RangeDemo demo = RangeDemo.Find("lamp")!;
+        var sim = new Simulation(SandboxMap.Create());
+        int player = sim.AddTank(TankCatalog.Medium, demo.PlayerPosition, demo.PlayerYaw, team: 0);
+        var vision = new VisionTracker(sim);
+        foreach (TargetSpot t in SandboxMap.TargetSpots) vision.SetWatching(sim.AddTank(t.Spec, t.Position, t.Yaw, team: 1), false);
+        SN.Vector2 start = SandboxMap.PatrolStart;
+        sim.AddTank(SandboxMap.PatrolSpec, start, Angles.YawOf(SandboxMap.PatrolRoute[0].Position - start), team: 1);
+        var driver = new PatrolDriver(SandboxMap.PatrolRoute);
+        var inputs = new InputCmd[sim.TankCount];
+        int fired = -1;
+        for (int tick = 1; tick <= demo.FireTick + 3 * SimConstants.TickRate; tick++)
+        {
+            inputs[0] = demo.Command(new InputCmd(tick, 0, 0, demo.PlayerYaw, 0f, false), sim.Tanks[0], sim.Field, hasFired: fired >= 0);
+            for (int i = 1; i < inputs.Length - 1; i++) inputs[i] = new InputCmd(tick, 0, 0, SandboxMap.TargetSpots[i - 1].Yaw, 0f, false);
+            inputs[^1] = driver.Command(sim.Tanks[^1], sim.Field, tick, sim.Tanks[0].Position);
+            sim.Step(inputs);
+            vision.Update();
+            foreach (GameEvent e in sim.Events)
+                if (e.Type == GameEventType.ShellFired && e.TankId == player && fired < 0)
+                {
+                    fired = tick;
+                    Assert.True(driver.Waiting && driver.Next == 0, "the patrol is in its first bush patch when the player fires");
+                }
+            bool seen = vision.IsVisible(player, 1);
+            if (fired < 0) Assert.False(seen, $"seen at {tick / (float)SimConstants.TickRate:F1} s, before the shot");
+            else if (tick >= fired + VisionTracker.UpdateInterval && tick <= fired + 2 * SimConstants.TickRate) Assert.True(seen, $"unseen {tick - fired} ticks after the shot");
+        }
+        Assert.Equal(demo.FireTick, fired);
+    }
+
     [Fact]
     public void Only_a_driving_demo_opens_the_throttle_and_only_for_its_drive()
     {
         RangeDemo ram = RangeDemo.Find("ram")!;
         Assert.Equal(78, ram.DriveTicks);   // 2.6 s
-        Assert.Equal(0, ram.Throttle(RangeDemo.FireTick - 1));
-        Assert.Equal(1, ram.Throttle(RangeDemo.FireTick));
-        Assert.Equal(1, ram.Throttle(RangeDemo.FireTick + ram.DriveTicks - 1));
-        Assert.Equal(0, ram.Throttle(RangeDemo.FireTick + ram.DriveTicks));
-        Assert.All(RangeDemo.Names.Where(n => n != "ram"), n => Assert.Equal(0, RangeDemo.Find(n)!.Throttle(RangeDemo.FireTick)));
+        Assert.Equal(0, ram.Throttle(ram.FireTick - 1));
+        Assert.Equal(1, ram.Throttle(ram.FireTick));
+        Assert.Equal(1, ram.Throttle(ram.FireTick + ram.DriveTicks - 1));
+        Assert.Equal(0, ram.Throttle(ram.FireTick + ram.DriveTicks));
+        Assert.All(RangeDemo.Names.Where(n => n != "ram"), n => Assert.Equal(0, RangeDemo.Find(n)!.Throttle(RangeDemo.Find(n)!.FireTick)));
     }
 
     [Fact]
@@ -226,6 +324,7 @@ public class RangeDemoTests
     [InlineData("fence", "medium")]
     [InlineData("ram", "medium")]
     [InlineData("bush", "medium")]
+    [InlineData("lamp", "medium")]
     public void Shoots_the_kind_of_tank_it_was_written_for(string demo, string kind) =>
         Assert.Equal(kind, RangeDemo.Find(demo)!.Spot.Spec.Id);
 

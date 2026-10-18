@@ -9,18 +9,21 @@ using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Vehicles;
+using Tank.Sim.Vision;
 using SN = System.Numerics;
 
 namespace Tank.Client.Sandbox;
 
 /// <summary>
-/// Offline test drive: runs Tank.Sim locally at 30Hz and renders one tick behind, interpolated. The player's tank is slot 0;
-/// the practice targets (<see cref="TargetRange"/>) take the next slots. Keys: 1 AP, 2 HE, R restock, T restore the walls,
-/// fences and bushes, F1–F4 another tank (<c>TankCatalog.All</c> in order). Scenery, HUD and scripted runs live in <see cref="SandboxWorld"/>,
+/// Offline test drive: runs Tank.Sim locally at 30Hz and renders one tick behind, interpolated. The player's tank is slot 0
+/// (team 0); the practice targets (<see cref="TargetRange"/>, team 1, the patrolling one last) take the next slots. A
+/// <see cref="VisionTracker"/> works out after every step who sees whom: targets the player's team doesn't see aren't drawn.
+/// Keys: 1 AP, 2 HE, R restock, T restore the walls, fences and bushes, F1–F4 another tank (<c>TankCatalog.All</c> in
+/// order), V the spotting numbers over every target. Scenery, HUD and scripted runs live in <see cref="SandboxWorld"/>,
 /// <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
 /// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --tank light|medium|heavy|td --autodrive
-/// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|... --fps-log --sniper
-/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush
+/// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|patrol|... --fps-log --sniper --spot-debug
+/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp
 /// --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill|prop|down:S --quit-after S]
 /// </summary>
 public partial class SandboxMain : Node3D
@@ -49,6 +52,7 @@ public partial class SandboxMain : Node3D
     private bool _playerFired;
     private ShellViews _shells = null!;
     private TargetRange _targets = null!;
+    private VisionTracker _vision = null!;
     private BattleFx _fx = null!;
     private SandboxHud _hud = null!;
     private double _accumulator;
@@ -66,10 +70,12 @@ public partial class SandboxMain : Node3D
         RangeDemo? demo = _automation.Demo;
         _sim = new Simulation(SandboxMap.Create());
         TankSpec start = _options.Tank is { } id ? TankCatalog.ById(id) : TankCatalog.Medium;
-        _sim.AddTank(start, demo?.PlayerPosition ?? CameraPresets.Spawn(_options.CameraPreset), demo?.PlayerYaw ?? SandboxMap.SpawnYaw);
+        _sim.AddTank(start, demo?.PlayerPosition ?? CameraPresets.Spawn(_options.CameraPreset), demo?.PlayerYaw ?? SandboxMap.SpawnYaw, TargetRange.PlayerTeam);
         _previous = _current = _sim.Tanks[0];
+        _vision = new VisionTracker(_sim);
         _targets = Add(new TargetRange());
-        _targets.Build(_sim);
+        _targets.Build(_sim, _vision, parkPatrol: demo is { PatrolDrives: false });
+        _vision.Update();   // who is seen at the start, before the first frame is drawn
         _commands = new InputCmd[_sim.TankCount];
         _groundAt = _sim.Field.Terrain.HeightAt;
         _aimYaw = _current.Yaw;
@@ -83,7 +89,7 @@ public partial class SandboxMain : Node3D
         _camera.SetAngles(_current.Yaw, 0.25f);
         if (_options.Sniper) _camera.ToggleSniper();
         _hud = Add(new SandboxHud());
-        _hud.Build(_camera, _targets, _sim.Field);
+        _hud.Build(_camera, _targets, _sim.Field, _vision, _current.Id, _options.SpotDebug);
 
         _automation.ReportBadOptions();
         if (!_options.AutoDrive && !IgnoresInput) Input.MouseMode = Input.MouseModeEnum.Captured;
@@ -126,6 +132,7 @@ public partial class SandboxMain : Node3D
                 break;
         }
         if (e.IsActionPressed(SandboxInput.SniperToggle)) _camera.ToggleSniper();
+        if (e.IsActionPressed(SandboxInput.SpotDebug)) _hud.ToggleSpotDebug();
         if (e.IsActionPressed(SandboxInput.UiCancel)) Input.MouseMode = Input.MouseModeEnum.Visible;
     }
 
@@ -140,14 +147,14 @@ public partial class SandboxMain : Node3D
         }
 
         float alpha = (float)(_accumulator / SimConstants.Dt);
-        TankState tank = Interpolate(_previous, _current, alpha);
+        TankState tank = TankInterpolation.Between(_previous, _current, alpha);
         TankPose pose = TankPose.Compute(tank, _sim.Field.Terrain);
         ShowPlayer(tank, pose, (float)delta);
         UpdateCamera(tank, pose);
         _world.Update(tank, pose, _camera.Camera.GlobalPosition, (float)delta);
-        _targets.Sync(_sim, (float)delta);
+        _targets.Sync(_sim, alpha, (float)delta);
         _shells.Sync(_sim.Shells, alpha, (float)delta);
-        _hud.Refresh(tank);
+        _hud.Refresh(tank, _sim.Tick);
         _automation.EndFrame(delta, _time);
     }
 
@@ -161,8 +168,10 @@ public partial class SandboxMain : Node3D
         var own = new InputCmd(_sim.Tick + 1, throttle, steer, _aimYaw, _aimPitch, fire, _input.Ammo);
         _commands[0] = _automation.Command(own, _current, _sim.Field, _time);   // a scripted run may drive and aim instead
         (_aimYaw, _aimPitch) = (_commands[0].AimYaw, _commands[0].AimPitch);
-        _targets.FillInputs(_commands.AsSpan(1), _sim.Tick + 1);
+        _targets.FillInputs(_commands.AsSpan(1), _sim.Tick + 1, _sim, _current.Position);
         _sim.Step(_commands);
+        _vision.Update();
+        _targets.AfterStep(_sim);
         foreach (GameEvent e in _sim.Events) OnEvent(e);
         _previous = _current;
         _current = _sim.Tanks[0];
@@ -263,16 +272,6 @@ public partial class SandboxMain : Node3D
         }
         (_aimYaw, _aimPitch) = Angles.AimAngles(target - trunnion, _aimYaw);
     }
-
-    private static TankState Interpolate(in TankState a, in TankState b, float t) => b with
-    {
-        Position = SN.Vector2.Lerp(a.Position, b.Position, t),
-        Yaw = Angles.Lerp(a.Yaw, b.Yaw, t),
-        TurretYaw = Angles.Lerp(a.TurretYaw, b.TurretYaw, t),
-        GunPitch = a.GunPitch + (b.GunPitch - a.GunPitch) * t,
-        Speed = a.Speed + (b.Speed - a.Speed) * t,
-        Bloom = a.Bloom + (b.Bloom - a.Bloom) * t,
-    };
 
     private T Add<T>(T node) where T : Node
     {

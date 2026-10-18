@@ -6,8 +6,8 @@ namespace Tank.Client.Sandbox;
 /// <summary>
 /// Registers the sandbox's own input actions at runtime (so project.godot and the old game's bindings stay untouched)
 /// and samples them once per sim tick. A fire click shorter than a tick is latched so it is never lost. 1 and 2 pick
-/// AP or HE (kept until changed); R asks for a restock, T to restore the walls, fences and bushes, and F1–F4 for another
-/// tank, each consumed once by the next tick.
+/// AP or HE (kept until changed); V (read by <c>SandboxMain</c>) shows or hides the spotting debug lines; R asks for a
+/// restock, T to restore the walls, fences and bushes, and F1–F4 for another tank, each consumed once by the next tick.
 /// </summary>
 public sealed class SandboxInput
 {
@@ -26,7 +26,7 @@ public sealed class SandboxInput
     };
 
     // Also read by SandboxMain's input handlers; UiCancel is Godot's built-in action, not registered here.
-    internal static readonly StringName FireGun = "fire_gun", SniperToggle = "sniper_toggle", UiCancel = "ui_cancel";
+    internal static readonly StringName FireGun = "fire_gun", SniperToggle = "sniper_toggle", SpotDebug = "spot_debug", UiCancel = "ui_cancel";
 
     private bool _fireLatched;
     private bool _fireHeld;
@@ -41,6 +41,7 @@ public sealed class SandboxInput
         AddKey(DriveLeft, Key.A);
         AddKey(DriveRight, Key.D);
         AddKey(SniperToggle, Key.Shift);
+        AddKey(SpotDebug, Key.V);
         AddMouse(FireGun, MouseButton.Left);
         AddMouse(FreeLookAction, MouseButton.Right);
         AddKey(AmmoAp, Key.Key1);

@@ -23,16 +23,18 @@ public enum DemoAim
 /// <summary>
 /// Scripted shooting at the practice targets, for screenshots (<c>--range-demo NAME</c>): the player's tank is parked
 /// <see cref="Distance"/> m from target <see cref="Target"/>, <see cref="AngleOffFront"/> degrees round from straight
-/// ahead of it, its hull <see cref="PlayerTurn"/> degrees to the left of facing the target, lays its gun on the
-/// <see cref="Aim"/> face of that target's own armour (<see cref="AimLocal"/>, worked out from <see cref="Spot"/>'s
-/// <see cref="TankSpec"/>, so it can't drift from the kind of tank standing there) and pulls the trigger from
-/// <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded. A demo with <see cref="DriveSeconds"/>
-/// fires nothing: from <see cref="FireTick"/> it drives at full throttle for that long, then stops.
+/// ahead of it (or at <see cref="Stand"/>), its hull <see cref="PlayerTurn"/> degrees to the left of facing the target,
+/// lays its gun on the <see cref="Aim"/> face of that target's own armour (<see cref="AimLocal"/>, worked out from
+/// <see cref="Spot"/>'s <see cref="TankSpec"/>, so it can't drift from the kind of tank standing there) and pulls the
+/// trigger from <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded. A demo with
+/// <see cref="DriveSeconds"/> fires nothing: from <see cref="FireTick"/> it drives at full throttle for that long, then
+/// stops. The patrolling target stays parked at its start unless <see cref="PatrolDrives"/>.
 /// </summary>
 public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, DemoAim Aim, AmmoType Ammo, bool KeepFiring,
-    float PlayerTurn = 0f, float DriveSeconds = 0f)
+    float PlayerTurn = 0f, float DriveSeconds = 0f, double FireAfter = RangeDemo.DefaultFireAfter, SN.Vector2? Stand = null,
+    bool PatrolDrives = false)
 {
-    public const double FireAfter = 3.0;
+    public const double DefaultFireAfter = 3.0;
 
     /// <summary>
     /// The earliest sim tick the demo pulls the trigger: <see cref="FireAfter"/> s of simulation time, not wall-clock
@@ -41,11 +43,19 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
     /// (<c>he</c>) first waits out the full reload that switching starts (<c>TryFire</c> in the sim): it then fires
     /// <c>ReloadTime</c> after tick 1 rather than at <see cref="FireTick"/>.
     /// </summary>
-    public static readonly int FireTick = (int)Math.Ceiling(FireAfter * SimConstants.TickRate);
+    public int FireTick => (int)Math.Ceiling(FireAfter * SimConstants.TickRate);
+
+    /// <summary>
+    /// Where the <c>lamp</c> demo parks the player: open ground 269 m west of the patrolling target's first bush patch,
+    /// in sight of it, about 120 m from target 0. A medium tank standing still is out of the patrol's detection range
+    /// there (229 m) and inside it for 3 s after a shot (282 m). Worked out for the medium tank only: a heavy tank is seen
+    /// before its shot, a tank destroyer not even after it.
+    /// </summary>
+    public static readonly SN.Vector2 LampStand = new(38, 306);
 
     /// <summary>The demos' names, in the order <see cref="Find"/> documents them.</summary>
     public static IReadOnlyList<string> Names { get; } =
-        new[] { "pen", "ricochet", "nopen", "he", "kill", "nopen-heavy", "kill-td", "turn", "wall", "breach", "fence", "ram", "bush" };
+        new[] { "pen", "ricochet", "nopen", "he", "kill", "nopen-heavy", "kill-td", "turn", "wall", "breach", "fence", "ram", "bush", "lamp" };
 
     /// <summary>
     /// pen, ricochet, nopen, he or kill (at target 0, a medium tank); nopen-heavy (the far heavy tank's 200 mm turret
@@ -54,9 +64,13 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
     /// destroyer's rear until it is knocked out); turn (target 0 again, the hull starting 60° off: a tank destroyer has to
     /// turn its hull to bring the gun round). At the yard target (stage 2C): wall (one AP shot from 30 m in front, into
     /// the stone wall between), breach (HE from there until the wall is down and the target behind it), fence (AP at its
-    /// rear from 30 m west by north-west, in through a panel of the fence gate), ram (from 17 m north of it, 2.6 s at full throttle into the
-    /// north wall: a heavy tank breaks through, the others are stopped); bush (target 0's rear from 50 m, through a bush
-    /// patch); null for any other name. Each shoots, or drives, with whatever tank --tank gives the player.
+    /// rear from 30 m west by north-west, in through a panel of the fence gate, in sight of the target through the
+    /// gate), ram (from 17 m north of it, 2.6 s at full throttle into the north wall: a heavy tank breaks through, the
+    /// others are stopped); bush (target 0's rear from 50 m, through a bush
+    /// patch). For the spotting lamp (stage 3): lamp (from <see cref="LampStand"/>, with the patrol driving, one AP shot at
+    /// target 0 after 8 s, while the patrol waits in its first bush patch: the player is unseen until the shot, then seen);
+    /// null for any other name. Each shoots, or drives, with whatever tank --tank gives the player (lamp is meant for the
+    /// medium tank, the default).
     /// </summary>
     public static RangeDemo? Find(string? name) => name switch
     {
@@ -73,16 +87,18 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
         "fence" => new RangeDemo(SandboxMap.YardTarget, YardGateOffFront, 30f, DemoAim.HullRear, AmmoType.AP, false),
         "ram" => new RangeDemo(SandboxMap.YardTarget, YardNorthOffFront, 17f, DemoAim.HullFront, AmmoType.AP, false, DriveSeconds: 2.6f),
         "bush" => new RangeDemo(0, 210f, 50f, DemoAim.HullRear, AmmoType.AP, false),
+        "lamp" => new RangeDemo(0, 0f, 0f, DemoAim.HullFront, AmmoType.AP, false, FireAfter: 8.0, Stand: LampStand, PatrolDrives: true),
         _ => null,
     };
 
     private const float DegreesPerRadian = 180f / MathF.PI;
 
     /// <summary>
-    /// Degrees round from the yard target's front to west by north-west: the line from its rear in through the middle of
-    /// the gate's north panel (straight west would park the player, and the camera behind it, against the rocks there).
+    /// Degrees round from the yard target's front to west by north-west: the line from its rear in through the gate's
+    /// north panel (straight west would park the player, and the camera behind it, against the rocks there), close enough
+    /// to west that a sight line to the target passes through the gate too, not into the brick wall north of it.
     /// </summary>
-    private static float YardGateOffFront => YardOffFront(new SN.Vector2(-1, -0.35f));
+    private static float YardGateOffFront => YardOffFront(new SN.Vector2(-1, -0.27f));
 
     /// <summary>Degrees round from the yard target's front to due north (−Z), square on to the yard's north wall.</summary>
     private static float YardNorthOffFront => YardOffFront(new SN.Vector2(0, -1));
@@ -120,8 +136,8 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
 
     public TargetSpot Spot => SandboxMap.TargetSpots[Target];
 
-    /// <summary>Where the player's tank is parked.</summary>
-    public SN.Vector2 PlayerPosition => Spot.Position + Angles.Forward(Spot.Yaw + Angles.Deg(AngleOffFront)) * Distance;
+    /// <summary>Where the player's tank is parked: <see cref="Stand"/>, else round from the target.</summary>
+    public SN.Vector2 PlayerPosition => Stand ?? Spot.Position + Angles.Forward(Spot.Yaw + Angles.Deg(AngleOffFront)) * Distance;
 
     /// <summary>Heading from the player's tank to the target (where the demo camera looks).</summary>
     public float Bearing => Angles.YawOf(Spot.Position - PlayerPosition);

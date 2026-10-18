@@ -1,4 +1,5 @@
 using System.Numerics;
+using Tank.Sim.Ai;
 using Tank.Sim.Geometry;
 using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
@@ -79,6 +80,35 @@ public static class SandboxMap
 
     /// <summary>The index in <see cref="TargetSpots"/> of the target inside the yard.</summary>
     public const int YardTarget = 6;
+
+    /// <summary>The kind of tank that drives <see cref="PatrolRoute"/> (stage 3 design §4.2).</summary>
+    public static TankSpec PatrolSpec => TankCatalog.Light;
+
+    /// <summary>Where the patrolling target starts, facing its first point (the bush patch east of it).</summary>
+    public static readonly Vector2 PatrolStart = new(270, 278);
+
+    /// <summary>
+    /// The patrolling target's loop, about 120 m east and north-east of the spawn: it stops 10 s in the middle of two
+    /// bush patches (306, 280) and (256, 214), driving round the west of the hill between them. Clear of rocks, walls,
+    /// targets and the spawn-to-hill lane; it starts at <see cref="PatrolStart"/>, the last point.
+    /// </summary>
+    public static readonly IReadOnlyList<PatrolPoint> PatrolRoute = new PatrolPoint[]
+    {
+        new(BushPatches[2], 10f),
+        new(new Vector2(272, 266), 0f),
+        new(new Vector2(262, 238), 0f),
+        new(BushPatches[3], 10f),
+        new(new Vector2(242, 238), 0f),
+        new(new Vector2(242, 262), 0f),
+        new(PatrolStart, 0f),
+    };
+
+    /// <summary>
+    /// A place to watch the patrol from: open ground 109 m south-west of its first bush patch, in sight of it (from the
+    /// spawn, rocks and the hill hide both patches). From here a medium tank sees the patrol in the open, loses it once it
+    /// stands in the bushes (two of them hide it: 40.5 m) and sees it again for 3 s after each shot it fires (117 m).
+    /// </summary>
+    public static readonly Vector2 PatrolWatch = new(224, 352);
 
     /// <summary>
     /// Hand-placed walls and fences (stage 2C design §3.6). The yard, 18 × 12.8 m inside around (160, 340): a stone wall

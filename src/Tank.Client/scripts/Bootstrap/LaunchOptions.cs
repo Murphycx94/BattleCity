@@ -10,11 +10,11 @@ namespace Tank.Client.Bootstrap;
 /// --name N  --host  --join IP[:PORT]  --mode coop|basebattle|deathmatch  --bots N  --autostart
 /// --camera chase  --netgraph  --screenshot FILE  --screenshot-at SECONDS  --quit-after SECONDS
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场：自动驾驶并开火，用于截图）
-/// --camera-preset front|side|close|closerear|sprocket|hill|spin|orbit|bush|target|yard|gate（试驾场：固定镜头，用于截图和测帧）  --fps-log（试驾场：每秒打印平均和最差帧时间）
+/// --camera-preset front|side|close|closerear|sprocket|hill|spin|orbit|bush|target|yard|gate|patrol（试驾场：固定镜头，用于截图和测帧）  --fps-log（试驾场：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场：以狙击镜视角启动，用于截图）
-/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush（试驾场：自动对靶车开炮或开车撞墙，用于截图）
+/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp（试驾场：自动对靶车开炮或开车撞墙，用于截图）
 /// --shot-after fire|hit|kill|prop|down:SECONDS（试驾场：玩家第一次开炮、第一次命中坦克、第一次击毁坦克、第一次有墙受伤或第一次有物件被毁后再过 SECONDS 秒截图）
-/// --tank light|medium|heavy|td（试驾场：开局的车型，默认中坦）
+/// --tank light|medium|heavy|td（试驾场：开局的车型，默认中坦）  --spot-debug（试驾场：一开始就显示点亮调试文字，同 V 键）
 /// A plain parser, free of the engine: values it can't read fall back to defaults and are listed in <see cref="Warnings"/>
 /// for the caller to report.
 /// </summary>
@@ -39,6 +39,7 @@ public sealed record LaunchOptions
     public bool FpsLog { get; init; }
     public double? FxShotDelay { get; init; }
     public bool Sniper { get; init; }
+    public bool SpotDebug { get; init; }
     public string? RangeDemo { get; init; }
 
     /// <summary>"fire", "hit", "kill", "prop" or "down" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
@@ -75,6 +76,7 @@ public sealed record LaunchOptions
                 "--camera-preset" => o with { CameraPreset = Next() },
                 "--fps-log" => o with { FpsLog = true },
                 "--sniper" => o with { Sniper = true },
+                "--spot-debug" => o with { SpotDebug = true },
                 "--fx-shot" => o with { FxShotDelay = Seconds("--fx-shot", Next(), 0.05, warnings) },
                 "--range-demo" => o with { RangeDemo = Next() },
                 "--shot-after" => ParseShotAfter(o, Next(), warnings),

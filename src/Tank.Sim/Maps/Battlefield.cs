@@ -128,6 +128,9 @@ public sealed class Battlefield
     /// <summary>Indices of brick and stone walls: what HE splashes and what leaves rubble.</summary>
     internal ReadOnlySpan<int> Walls => _walls;
 
+    /// <summary>Indices of bushes: what hides a tank from view.</summary>
+    internal ReadOnlySpan<int> Bushes => _bushes;
+
     internal int IndexOf(int propId) =>
         _indexOf.TryGetValue(propId, out int index) ? index : throw new ArgumentException($"No prop {propId}.", nameof(propId));
 
