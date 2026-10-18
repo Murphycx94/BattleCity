@@ -2,13 +2,16 @@
 
 > 每完成一个小节点就更新本文件。中断后，先读这里，再从“下一步”接着做。
 
-最后更新：2026-10-16
+最后更新：2026-10-18
 
 ## 当前位置
 
-- **阶段**：3 点亮（点亮计算、草丛加成、开火惩罚、视线遮挡；试驾场里放一个会动的 AI 靶车用于观察），未开始
-- **下一步**：先做阶段 3 的设计（头脑风暴 → 设计文档 → 用户确认），再照 2A～2C 的做法：草稿实现并截图验证、审查，脚本导出实施计划，逐批派子代理执行。依据：总体设计 [§6 点亮系统、§12 阶段划分](superpowers/specs/2026-10-13-third-person-tank-design.md)，以及下方“遗留问题”里阶段 3 要用到的内容
-- **上一阶段**：2C 可破坏物已 squash 合入 main（`7d398b6`），节点记录见下方“2C 节点记录”。分支 `feat/stage2c-destructibles` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage2c` 还在（`build/shots/` 有验收截图），不再需要时可删。草稿目录、草稿分支和核对用的临时目录已删
+- **阶段**：3 点亮，草稿实现中
+- **设计**：已确认，文档在 feat 分支 `feat/stage3-spotting`（工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage3`，提交 `032b443`）：[阶段 3 点亮设计](superpowers/specs/2026-10-16-stage3-spotting-design.md)。用户选择：没点亮的敌车完全不画；AI 靶车绕圈、进草丛停、偶尔开炮；固定靶车也按点亮规则（但不看人）；加“被点亮”灯
+- **草稿**：`/Users/murphy/Desktop/dev/BattleCity-stage3-draft`，分支 `draft/stage3-spotting`。已提交 T1 `1ee90f0`（视野、隐蔽、队伍、最后开炮 tick）、T2 `a10b00d`（`Vision/Spotting` 判定规则）、T3 `80b51aa`（`VisionTracker` 5 Hz、保持 2 秒、队伍共享）、T4 `05618cc`（`Ai/PatrolDriver` 和试驾场路线）。T4 后 Sim 563、Art 445
+- **下一步**：草稿 T5 客户端接入（队伍、`VisionTracker`、AI 靶车插值显示、没点亮的不画、打靶演示时 AI 停在起点、截图时机只算玩家造成的）→ T6“被点亮”灯和调试显示（V 键、`--spot-debug`）→ T7 `patrol` 机位和灯演示 → 截图、帧率 → 草稿审查 → 脚本导出计划 → 逐批执行
+- **与设计不同、写计划时要说明的**（记在 `scratchpad/plan3/notes.md`）：AI 瞄准玩家前方 25 m、偏左 8 m（设计写 15 m，实测 15 m 会越过瞄准点打中玩家），玩家 50 m 内不开炮；急转弯的路点也停稳再转。`patrol` 机位的玩家放在观察点 (224,352)（出生点看两片草丛都被挡），灯演示玩家停在 (40,332)
+- **上一阶段**：2C 可破坏物已 squash 合入 main（`7d398b6`），节点记录见下方“2C 节点记录”。分支 `feat/stage2c-destructibles` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage2c` 还在，不再需要时可删
 
 ## 阶段总览
 
