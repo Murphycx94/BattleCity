@@ -8,9 +8,18 @@
 
 - **阶段**：3 点亮，草稿实现中
 - **设计**：已确认，文档在 feat 分支 `feat/stage3-spotting`（工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage3`，提交 `032b443`）：[阶段 3 点亮设计](superpowers/specs/2026-10-16-stage3-spotting-design.md)。用户选择：没点亮的敌车完全不画；AI 靶车绕圈、进草丛停、偶尔开炮；固定靶车也按点亮规则（但不看人）；加“被点亮”灯
-- **草稿**：`/Users/murphy/Desktop/dev/BattleCity-stage3-draft`，分支 `draft/stage3-spotting`。已提交 T1 `1ee90f0`（视野、隐蔽、队伍、最后开炮 tick）、T2 `a10b00d`（`Vision/Spotting` 判定规则）、T3 `80b51aa`（`VisionTracker` 5 Hz、保持 2 秒、队伍共享）、T4 `05618cc`（`Ai/PatrolDriver` 和试驾场路线）。T4 后 Sim 563、Art 445
-- **下一步**：草稿 T5 客户端接入（队伍、`VisionTracker`、AI 靶车插值显示、没点亮的不画、打靶演示时 AI 停在起点、截图时机只算玩家造成的）→ T6“被点亮”灯和调试显示（V 键、`--spot-debug`）→ T7 `patrol` 机位和灯演示 → 截图、帧率 → 草稿审查 → 脚本导出计划 → 逐批执行
-- **与设计不同、写计划时要说明的**（记在 `scratchpad/plan3/notes.md`）：AI 瞄准玩家前方 25 m、偏左 8 m（设计写 15 m，实测 15 m 会越过瞄准点打中玩家），玩家 50 m 内不开炮；急转弯的路点也停稳再转。`patrol` 机位的玩家放在观察点 (224,352)（出生点看两片草丛都被挡），灯演示玩家停在 (40,332)
+- **草稿**：`/Users/murphy/Desktop/dev/BattleCity-stage3-draft`，分支 `draft/stage3-spotting`，7 个提交：
+  - T1 `1ee90f0`：视野、隐蔽、队伍、最后开炮 tick；
+  - T2 `a10b00d`：`Vision/Spotting` 判定规则；
+  - T3 `80b51aa`：`VisionTracker`，5 Hz、保持 2 秒、队伍共享；
+  - T4 `05618cc`：`Ai/PatrolDriver` 和试驾场路线；
+  - T5 `10ee80e`：客户端接入，AI 靶车插值显示，没点亮的不画；
+  - T6 `2152dc5`：“被点亮”灯，调试文字（V 键、`--spot-debug`）；
+  - T7 `71c0a9b`：`patrol` 机位、`lamp` 演示。
+
+  最终 Sim 565、Art 465。截图都看过（AI 在空地上看得见、进草丛消失、开炮后出现、“保持中”；院子靶车隔墙看不见、打穿后看得见；灯演示开炮前灭、开炮后亮）。帧率 orbit 145、spin 118～120
+- **下一步**：草稿审查 → 脚本导出计划（照 2C 的 `export_plan_2c.py` 做一份 3 的）→ 重放核对 → 逐批执行 → 验收 → 试玩 → 合并
+- **与设计不同、写计划时要说明的**（记在 `scratchpad/plan3/notes.md`）：AI 瞄准玩家前方 25 m、偏左 8 m（设计写 15 m，实测 15 m 会越过瞄准点打中玩家），玩家 50 m 内不开炮；急转弯的路点也停稳再转。`patrol` 机位的玩家放在观察点 (224,352)（出生点看两片草丛都被挡），灯演示玩家停在 (38,306)、第 8 秒开炮（AI 在第一片草丛里等，距离 269 m）；调试文字多一种“保持中”（刚看不见、还在 2 秒保持期内）
 - **上一阶段**：2C 可破坏物已 squash 合入 main（`7d398b6`），节点记录见下方“2C 节点记录”。分支 `feat/stage2c-destructibles` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage2c` 还在，不再需要时可删
 
 ## 阶段总览
@@ -22,7 +31,7 @@
 | 2A 战斗核心 | ✅ 已合入 main（`81bbead`，squash） | 用户已试玩确认；中坦装填改为 4 秒；跳弹规则保持 70° |
 | 2B 车型（轻坦、重坦、坦克歼击车） | ✅ 已合入 main（`1160ad6`，squash） | 用户已试玩确认；TD 炮管缩短为伸出车头 2.8 m |
 | 2C 可破坏物（墙、栅栏、草丛、瓦砾、撞墙） | ✅ 已合入 main（`7d398b6`，squash） | 用户已试玩确认，没有要改的 |
-| 3 点亮 | ⏳ 下一个 | 本文件“当前位置” |
+| 3 点亮 | ⏳ 草稿完成，待审查 | 本文件“当前位置” |
 | 4 联网 | ⏳ 未开始 | |
 | 5 5v5 | ⏳ 未开始 | |
 | 6 吃鸡 | ⏳ 未开始 | |
