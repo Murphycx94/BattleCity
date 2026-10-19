@@ -15,14 +15,16 @@ namespace Tank.Sim;
 /// get to fire first, shell ids follow slot order, and a prop one tank knocks down is already down for the next). Then
 /// the shell phase: shots that burst in a blocked barrel go off, then every shell in flight flies and resolves its hits,
 /// each group in firing order (shots of the same tick in slot order).
+/// <para>
+/// Tanks sit in slots in <see cref="Tanks"/>, in the order they were added; <see cref="RemoveTank"/> closes the gap, so
+/// the slots after it move down by one (ids never change or come back). Hosts that keep per-slot data follow
+/// <see cref="SlotOf"/>, as <see cref="Vision.VisionTracker"/> does.
+/// </para>
 /// </summary>
 public sealed partial class Simulation
 {
     public const int MaxTanks = 32;
     public const int MaxShells = 256;
-
-    /// <summary>Float drift in the countdown must not cost an extra tick of reload.</summary>
-    private const float ReloadEpsilon = 1e-4f;
 
     private readonly TankState[] _tanks = new TankState[MaxTanks];
     private readonly Shell[] _shells = new Shell[MaxShells];
@@ -63,6 +65,48 @@ public sealed partial class Simulation
         return id;
     }
 
+    /// <summary>The slot of tank <paramref name="tankId"/> in <see cref="Tanks"/>, or −1 when there is no such tank.</summary>
+    public int SlotOf(int tankId)
+    {
+        for (int i = 0; i < TankCount; i++)
+            if (_tanks[i].Id == tankId) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Takes a tank out of the battle (its player left): the slots after it move down by one. Shells it fired fly on and
+    /// still count as its. No event: the host knows.
+    /// </summary>
+    public void RemoveTank(int tankId)
+    {
+        int slot = SlotOf(tankId);
+        if (slot < 0) throw new ArgumentException($"No tank {tankId}.", nameof(tankId));
+        Array.Copy(_tanks, slot + 1, _tanks, slot, TankCount - slot - 1);
+        TankCount--;
+        _tanks[TankCount] = default;
+    }
+
+    /// <summary>
+    /// Puts a tank (a wreck, usually) back into the battle at <paramref name="position"/> facing <paramref name="yaw"/>,
+    /// as fresh as on <see cref="AddTank"/>: full health and ammunition, AP loaded, standing still, not having fired.
+    /// Its id, team and shot count stay (the shot count carries on, so each tank's shot index stays monotonic). The
+    /// <see cref="GameEventType.TankRevived"/> event is reported by the next <see cref="Step"/>; the host sets any
+    /// protection with <see cref="Protect"/>.
+    /// </summary>
+    public void Respawn(int tankId, Vector2 position, float yaw)
+    {
+        ref TankState tank = ref TankRef(tankId);
+        tank = Fresh(tank.Id, tank.Spec, position, yaw, tank.Team) with { ShotCount = tank.ShotCount };
+        Vector3 at = TankPose.Compute(tank, Field.Terrain).Position;
+        _pending.Add(new GameEvent(GameEventType.TankRevived, Tick, tankId, 0, at, Vector3.Zero, TargetTankId: tankId));
+    }
+
+    /// <summary>Protects a tank through the next <paramref name="ticks"/> steps (see <see cref="TankState.ProtectedUntil"/>).</summary>
+    public void Protect(int tankId, int ticks) => TankRef(tankId).ProtectedUntil = Tick + ticks + 1;
+
+    /// <summary>Whether <paramref name="tank"/> is under spawn protection at the current tick.</summary>
+    public bool IsProtected(in TankState tank) => Tick < tank.ProtectedUntil;
+
     /// <summary>
     /// Makes a tank another kind of vehicle where it stands (sandbox only for now). Its id, team, place, heading and shot
     /// count stay (the shot count carries on, so each tank's shot index stays monotonic); everything else starts as on
@@ -88,6 +132,9 @@ public sealed partial class Simulation
         HeLeft = spec.He.Capacity,
     };
 
+    /// <summary>
+    /// One tick: pending events first, then every live tank's step (its props felled, then its shot), then the shells.
+    /// </summary>
     /// <param name="inputs">One command per tank, in <see cref="Tanks"/> order.</param>
     public void Step(ReadOnlySpan<InputCmd> inputs)
     {
@@ -102,13 +149,10 @@ public sealed partial class Simulation
         {
             ref TankState tank = ref _tanks[i];
             if (tank.IsDestroyed) continue;   // wrecks don't drive, aim or fire, but still block (see SnapshotFootprints)
-            InputCmd input = TankMotion.TraverseHull(tank, Sanitize(inputs[i], tank), Field.Terrain);
-            float yaw = tank.Yaw, turretYaw = tank.TurretYaw;
-            TankMotion.Drive(ref tank, input, Field, FootprintsExcept(i), _felled);
+            bool fired = TankStep.Advance(ref tank, inputs[i], Tick, Field, FootprintsExcept(i), knockDown: true, _felled,
+                canFire: !IsProtected(tank) && ShellCount < MaxShells, out TankStep.Shot shot);
             ReportFelled(tank);
-            TankMotion.AimGun(ref tank, input, Field.Terrain);
-            UpdateBloom(ref tank, yaw, turretYaw);
-            TryFire(ref tank, input);
+            if (fired) Launch(tank, shot);
         }
         StepShells();
     }
@@ -144,29 +188,8 @@ public sealed partial class Simulation
         throw new ArgumentException($"No tank {tankId}.", nameof(tankId));
     }
 
-    /// <summary>
-    /// Inputs come from the network: clamp the axes, replace a non-finite aim with the turret's current heading so a bad
-    /// packet can't spin the turret, and keep the loaded round if the requested one isn't a known type.
-    /// </summary>
-    internal static InputCmd Sanitize(in InputCmd input, in TankState tank)
-    {
-        sbyte throttle = (sbyte)System.Math.Sign(input.Throttle);
-        sbyte steer = (sbyte)System.Math.Sign(input.Steer);
-        bool aimValid = float.IsFinite(input.AimYaw) && float.IsFinite(input.AimPitch);
-        float aimYaw = aimValid ? input.AimYaw : Angles.Wrap(tank.Yaw + tank.TurretYaw);
-        float aimPitch = aimValid ? input.AimPitch : 0f;
-        AmmoType ammo = input.Ammo is AmmoType.AP or AmmoType.HE ? input.Ammo : tank.Ammo;
-        return input with { Throttle = throttle, Steer = steer, AimYaw = aimYaw, AimPitch = aimPitch, Ammo = ammo };
-    }
-
-    /// <summary>Opens the aim circle for this tick's driving, hull turn and turret turn, or lets it settle.</summary>
-    private static void UpdateBloom(ref TankState tank, float oldYaw, float oldTurretYaw)
-    {
-        float hullRate = Angles.Wrap(tank.Yaw - oldYaw) / SimConstants.Dt;
-        float turretRate = Angles.Wrap(tank.TurretYaw - oldTurretYaw) / SimConstants.Dt;
-        float target = Dispersion.Target(tank.Spec, tank.Speed, hullRate, turretRate);
-        tank.Bloom = Dispersion.Step(tank.Bloom, target, tank.Spec.AimTime);
-    }
+    /// <summary>See <see cref="TankStep.Sanitize"/>.</summary>
+    internal static InputCmd Sanitize(in InputCmd input, in TankState tank) => TankStep.Sanitize(input, tank);
 
     /// <summary>Every tank collides against where the others were at the start of the tick, independent of slot order.</summary>
     private void SnapshotFootprints()
@@ -187,49 +210,18 @@ public sealed partial class Simulation
     }
 
     /// <summary>
-    /// Counts the reload down, swaps rounds if the input asks for the other type (which restarts the reload), then fires
-    /// if asked, loaded and a round of that type is left. The shell leaves inside the aim circle, which then opens.
+    /// The shell a tank just fired (<see cref="TankStep.Advance"/>) gets its id and leaves the muzzle, or, when the barrel
+    /// was pushed into a rock, a wall or the ground, bursts where the barrel meets it instead of spawning inside (a wall
+    /// takes it as a direct hit). That goes off in the shell phase, so every tank has had its turn before the splash,
+    /// whatever the slots.
     /// </summary>
-    private void TryFire(ref TankState tank, in InputCmd input)
+    private void Launch(in TankState tank, in TankStep.Shot shot)
     {
-        tank.Reload = MathF.Max(0, tank.Reload - SimConstants.Dt);
-        if (tank.Reload < ReloadEpsilon) tank.Reload = 0f;
-        if (input.Ammo != tank.Ammo)
-        {
-            tank.Ammo = input.Ammo;
-            tank.Reload = tank.Spec.ReloadTime;
-            return;
-        }
-        if (!input.Fire || tank.Reload > 0 || tank.AmmoLeft(tank.Ammo) == 0 || ShellCount == MaxShells) return;
-
-        Ballistics.Launch launch = Ballistics.Aim(tank, Field);
-        uint seed = ShotRandom.Seed(Tick, tank.Id, tank.ShotCount);
-        float speed = launch.Velocity.Length();
-        var shell = new Shell
-        {
-            Id = _nextId++,
-            OwnerTankId = tank.Id,
-            Position = launch.Origin,
-            Velocity = Dispersion.Deflect(launch.Velocity, Dispersion.Radius(tank.Spec, tank.Bloom), seed) * speed,
-            Ammo = tank.Ammo,
-            Round = tank.Spec.Round(tank.Ammo),
-            Caliber = tank.Spec.Caliber,
-            Seed = seed,
-        };
-        tank.Reload = tank.Spec.ReloadTime;
-        tank.ShotCount++;
-        tank.LastFired = Tick;
-        tank.Bloom += tank.Spec.Bloom.Fire;
-        if (tank.Ammo == AmmoType.HE) tank.HeLeft--;
-        else tank.ApLeft--;
+        Shell shell = shot.Shell with { Id = _nextId++ };
         _events.Add(new GameEvent(GameEventType.ShellFired, Tick, tank.Id, shell.Id, shell.Position, shell.Velocity, Ammo: shell.Ammo));
-
-        // Barrel pushed into a rock, a wall or the ground: the shell bursts where the barrel meets it instead of spawning
-        // inside (a wall takes it as a direct hit). It goes off in the shell phase, so every tank has had its turn before
-        // the splash, whatever the slots.
-        if (launch.Blocked)
+        if (shot.Launch.Blocked)
         {
-            _barrelBursts[_barrelBurstCount++] = new BarrelBurst(shell, launch.BlockPoint, launch.BlockPropId);
+            _barrelBursts[_barrelBurstCount++] = new BarrelBurst(shell, shot.Launch.BlockPoint, shot.Launch.BlockPropId);
             return;
         }
         _shells[ShellCount++] = shell;

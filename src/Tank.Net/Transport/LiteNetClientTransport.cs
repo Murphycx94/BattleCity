@@ -10,7 +10,7 @@ public sealed class LiteNetClientTransport : IClientTransport
     private NetPeer? _server;
     private ITransportHandler? _handler;
 
-    public LiteNetClientTransport(string host, int port)
+    public LiteNetClientTransport(string host, int port, string connectKey = ProtocolInfo.ConnectKey)
     {
         _manager = new NetManager(_listener)
         {
@@ -33,7 +33,7 @@ public sealed class LiteNetClientTransport : IClientTransport
         _listener.NetworkReceiveEvent += (_, reader, _, _) => _handler?.OnData(0, reader.GetRemainingBytesSpan());
 
         if (!_manager.Start()) throw new InvalidOperationException("无法打开 UDP 套接字。");
-        _manager.Connect(host, port, ProtocolInfo.ConnectKey);
+        _manager.Connect(host, port, connectKey);
     }
 
     public NetManager Manager => _manager;

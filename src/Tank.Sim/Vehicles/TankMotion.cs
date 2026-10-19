@@ -33,14 +33,19 @@ public static class TankMotion
     public static Obb2 Footprint(TankSpec spec, Vector2 center, float yaw) =>
         new(center, new Vector2(spec.HullWidth / 2, spec.HullLength / 2), yaw);
 
+    /// <summary>At most this many props give way to one hull in one tick (a hull spans a few 2 m segments at most).</summary>
+    private const int MaxGivingWay = 16;
+
     /// <summary>
     /// Applies throttle and steering, knocks down what gives way where the hull is going (any fence it touches, and brick
     /// walls when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, at the cost of half its speed; their ids
     /// are added to <paramref name="felled"/> if given), then moves the hull and pushes it out of standing solid props and
     /// <paramref name="obstacles"/>. Knocking props down changes <paramref name="field"/> for everyone using it, so only
-    /// the simulation stepping the battle should drive on it (a client predicting its own tank must not).
+    /// the simulation stepping the battle drives with <paramref name="knockDown"/>; a client predicting its own tank
+    /// drives without it: the props that would give way are then driven through as if down (the speed still halved for a
+    /// brick wall) but left standing, and whether they really fell is the server's to say.
     /// </summary>
-    public static void Drive(ref TankState t, in InputCmd input, Battlefield field, ReadOnlySpan<Obb2> obstacles, List<int>? felled = null)
+    public static void Drive(ref TankState t, in InputCmd input, Battlefield field, ReadOnlySpan<Obb2> obstacles, List<int>? felled = null, bool knockDown = true)
     {
         TankSpec spec = t.Spec;
         const float dt = SimConstants.Dt;
@@ -55,10 +60,12 @@ public static class TankMotion
 
         Vector2 start = t.Position;
         Vector2 intended = Angles.Forward(t.Yaw) * (t.Speed * dt);
-        KnockDown(ref t, Footprint(spec, start + intended, t.Yaw), field, felled);
-        Vector2 dest = field.ClampToPlayable(Resolve(Footprint(spec, start + intended, t.Yaw), field, obstacles));
+        Span<int> ignored = stackalloc int[MaxGivingWay];
+        int ignoredCount = KnockDown(ref t, Footprint(spec, start, oldYaw), Footprint(spec, start + intended, t.Yaw), field, felled, knockDown, ignored);
+        ReadOnlySpan<int> through = ignored[..ignoredCount];
+        Vector2 dest = field.ClampToPlayable(Resolve(Footprint(spec, start + intended, t.Yaw), field, obstacles, through));
         if (IsTooSteepToEnter(spec, field.Terrain, start, dest)) dest = start;
-        (t.Position, t.Yaw) = SettleWithoutOverlap(spec, dest, t.Yaw, oldYaw, start, field, obstacles);
+        (t.Position, t.Yaw) = SettleWithoutOverlap(spec, dest, t.Yaw, oldYaw, start, field, obstacles, through);
 
         // Pushed almost straight back (head-on into a rock, a standing wall or fence, a tank or the map edge): stall.
         // A glancing contact keeps its speed so the hull slides along the obstacle.
@@ -115,24 +122,47 @@ public static class TankMotion
     }
 
     /// <summary>
-    /// What gives way to a hull about to stand on <paramref name="hull"/> (design §4.2): any fence, and brick walls when it
-    /// is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, which then costs it half its speed (once, however many
-    /// it breaks). They go down before the hull is pushed out of what still stands, so it drives on through.
+    /// What gives way to a hull about to move from <paramref name="from"/> onto <paramref name="hull"/> (design §4.2): any
+    /// fence, and brick walls when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, which costs it half its
+    /// speed as it breaks into one (once, however many at a time). With <paramref name="knockDown"/> they go down before
+    /// the hull is pushed out of what still stands, so it drives on through; without it they are left standing and their
+    /// indices put in <paramref name="ignored"/> (as many as fit), for the collision to drive through them all the same.
+    /// A standing wall the hull is already inside can only be one it broke into without knocking down (the break cost it
+    /// half its speed, so it may now be under ram speed): it still gives way, at no further cost, or the hull would be
+    /// pushed back out and stall where the server drives on.
     /// </summary>
-    private static void KnockDown(ref TankState t, in Obb2 hull, Battlefield field, List<int>? felled)
+    /// <returns>How many of <paramref name="ignored"/> were filled.</returns>
+    private static int KnockDown(ref TankState t, in Obb2 from, in Obb2 hull, Battlefield field, List<int>? felled, bool knockDown, Span<int> ignored)
     {
         bool ramming = MathF.Abs(t.Speed) > t.Spec.BrickWallRamSpeed;
         bool broke = false;
+        int count = 0;
         foreach (int i in field.Blockers)
         {
             ref readonly Prop prop = ref field.PropAt(i);
-            bool givesWay = prop.Kind == PropKind.Fence || (ramming && prop.Kind == PropKind.BrickWall);
-            if (!givesWay || !field.StandingAt(i) || !Overlaps(hull, prop.Footprint)) continue;
-            field.Destroy(i);
-            felled?.Add(prop.Id);
-            broke |= prop.Kind == PropKind.BrickWall;
+            if (!field.StandingAt(i) || !Overlaps(hull, prop.Footprint)) continue;
+            bool inside = prop.Kind == PropKind.BrickWall && Overlaps(from, prop.Footprint);
+            bool givesWay = prop.Kind == PropKind.Fence || prop.Kind == PropKind.BrickWall && (ramming || (!knockDown && inside));
+            if (!givesWay) continue;
+            if (knockDown)
+            {
+                field.Destroy(i);
+                felled?.Add(prop.Id);
+            }
+            else if (count < ignored.Length)
+            {
+                ignored[count++] = i;
+            }
+            broke |= prop.Kind == PropKind.BrickWall && !inside;
         }
         if (broke) t.Speed *= RamSpeedKept;
+        return count;
+    }
+
+    private static bool IsIgnored(int index, ReadOnlySpan<int> ignored)
+    {
+        foreach (int i in ignored) if (i == index) return true;
+        return false;
     }
 
     /// <summary>The hull lies partly on the rubble of a wall.</summary>
@@ -181,38 +211,38 @@ public static class TankMotion
     /// can still drive out (ties go to the earlier candidate).
     /// </summary>
     private static (Vector2 Position, float Yaw) SettleWithoutOverlap(
-        TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+        TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
     {
         Span<(Vector2 Position, float Yaw)> candidates = stackalloc (Vector2, float)[3] { (dest, yaw), (dest, oldYaw), (oldPosition, oldYaw) };
         var best = candidates[0];
         float bestDepth = float.MaxValue;
         foreach (var candidate in candidates)
         {
-            float depth = PenetrationDepth(Footprint(spec, candidate.Position, candidate.Yaw), field, obstacles);
+            float depth = PenetrationDepth(Footprint(spec, candidate.Position, candidate.Yaw), field, obstacles, ignored);
             if (depth <= Skin * 0.5f) return candidate;
             if (depth < bestDepth - TieDepth) (best, bestDepth) = (candidate, depth);
         }
         return best;
     }
 
-    /// <summary>Deepest overlap of <paramref name="box"/> with any standing solid prop or obstacle; 0 when clear.</summary>
-    private static float PenetrationDepth(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+    /// <summary>Deepest overlap of <paramref name="box"/> with any standing solid prop (but those <paramref name="ignored"/>) or obstacle; 0 when clear.</summary>
+    private static float PenetrationDepth(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
     {
         float deepest = 0f;
         foreach (int i in field.Blockers)
-            if (field.StandingAt(i) && Obb2.TryGetPenetration(box, field.PropAt(i).Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
+            if (field.StandingAt(i) && !IsIgnored(i, ignored) && Obb2.TryGetPenetration(box, field.PropAt(i).Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         foreach (Obb2 other in obstacles)
             if (Obb2.TryGetPenetration(box, other, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         return deepest;
     }
 
-    private static Vector2 Resolve(Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles)
+    private static Vector2 Resolve(Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
     {
         for (int iteration = 0; iteration < CollisionIterations; iteration++)
         {
             bool pushed = false;
             foreach (int i in field.Blockers)
-                if (field.StandingAt(i)) pushed |= PushOut(ref box, field.PropAt(i).Footprint);   // rubble, fallen fences and bushes don't block
+                if (field.StandingAt(i) && !IsIgnored(i, ignored)) pushed |= PushOut(ref box, field.PropAt(i).Footprint);   // rubble, fallen fences and bushes don't block
             foreach (Obb2 other in obstacles) pushed |= PushOut(ref box, other);
             if (!pushed) break;
         }

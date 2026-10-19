@@ -1,0 +1,155 @@
+using Tank.Sim.Combat;
+using Tank.Sim.Modes;
+
+namespace Tank.Net.Battle;
+
+[Flags]
+public enum TankFlags : byte
+{
+    None = 0,
+    Destroyed = 1,
+    Protected = 2,
+}
+
+/// <summary>Another tank as a client sees it (design §5.5): whole centimetres, 12-bit headings, 10-bit gun pitch.</summary>
+public struct BattleEntity : IEquatable<BattleEntity>
+{
+    public int Id;
+    public byte Slot;      // the player's room slot
+    public byte Spec;      // index into TankCatalog.All
+    public byte Team;
+    public int X;          // cm
+    public int Z;          // cm
+    public ushort Yaw;     // 12 bits
+    public ushort TurretYaw;
+    public ushort Pitch;   // 10 bits
+    public short Speed;    // tenths of a metre per second
+    public ushort Health;
+    public TankFlags Flags;
+
+    public readonly bool Has(TankFlags flag) => (Flags & flag) != 0;
+
+    public readonly bool Equals(BattleEntity o) =>
+        Id == o.Id && Slot == o.Slot && Spec == o.Spec && Team == o.Team && X == o.X && Z == o.Z && Yaw == o.Yaw &&
+        TurretYaw == o.TurretYaw && Pitch == o.Pitch && Speed == o.Speed && Health == o.Health && Flags == o.Flags;
+
+    public override readonly bool Equals(object? obj) => obj is BattleEntity e && Equals(e);
+
+    public override readonly int GetHashCode() => HashCode.Combine(Id, X, Z, Yaw, TurretYaw, Health, Flags);
+}
+
+/// <summary>The client's own tank, exactly as the server has it, for reconciliation (design §5.5).</summary>
+public struct OwnTank : IEquatable<OwnTank>
+{
+    public int Id;
+    public float X, Z, Yaw, TurretYaw, GunPitch, Speed, Reload, Bloom;
+    public AmmoType Ammo;
+    public int ApLeft, HeLeft, ShotCount, Health, ProtectedUntil, LastFired;
+    public bool Destroyed;
+
+    public readonly bool Equals(OwnTank o) =>
+        Id == o.Id && X == o.X && Z == o.Z && Yaw == o.Yaw && TurretYaw == o.TurretYaw && GunPitch == o.GunPitch && Speed == o.Speed &&
+        Reload == o.Reload && Bloom == o.Bloom && Ammo == o.Ammo && ApLeft == o.ApLeft && HeLeft == o.HeLeft && ShotCount == o.ShotCount &&
+        Health == o.Health && ProtectedUntil == o.ProtectedUntil && LastFired == o.LastFired && Destroyed == o.Destroyed;
+
+    public override readonly bool Equals(object? obj) => obj is OwnTank o && Equals(o);
+
+    public override readonly int GetHashCode() => HashCode.Combine(Id, X, Z, Yaw, ShotCount, Health);
+}
+
+/// <summary>The match as this client should show it (design §5.5).</summary>
+public struct MatchBlock : IEquatable<MatchBlock>
+{
+    public MatchPhase Phase;
+    public int TicksLeft;
+    public bool Spotted;       // an enemy sees the client's tank
+    public byte WinnerTeam;    // MatchRules.NoTeam while playing or drawn
+    public byte WinnerSlot;    // MatchRules.NoSlot unless a free-for-all has ended
+    public int RespawnIn;      // ticks until the client's tank comes back, 0 otherwise
+    public int TeamScore0;     // the teams' kills, leavers' included (two-team modes; 0 in a free-for-all)
+    public int TeamScore1;
+
+    public readonly bool Equals(MatchBlock o) =>
+        Phase == o.Phase && TicksLeft == o.TicksLeft && Spotted == o.Spotted && WinnerTeam == o.WinnerTeam && WinnerSlot == o.WinnerSlot
+        && RespawnIn == o.RespawnIn && TeamScore0 == o.TeamScore0 && TeamScore1 == o.TeamScore1;
+
+    public override readonly bool Equals(object? obj) => obj is MatchBlock m && Equals(m);
+
+    public override readonly int GetHashCode() => HashCode.Combine(Phase, TicksLeft, Spotted, WinnerTeam, WinnerSlot, RespawnIn, TeamScore0, TeamScore1);
+}
+
+/// <summary>One player's line on the scoreboard.</summary>
+public struct PlayerStats : IEquatable<PlayerStats>
+{
+    public bool Active;
+    public byte Team;
+    public byte Spec;
+    public int TankId;
+    public int Kills;
+    public int Deaths;
+    public bool Alive;
+    public byte Rank;
+
+    public readonly bool Equals(PlayerStats o) =>
+        Active == o.Active && Team == o.Team && Spec == o.Spec && TankId == o.TankId && Kills == o.Kills && Deaths == o.Deaths && Alive == o.Alive && Rank == o.Rank;
+
+    public override readonly bool Equals(object? obj) => obj is PlayerStats p && Equals(p);
+
+    public override readonly int GetHashCode() => HashCode.Combine(Active, Team, TankId, Kills, Deaths, Alive, Rank);
+}
+
+/// <summary>
+/// What one client is told about one server tick: the tanks it may know of (sorted by id), its own tank in full, the
+/// match, and the scoreboard. Built per client on the server; kept per tick on both sides as a delta baseline.
+/// </summary>
+public sealed class BattleSnapshot
+{
+    public const int MaxEntities = Tank.Sim.Simulation.MaxTanks;
+
+    public int Tick = -1;
+    public readonly BattleEntity[] Entities = new BattleEntity[MaxEntities];
+    public int EntityCount;
+    public bool HasOwn;
+    public OwnTank Own;
+    public MatchBlock Match;
+    public readonly PlayerStats[] Players = new PlayerStats[BattleProtocol.MaxPlayers];
+
+    public ReadOnlySpan<BattleEntity> EntitySpan => Entities.AsSpan(0, EntityCount);
+
+    public void CopyFrom(BattleSnapshot other)
+    {
+        Tick = other.Tick;
+        Array.Copy(other.Entities, Entities, other.EntityCount);
+        EntityCount = other.EntityCount;
+        HasOwn = other.HasOwn;
+        Own = other.Own;
+        Match = other.Match;
+        Array.Copy(other.Players, Players, Players.Length);
+    }
+
+    public bool TryFind(int id, out BattleEntity entity)
+    {
+        int lo = 0, hi = EntityCount - 1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1;
+            int midId = Entities[mid].Id;
+            if (midId == id)
+            {
+                entity = Entities[mid];
+                return true;
+            }
+            if (midId < id) lo = mid + 1;
+            else hi = mid - 1;
+        }
+        entity = default;
+        return false;
+    }
+}
+
+/// <summary>Per-client feedback sent with every snapshot (prediction and clock sync).</summary>
+public struct ClientFeedback
+{
+    public int LastProcessedInputTick;
+    public int InputSlack;   // newest received input tick minus the tick it is simulated at
+}

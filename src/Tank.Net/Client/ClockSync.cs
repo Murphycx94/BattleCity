@@ -13,12 +13,16 @@ public sealed class ClockSync
     private const double DeadZone = 0.75;
     private const double Gain = 0.02;
     private const double MaxDilation = 0.05;
-    private const int HardResyncThreshold = 20;
-    private const int MaxTicksPerFrame = 8;
+    private const int HardResyncThreshold = 20;   // ticks: 333 ms at 60 Hz, 667 ms at 30 Hz — a stall this long is a reconnect-sized gap either way
+    private const int MaxTicksPerFrame = 8;       // ticks: a long frame catches up this much at once, the rest is dropped
 
+    private readonly int _tickRate;
     private double _accumulator;
     private double _slackEma;
     private bool _hasSlack;
+
+    /// <param name="tickRate">The server's ticks per second: the old game's 60, a battle's 30.</param>
+    public ClockSync(int tickRate = Units.TickRate) => _tickRate = tickRate;
 
     public bool Synced { get; private set; }
     public int Tick { get; private set; }
@@ -41,7 +45,7 @@ public sealed class ClockSync
     public void Initialize(int serverTick, double rttSeconds)
     {
         // The snapshot is already RTT/2 old on arrival and our input needs another RTT/2 to get back: lead by a full RTT.
-        Tick = serverTick + (int)System.Math.Ceiling(rttSeconds * Units.TickRate + TargetSlackTicks);
+        Tick = serverTick + (int)System.Math.Ceiling(rttSeconds * _tickRate + TargetSlackTicks);
         _accumulator = 0;
         Synced = true;
     }
@@ -71,7 +75,7 @@ public sealed class ClockSync
     public int Advance(double dt)
     {
         if (!Synced) return 0;
-        _accumulator += dt * Units.TickRate * Rate;
+        _accumulator += dt * _tickRate * Rate;
         int n = (int)_accumulator;
         _accumulator -= n;
         if (n > MaxTicksPerFrame)

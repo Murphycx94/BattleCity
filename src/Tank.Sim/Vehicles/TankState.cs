@@ -42,6 +42,12 @@ public struct TankState
     /// <summary>A wreck ignores input and takes no more damage, but still blocks tanks and shells.</summary>
     public bool IsDestroyed;
 
+    /// <summary>
+    /// Spawn protection (stage 4 design §2.2): before this tick the gun won't fire, and hits still stop the shell and
+    /// are reported, but do no damage. 0 (or any past tick) means none.
+    /// </summary>
+    public int ProtectedUntil;
+
     /// <summary>Round in the breech; firing uses this type.</summary>
     public AmmoType Ammo;
 

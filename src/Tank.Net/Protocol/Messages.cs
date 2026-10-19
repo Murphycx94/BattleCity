@@ -218,9 +218,13 @@ public static class Messages
         w.WriteVarUInt((uint)m.Port);
     }
 
-    public static RoomInfoMessage ReadRoomInfo(ref BitReader r) =>
-        new((int)r.ReadVarUInt(), r.ReadString(48), ReadMode(ref r), r.ReadString(), (int)r.ReadVarUInt(),
+    public static RoomInfoMessage ReadRoomInfo(ref BitReader r)
+    {
+        var info = new RoomInfoMessage((int)r.ReadVarUInt(), r.ReadString(48), ReadMode(ref r), r.ReadString(), (int)r.ReadVarUInt(),
             (int)r.ReadVarUInt(), r.ReadBool(), (int)r.ReadVarUInt());
+        if (info.Port is < 1 or > ushort.MaxValue) throw new ProtocolException("Bad port.");   // an endpoint can't be made of it
+        return info;
+    }
 
     private static GameMode ReadMode(ref BitReader r)
     {

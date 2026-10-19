@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Ai;
 using Tank.Sim.Geometry;
+using Tank.Sim.Modes;
 using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 
@@ -102,6 +103,46 @@ public static class SandboxMap
         new(new Vector2(242, 262), 0f),
         new(PatrolStart, 0f),
     };
+
+    /// <summary>
+    /// Where the two teams of a match start (stage 4 design §2.3): five spots each on open flat ground about 280 m apart,
+    /// team 0 south-west of the middle, team 1 north-east, every tank facing the other side.
+    /// </summary>
+    private static readonly Vector2 Team0Centre = new(100, 300), Team1Centre = new(300, 100);
+    private static readonly Vector2[] Team0Spots = { new(100, 300), new(110, 303), new(103, 310), new(93, 307), new(90, 297) };
+    private static readonly Vector2[] Team1Spots = { new(300, 100), new(310, 100), new(305, 109), new(295, 109), new(290, 100) };
+
+    /// <summary>Ten spots for a free-for-all, spread over the map at least 100 m apart, each facing the middle.</summary>
+    private static readonly Vector2[] SoloSpots =
+    {
+        new(76, 60), new(360, 360), new(40, 360), new(352, 84), new(200, 228),
+        new(48, 208), new(212, 76), new(344, 224), new(224, 360), new(132, 148),
+    };
+
+    // After the spot arrays: static initialisers run in order.
+    public static readonly SpawnLayout Spawns = new(TeamSpawns(), SoloSpawns());
+
+    /// <summary>Twenty points on open ground for the bots to drive between, at least 45 m apart and covering the map.</summary>
+    public static readonly IReadOnlyList<Vector2> Waypoints = new Vector2[]
+    {
+        new(192, 216), new(40, 40), new(340, 40), new(360, 360), new(40, 360), new(40, 192), new(360, 188), new(212, 360),
+        new(184, 40), new(288, 272), new(124, 128), new(260, 104), new(124, 312), new(48, 116), new(116, 208), new(284, 180),
+        new(56, 280), new(360, 112), new(112, 52), new(284, 348),
+    };
+
+    private static SpawnPoint[] TeamSpawns()
+    {
+        var points = new SpawnPoint[Team0Spots.Length + Team1Spots.Length];
+        for (int i = 0; i < Team0Spots.Length; i++) points[i] = new SpawnPoint(Team0Spots[i], Angles.YawOf(Team1Centre - Team0Spots[i]), 0);
+        for (int i = 0; i < Team1Spots.Length; i++) points[Team0Spots.Length + i] = new SpawnPoint(Team1Spots[i], Angles.YawOf(Team0Centre - Team1Spots[i]), 1);
+        return points;
+    }
+
+    private static SpawnPoint[] SoloSpawns()
+    {
+        var middle = new Vector2(200, 200);
+        return SoloSpots.Select(p => new SpawnPoint(p, Angles.YawOf(middle - p), 0)).ToArray();
+    }
 
     /// <summary>
     /// A place to watch the patrol from: open ground 109 m south-west of its first bush patch, in sight of it (from the

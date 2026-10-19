@@ -32,14 +32,13 @@ public sealed class PatrolDriver
     public const float PassRadius = 3f;
 
     /// <summary>A point to wait at, or a sharp corner, counts as reached once the hull has stopped within this of it, m.</summary>
-    public const float StopRadius = 2f;
+    public const float StopRadius = Steering.StopRadius;
 
     /// <summary>
-    /// A point further off the heading than this (radians) is turned to on the spot; a route point where the route turns
-    /// more than this is stopped at, like a point waited at.
+    /// A point further off the heading than this (radians) is turned to on the spot (<see cref="Steering"/>); a route
+    /// point where the route turns more than this is stopped at, like a point waited at.
     /// </summary>
-    public static readonly float TurnInPlace = Angles.Deg(35);
-    private static readonly float SteerDeadZone = Angles.Deg(2);
+    public static readonly float TurnInPlace = Steering.TurnInPlace;
 
     /// <summary>Seconds between shots while waiting.</summary>
     public const float FireEvery = 4f;
@@ -60,13 +59,7 @@ public sealed class PatrolDriver
     public const float HoldFireWithin = 2 * AimShort;
 
     /// <summary>The gun fires only once it is laid this close to the aim, in turret yaw and gun pitch (radians).</summary>
-    public static readonly float OnTarget = Angles.Deg(1);
-
-    /// <summary>Slower than this (m/s) the hull counts as stopped.</summary>
-    private const float StoppedSpeed = 0.3f;
-
-    /// <summary>Extra distance allowed for when braking to a stop, m.</summary>
-    private const float BrakeMargin = 0.5f;
+    public static readonly float OnTarget = Steering.OnTarget;
 
     private readonly PatrolPoint[] _route;
     private readonly bool[] _sharp;   // per point: the route turns more than TurnInPlace there
@@ -105,7 +98,7 @@ public sealed class PatrolDriver
         PatrolPoint point = _route[Next];
         float distance = Vector2.Distance(tank.Position, point.Position);
         bool stopsHere = point.WaitSeconds > 0 || _sharp[Next];
-        if (stopsHere ? distance <= StopRadius && MathF.Abs(tank.Speed) < StoppedSpeed : distance <= PassRadius)
+        if (stopsHere ? Steering.StoppedAt(tank, point.Position) : distance <= PassRadius)
         {
             if (point.WaitSeconds > 0)
             {
@@ -118,10 +111,7 @@ public sealed class PatrolDriver
             distance = Vector2.Distance(tank.Position, point.Position);
             stopsHere = point.WaitSeconds > 0 || _sharp[Next];
         }
-        float off = Angles.Wrap(Angles.YawOf(point.Position - tank.Position) - tank.Yaw);
-        sbyte steer = (sbyte)(MathF.Abs(off) <= SteerDeadZone ? 0 : off > 0 ? -1 : 1);   // +yaw is to the left; Steer +1 turns right
-        bool braking = stopsHere && distance <= tank.Speed * tank.Speed / (2 * tank.Spec.Braking) + BrakeMargin;
-        sbyte throttle = (sbyte)(MathF.Abs(off) > TurnInPlace || braking || distance <= StopRadius / 2 ? 0 : 1);
+        var (throttle, steer) = Steering.Toward(tank, point.Position, stopsHere);
         return hold with { Throttle = throttle, Steer = steer };
     }
 
@@ -141,8 +131,7 @@ public sealed class PatrolDriver
         TankPose pose = TankPose.Compute(tank, field.Terrain);
         var (yaw, pitch) = Angles.AimAngles(aim - pose.Trunnion(tank.Spec), tank.Yaw);
         var (turret, gun) = pose.ToHullAngles(Angles.Direction(yaw, pitch), tank.TurretYaw);
-        bool laid = MathF.Abs(Angles.Wrap(turret - tank.TurretYaw)) <= OnTarget && MathF.Abs(gun - tank.GunPitch) <= OnTarget;
-        bool fire = tick >= _nextShot && laid;
+        bool fire = tick >= _nextShot && Steering.IsLaid(tank, turret, gun);
         if (fire) _nextShot = tick + (int)MathF.Round(FireEvery * SimConstants.TickRate);
         return new InputCmd(tick, 0, 0, yaw, pitch, fire, AmmoType.AP);
     }

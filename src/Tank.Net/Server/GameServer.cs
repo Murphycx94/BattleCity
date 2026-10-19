@@ -9,7 +9,7 @@ namespace Tank.Net.Server;
 /// Authoritative game server. Transport-agnostic and clock-agnostic: call <see cref="Tick"/> at exactly
 /// 60Hz (see <see cref="ServerRunner"/>) or from a test with a virtual clock.
 /// </summary>
-public sealed partial class GameServer : ITransportHandler, IRoomInfoProvider
+public sealed partial class GameServer : ITransportHandler, IRoomInfoProvider, ITickServer
 {
     private const int HistorySize = 64;
     private const int MaxUnreliableBytes = 1150;

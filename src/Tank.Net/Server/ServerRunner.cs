@@ -4,24 +4,31 @@ using Tank.Core;
 
 namespace Tank.Net.Server;
 
+/// <summary>A server stepped by a <see cref="ServerRunner"/>.</summary>
+public interface ITickServer
+{
+    void Tick();
+}
+
 /// <summary>
-/// Runs <see cref="GameServer.Tick"/> at a precise 60Hz on a dedicated thread, using a sleep + spin hybrid
-/// wait. If the thread falls behind it catches up (bounded) instead of skipping ticks.
+/// Runs <see cref="ITickServer.Tick"/> at a precise rate (the old game's 60Hz, a battle's 30Hz) on a dedicated thread,
+/// using a sleep + spin hybrid wait. If the thread falls behind it catches up (bounded) instead of skipping ticks.
 /// </summary>
 public sealed class ServerRunner : IDisposable
 {
     private const int MaxCatchUpTicks = 5;
-    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(1.0 / Units.TickRate);
+    private readonly TimeSpan TickInterval;
 
-    private readonly GameServer _server;
+    private readonly ITickServer _server;
     private readonly Action<string> _log;
     private readonly Thread _thread;
     private volatile bool _running;
 
-    public ServerRunner(GameServer server, Action<string>? log = null)
+    public ServerRunner(ITickServer server, Action<string>? log = null, int tickRate = Units.TickRate)
     {
         _server = server;
         _log = log ?? (_ => { });
+        TickInterval = TimeSpan.FromSeconds(1.0 / tickRate);
         _thread = new Thread(Loop) { IsBackground = true, Name = "Tank server", Priority = ThreadPriority.AboveNormal };
     }
 

@@ -13,9 +13,10 @@ public readonly record struct RayHit(float T, Vector3 Point, int PropId)
 /// <summary>
 /// Terrain, the props on it and the rectangle tanks may drive in. Props keep their shapes; what changes as the battle
 /// goes on is their state: whether each still stands, and its hit points. Only the simulation changes it
-/// (<see cref="Simulation"/> and the <see cref="Vehicles.TankMotion.Drive"/> it calls), so a battlefield belongs to one
-/// battle: it is not safe to share between simulations, nor to reuse once the battle is over. Every query here (rays,
-/// tank collision, bushes) sees the props as they stand now.
+/// (<see cref="Simulation"/> and the <see cref="Vehicles.TankMotion.Drive"/> it calls), or a network client following
+/// the server's word (<see cref="SetDurability"/>), so a battlefield belongs to one battle: it is not safe to share
+/// between simulations, nor to reuse once the battle is over. Every query here (rays, tank collision, bushes) sees the
+/// props as they stand now.
 /// </summary>
 public sealed class Battlefield
 {
@@ -62,6 +63,9 @@ public sealed class Battlefield
     public IReadOnlyList<Prop> Props => _props;
     public float Border { get; }
 
+    /// <summary>Whether there is a prop with id <paramref name="propId"/> (<see cref="PropById"/> throws for one that is not).</summary>
+    public bool HasProp(int propId) => _indexOf.ContainsKey(propId);
+
     /// <summary>The prop with id <paramref name="propId"/>; throws if there is none.</summary>
     public Prop PropById(int propId) => _props[IndexOf(propId)];
 
@@ -70,6 +74,20 @@ public sealed class Battlefield
 
     /// <summary>Hit points left: <see cref="Prop.MaxDurability"/> when intact, 0 once destroyed (and always 0 for a rock, which can't be).</summary>
     public int Durability(int propId) => _durability[IndexOf(propId)];
+
+    /// <summary>
+    /// Sets a destructible prop's hit points from outside the simulation (a client applying the server's prop state):
+    /// 0 puts it down, anything else up to <see cref="Prop.MaxDurability"/> leaves it standing with that many left.
+    /// </summary>
+    public void SetDurability(int propId, int durability)
+    {
+        int index = IndexOf(propId);
+        RequireDestructible(index);
+        int max = _props[index].MaxDurability;
+        if (durability < 0 || durability > max) throw new ArgumentOutOfRangeException(nameof(durability), durability, $"Prop {propId} has 0 … {max} hit points.");
+        _durability[index] = durability;
+        _standing[index] = durability > 0;
+    }
 
     public Vector2 ClampToPlayable(Vector2 p) =>
         Vector2.Clamp(p, new Vector2(Border, Border), new Vector2(Terrain.SizeX - Border, Terrain.SizeZ - Border));

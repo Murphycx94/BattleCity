@@ -16,10 +16,18 @@ public sealed class LiteNetServerTransport : IServerTransport
     private readonly NetDataWriter _reply = new();
     private ITransportHandler? _handler;
 
-    public LiteNetServerTransport(int port, IRoomInfoProvider? roomInfo = null, int maxConnections = 8)
+    private readonly string _connectKey;
+    private readonly Func<BitWriter, bool>? _battleRoomInfo;
+
+    /// <param name="connectKey">What a client must present to connect: the old game's key, or <c>BattleProtocol.ConnectKey</c>.</param>
+    /// <param name="battleRoomInfo">Writes a battle room's reply to a discovery broadcast, or returns false for none.</param>
+    public LiteNetServerTransport(int port, IRoomInfoProvider? roomInfo = null, int maxConnections = 8, string connectKey = ProtocolInfo.ConnectKey,
+        Func<BitWriter, bool>? battleRoomInfo = null)
     {
         _port = port;
         _roomInfo = roomInfo;
+        _connectKey = connectKey;
+        _battleRoomInfo = battleRoomInfo;
         _manager = new NetManager(_listener)
         {
             ChannelsCount = 2,
@@ -34,7 +42,7 @@ public sealed class LiteNetServerTransport : IServerTransport
         _listener.ConnectionRequestEvent += request =>
         {
             if (_manager.ConnectedPeersCount >= maxConnections) request.Reject();
-            else request.AcceptIfKey(ProtocolInfo.ConnectKey);
+            else request.AcceptIfKey(_connectKey);
         };
         _listener.PeerConnectedEvent += peer => _handler?.OnPeerConnected(peer.Id);
         _listener.PeerDisconnectedEvent += (peer, info) => _handler?.OnPeerDisconnected(peer.Id, info.Reason.ToString());
@@ -86,14 +94,15 @@ public sealed class LiteNetServerTransport : IServerTransport
 
     private void OnUnconnected(IPEndPoint remote, NetPacketReader reader, UnconnectedMessageType type)
     {
-        if (_roomInfo is null) return;
+        if (_roomInfo is null && _battleRoomInfo is null) return;
         var data = reader.GetRemainingBytesSpan();
         try
         {
             var r = new BitReader(data);
             if ((MessageType)r.ReadByte() != MessageType.Discover) return;
             _discoveryWriter.Reset();
-            Messages.Write(_discoveryWriter, _roomInfo.GetRoomInfo());
+            if (_roomInfo is not null) Messages.Write(_discoveryWriter, _roomInfo.GetRoomInfo());
+            else if (!_battleRoomInfo!(_discoveryWriter)) return;
             _reply.Reset();
             _reply.Put(_discoveryWriter.Data);
             _manager.SendUnconnectedMessage(_reply, remote);

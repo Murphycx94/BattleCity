@@ -10,6 +10,7 @@ namespace Tank.Soak;
 /// <summary>
 /// Network soak test (docs/04 §4): 8 bots on a deterministic simulated network under several link qualities.
 /// Prints the acceptance metrics from docs/03 §11 and exits non-zero if any are violated.
+/// <c>--battle</c> runs the stage 4 battle soak (<see cref="BattleSoak"/>) instead.
 /// </summary>
 public static class Program
 {
@@ -28,8 +29,9 @@ public static class Program
         double.TryParse(Environment.GetEnvironmentVariable("SOAK_TICK_BUDGET_MS"), System.Globalization.CultureInfo.InvariantCulture, out double b) ? b : 2.0;
     private const double FrameDt = 1.0 / 144;
 
-    public static int Main()
+    public static int Main(string[] args)
     {
+        if (args.Contains("--battle")) return BattleSoak.Run(TickBudgetMs) ? 0 : 1;
         var scenarios = new[]
         {
             new Scenario("wired LAN", new LinkConditions(0.5, 0.2, 0), GameMode.Deathmatch, 10),
