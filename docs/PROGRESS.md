@@ -112,6 +112,7 @@
 ## 工作约定（中断恢复时先看）
 
 - 运行环境：`export PATH="$HOME/.dotnet:$PATH" DOTNET_ROOT="$HOME/.dotnet"`。Godot 命令是 `godot-mono`。
+- 新开的 worktree 第一次跑客户端前要先导入资源：`godot-mono --headless --path src/Tank.Client --import`（否则字体等资源加载不到）。`--screenshot` 要给绝对路径（Godot 的工作目录是 `src/Tank.Client`，相对路径存不到 `build/`）。
 - Godot 可能卡住不退出，每次运行都要套强制结束：`godot-mono ... & P=$!; ( sleep 40; kill -9 $P ) & wait $P`。
 - 截图和帧率：
   - 启动参数：`--camera-preset <front|side|hill|spin|close|closerear|sprocket|orbit|bush>`、`--screenshot <路径>`、`--screenshot-at 3`、`--quit-after <秒>`、`--fps-log`、`--autodrive`、`--fx-shot <秒>`、`--sniper`。
