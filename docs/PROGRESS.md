@@ -31,7 +31,8 @@
 
 | # | 节点 | 状态 | 提交 | 说明 |
 |---|---|---|---|---|
-| 1 | 范围与蓝图 | ⏳ | | 范围按设计 §7（主菜单、房间界面、对局画面、HUD、启动参数）。工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b`（`feat/stage4b-client-match`），草稿目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b-draft`（`draft/stage4b-client-match`），都从 main `44bfda6` 拉出。先让架构子代理按设计和现有客户端代码写蓝图（文件、接口、任务顺序），再在草稿目录逐任务实现 |
+| 1 | 范围与蓝图 | ✅ | feat `6c4d020`（草稿 `68efe6a`） | 范围按设计 §7。工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b`（`feat/stage4b-client-match`），草稿目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b-draft`（`draft/stage4b-client-match`），都从 main `44bfda6` 拉出。架构子代理按设计和现有客户端代码写了蓝图 `docs/superpowers/specs/2026-10-19-stage4b-client-match-blueprint.md`：对局场景 `MatchMain` 挂在 `Main` 下不切场景；沙盒与对局共享部件（`BattleWorld`、`TankActor`、`CombatHud`、`DriveInput`、`AimMath`）不共享基类；房主服务器在 `ServerRunner` 线程，`--loopback` 走虚拟网络做确定性冒烟；纯逻辑放 `Logic/` 子目录链接进 Art 测试；HUD 以 1600×900 基准自绘；11 个任务 T1～T11；16 条风险（开火点击在无 tick 帧丢失 → `Peek/EndTick` 锁存；重同步换 `Field` 实例；第一份快照前 `Own.Spec` 为空；自己残骸时别人照画；命名空间遮蔽等） |
+| 2 | 草稿实现（逐任务，每任务一个提交，每步截图回归） | ⏳ | T1 `4f1bb17` | 基线截图取自干净的蓝图提交（`build/shots/base/`：orbit、kill、lamp、wall、patrol、heavy）。T1 共享抽取 A：`Driving/DriveInput`（基类）+ `Logic/FireLatch`（按下锁存，`Peek` 不清、`EndTick` 才清）、`Driving/AimSolver` + `Logic/AimMath`（瞄准数学纯化）、`SandboxWorld` → `World/BattleWorld`（`MapStyle`、`SetField`、无车时不压草）、`ShellViews` 增加 `ShellView` 列表重载、`ShellView.Age`、调色板加 `AllyBody/EnemyBody/UiBackground/UiDim/UiGood/UiDanger`、Art 测试链接 `**/Logic/**`。Art 512 → 524，Net 208 → 209；六张回归截图与基线一致（差异只在粒子和地平线抖动） |
 
 ## 4A 节点记录
 
