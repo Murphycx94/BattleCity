@@ -9,7 +9,7 @@
 - **阶段**：4 联网，分 4A 联网核心（无画面）、4B 客户端对局、4C 清理。设计已确认：[阶段 4 联网设计](superpowers/specs/2026-10-18-stage4-networking-design.md)（在 `feat/stage4a-netcore` 上，工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4a`）
 - **用户的要求**：设计确认后一路做完三个小阶段（含审查、验收、squash 合入 main），中途不再询问，做完再汇报。不推送远程
 - **用户的选择**：三种模式都做（团队对战可复活、团队歼灭不复活、各自为战最后存活者赢）；简单的服务器端机器人；主菜单加试驾场；一局最多 10 辆车；各自为战不缩圈、限时 10 分钟；用试驾场地图去掉靶车
-- **进度**：4A 草稿完成、审查跟进完成，计划已导出到 `feat/stage4a-netcore`（`docs/superpowers/plans/2026-10-19-stage4a-netcore.md`，工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4a`）。正在逐批派子代理执行（提示 `scratchpad/implementer_prompt4a.sh N`；批 A = Task 1～4 ✅，批 B = Task 5～6 ✅（质量复核进行中），批 C = Task 7～8 进行中）
+- **进度**：4A 草稿完成、审查跟进完成，计划已导出到 `feat/stage4a-netcore`（`docs/superpowers/plans/2026-10-19-stage4a-netcore.md`，工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4a`）。正在逐批派子代理执行（提示 `scratchpad/implementer_prompt4a.sh N`；批 A = Task 1～4 ✅，批 B = Task 5～6 ✅（质量复核进行中），批 C = Task 7～8 已实现 `01a37b6` `e44cbec`，审查进行中）
 - **下一步**：每批做完做规格审查 + 质量审查 → 跟进提交 → 验收（全部测试、soak）→ squash 合入 main，然后 4B、4C
 - **上一阶段**：3 点亮已 squash 合入 main（`cf0d593`），节点记录见下方“3 节点记录”。分支 `feat/stage3-spotting` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage3` 还在，不再需要时可删
 
