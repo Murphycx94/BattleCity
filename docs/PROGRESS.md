@@ -27,6 +27,12 @@
 | 5 5v5 | ⏳ 未开始 | |
 | 6 吃鸡 | ⏳ 未开始 | |
 
+## 4B 节点记录
+
+| # | 节点 | 状态 | 提交 | 说明 |
+|---|---|---|---|---|
+| 1 | 范围与蓝图 | ⏳ | | 范围按设计 §7（主菜单、房间界面、对局画面、HUD、启动参数）。工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b`（`feat/stage4b-client-match`），草稿目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b-draft`（`draft/stage4b-client-match`），都从 main `44bfda6` 拉出。先让架构子代理按设计和现有客户端代码写蓝图（文件、接口、任务顺序），再在草稿目录逐任务实现 |
+
 ## 4A 节点记录
 
 | # | 节点 | 状态 | 提交 | 说明 |
