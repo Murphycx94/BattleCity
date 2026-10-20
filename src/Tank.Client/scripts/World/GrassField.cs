@@ -64,6 +64,7 @@ public partial class GrassField : Node3D
     public int ActiveCells => _cells.Count;
 
     // Global shader parameters read by grass.gdshader (declared under [shader_globals] in project.godot). One tank for now; making these arrays is the way to support several.
+    private const float OffMap = -100000f;                    // project.godot's default for tank_footprint
     private const string FootprintParam = "tank_footprint";   // vec4: centre x, centre z, half width, half length
     private const string AxesParam = "tank_axes";             // vec4: right x, right z, forward x, forward z
     private const string FocusParam = "grass_focus";          // vec2: where the far fade is centred
@@ -75,6 +76,9 @@ public partial class GrassField : Node3D
         SN.Vector2 right = footprint.AxisRight, forward = footprint.AxisForward;
         RenderingServer.GlobalShaderParameterSet(AxesParam, new Vector4(right.X, right.Y, forward.X, forward.Y));
     }
+
+    /// <summary>Moves the flattened patch off the map (the shader's own default), for a camera that follows no tank.</summary>
+    public void ClearTankFootprint() => SetTankFootprint(new Obb2(new SN.Vector2(OffMap, OffMap), SN.Vector2.Zero, 0f));
 
     public void Build(HeightField terrain, DirtMask dirt, IReadOnlyList<Prop> props)
     {

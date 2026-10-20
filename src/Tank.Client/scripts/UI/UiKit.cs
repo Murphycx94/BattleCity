@@ -1,12 +1,24 @@
 using Godot;
-using Tank.Client.View;
+using Tank.Client.Art;
+using Tank.Client.Online;
 
 namespace Tank.Client.UI;
 
 /// <summary>Shared look for all screens: monospace arcade type (CJK fallback), amber accent, hard-edged panels.</summary>
 public static class UiKit
 {
+    private const float ScreenPanelAlpha = 0.92f;   // screen panels sit on a flat backdrop, so they are nearly opaque (HUD plates are 0.7)
+
     private static Theme? _theme;
+
+    // The look's colours as engine colours, from the shared palette.
+    public static readonly Color Accent = Palette.UiAccent.ToColor();
+    public static readonly Color TextColor = Palette.UiText.ToColor();
+    public static readonly Color Dim = Palette.UiDim.ToColor();
+    public static readonly Color Good = Palette.UiGood.ToColor();
+    public static readonly Color Danger = Palette.UiDanger.ToColor();
+    public static readonly Color Background = Palette.UiBackground.ToColor();
+    public static readonly Color PanelFill = Palette.UiPanel.ToColor(ScreenPanelAlpha);
 
     public static Theme Theme => _theme ??= BuildTheme();
 
@@ -14,14 +26,14 @@ public static class UiKit
     {
         var l = new Label { Text = text, HorizontalAlignment = align };
         l.AddThemeFontSizeOverride("font_size", size);
-        l.AddThemeColorOverride("font_color", color ?? Palette.UiText);
+        l.AddThemeColorOverride("font_color", color ?? TextColor);
         return l;
     }
 
     public static PanelContainer Panel(Color? bg = null, int pad = 18, Color? border = null)
     {
         var p = new PanelContainer();
-        p.AddThemeStyleboxOverride("panel", Box(bg ?? Palette.UiPanel, pad, border ?? new Color(1, 1, 1, 0.08f)));
+        p.AddThemeStyleboxOverride("panel", Box(bg ?? PanelFill, pad, border ?? new Color(1, 1, 1, 0.08f)));
         return p;
     }
 
@@ -30,9 +42,9 @@ public static class UiKit
         var b = new Button { Text = text, CustomMinimumSize = new Vector2(0, 44), FocusMode = Control.FocusModeEnum.All };
         if (primary)
         {
-            b.AddThemeStyleboxOverride("normal", Box(Palette.UiAccent, 10));
-            b.AddThemeStyleboxOverride("hover", Box(Palette.UiAccent.Lightened(0.15f), 10));
-            b.AddThemeStyleboxOverride("pressed", Box(Palette.UiAccent.Darkened(0.2f), 10));
+            b.AddThemeStyleboxOverride("normal", Box(Accent, 10));
+            b.AddThemeStyleboxOverride("hover", Box(Accent.Lightened(0.15f), 10));
+            b.AddThemeStyleboxOverride("pressed", Box(Accent.Darkened(0.2f), 10));
             b.AddThemeStyleboxOverride("focus", Box(new Color(0, 0, 0, 0), 10, Colors.White));
             b.AddThemeColorOverride("font_color", new Color(0.08f, 0.06f, 0.02f));
             b.AddThemeColorOverride("font_hover_color", new Color(0.08f, 0.06f, 0.02f));
@@ -81,19 +93,8 @@ public static class UiKit
 
     public static Control Gap(int px) => new Control { CustomMinimumSize = new Vector2(px, px) };
 
-    /// <summary>
-    /// Right-pads text to a column width for the monospace tables (room list, scoreboard). CJK and full-width
-    /// characters occupy two columns, so string.PadRight alone would misalign rows that mix them with ASCII.
-    /// </summary>
-    public static string Pad(string text, int columns)
-    {
-        int width = text.Sum(c => IsWide(c) ? 2 : 1);
-        return width >= columns ? text : text + new string(' ', columns - width);
-    }
-
-    private static bool IsWide(char c) =>
-        c is >= '\u1100' and <= '\u115F' or >= '\u2E80' and <= '\uA4CF' or >= '\uAC00' and <= '\uD7A3'
-            or >= '\uF900' and <= '\uFAFF' or >= '\uFE30' and <= '\uFE4F' or >= '\uFF00' and <= '\uFF60' or >= '\uFFE0' and <= '\uFFE6';
+    /// <summary>Right-pads text to a column width for the monospace tables; wide (CJK) characters count as two columns.</summary>
+    public static string Pad(string text, int columns) => TextColumns.PadColumns(text, columns);
 
     private static Theme BuildTheme()
     {
@@ -114,18 +115,18 @@ public static class UiKit
         };
         var theme = new Theme { DefaultFont = font, DefaultFontSize = 18 };
         var normal = Box(new Color(0.13f, 0.14f, 0.19f), 10, new Color(1, 1, 1, 0.1f));
-        var hover = Box(new Color(0.18f, 0.19f, 0.25f), 10, Palette.UiAccent);
+        var hover = Box(new Color(0.18f, 0.19f, 0.25f), 10, Accent);
         theme.SetStylebox("normal", "Button", normal);
         theme.SetStylebox("hover", "Button", hover);
-        theme.SetStylebox("pressed", "Button", Box(new Color(0.09f, 0.1f, 0.13f), 10, Palette.UiAccent));
-        theme.SetStylebox("focus", "Button", Box(new Color(0, 0, 0, 0), 10, Palette.UiAccent));
+        theme.SetStylebox("pressed", "Button", Box(new Color(0.09f, 0.1f, 0.13f), 10, Accent));
+        theme.SetStylebox("focus", "Button", Box(new Color(0, 0, 0, 0), 10, Accent));
         theme.SetStylebox("disabled", "Button", Box(new Color(0.1f, 0.1f, 0.12f), 10));
-        theme.SetColor("font_color", "Button", Palette.UiText);
-        theme.SetColor("font_hover_color", "Button", Palette.UiAccent);
+        theme.SetColor("font_color", "Button", TextColor);
+        theme.SetColor("font_hover_color", "Button", Accent);
         theme.SetStylebox("normal", "LineEdit", Box(new Color(0.05f, 0.06f, 0.08f), 10, new Color(1, 1, 1, 0.12f)));
-        theme.SetStylebox("focus", "LineEdit", Box(new Color(0, 0, 0, 0), 10, Palette.UiAccent));
+        theme.SetStylebox("focus", "LineEdit", Box(new Color(0, 0, 0, 0), 10, Accent));
         theme.SetStylebox("panel", "ItemList", Box(new Color(0.05f, 0.06f, 0.08f), 8, new Color(1, 1, 1, 0.12f)));
-        theme.SetColor("font_selected_color", "ItemList", Palette.UiAccent);
+        theme.SetColor("font_selected_color", "ItemList", Accent);
         theme.SetStylebox("normal", "OptionButton", normal);
         theme.SetStylebox("hover", "OptionButton", hover);
         return theme;

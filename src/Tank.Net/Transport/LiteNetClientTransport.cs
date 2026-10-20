@@ -33,7 +33,15 @@ public sealed class LiteNetClientTransport : IClientTransport
         _listener.NetworkReceiveEvent += (_, reader, _, _) => _handler?.OnData(0, reader.GetRemainingBytesSpan());
 
         if (!_manager.Start()) throw new InvalidOperationException("无法打开 UDP 套接字。");
-        _manager.Connect(host, port, connectKey);
+        try
+        {
+            _manager.Connect(host, port, connectKey);
+        }
+        catch
+        {
+            _manager.Stop();   // a bad address throws here: the started socket and its thread must not outlive the throw
+            throw;
+        }
     }
 
     public NetManager Manager => _manager;

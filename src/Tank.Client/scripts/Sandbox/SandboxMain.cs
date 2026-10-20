@@ -2,6 +2,7 @@ using Godot;
 using Tank.Client.Bootstrap;
 using Tank.Client.Cameras;
 using Tank.Client.Combat;
+using Tank.Client.Driving;
 using Tank.Client.Vehicles;
 using Tank.Client.World;
 using Tank.Sim;
@@ -10,7 +11,6 @@ using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
-using SN = System.Numerics;
 
 namespace Tank.Client.Sandbox;
 
@@ -19,7 +19,7 @@ namespace Tank.Client.Sandbox;
 /// (team 0); the practice targets (<see cref="TargetRange"/>, team 1, the patrolling one last) take the next slots. A
 /// <see cref="VisionTracker"/> works out after every step who sees whom: targets the player's team doesn't see aren't drawn.
 /// Keys: 1 AP, 2 HE, R restock, T restore the walls, fences and bushes, F1–F4 another tank (<c>TankCatalog.All</c> in
-/// order), V the spotting numbers over every target. Scenery, HUD and scripted runs live in <see cref="SandboxWorld"/>,
+/// order), V the spotting numbers over every target. Scenery, HUD and scripted runs live in <see cref="BattleWorld"/>,
 /// <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
 /// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --tank light|medium|heavy|td --autodrive
 /// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|patrol|... --fps-log --sniper --spot-debug
@@ -29,16 +29,19 @@ namespace Tank.Client.Sandbox;
 public partial class SandboxMain : Node3D
 {
     private const double MaxCatchUp = 0.25;
-    private const float AimRange = 900f;
     private const float SniperEyeAboveTrunnion = 0.45f;
-    private const float MinAimDistance = 8f;
     private const float FireShake = 0.08f;
     private const float FireShakeSeconds = 0.15f;
     private const float ArmorHitSize = 0.5f;        // an AP shell striking armour: a small grey puff
     private const float GroundBurstHeight = 0.5f;   // a shell bursting higher than this over the ground hit a rock or a tank
 
     private readonly SandboxInput _input = new();
+
+    /// <summary>Raised by a second Esc (the first lets go of the mouse); only the menu, which hosts the sandbox as a child, listens.</summary>
+    public event Action? ExitRequested;
+
     private InputCmd[] _commands = Array.Empty<InputCmd>();
+    private LaunchOptions? _given;   // Main's options (already reported); null when the sandbox is the scene run on its own
     private LaunchOptions _options = new();
     private SandboxAutomation _automation = null!;
     private Simulation _sim = null!;
@@ -46,9 +49,8 @@ public partial class SandboxMain : Node3D
     private TankState _previous;
     private TankState _current;
     private OrbitCamera _camera = null!;
-    private SandboxWorld _world = null!;
-    private TankModel _tank = null!;
-    private DustTrail _dust = null!;
+    private BattleWorld _world = null!;
+    private TankActor _tank = null!;
     private bool _playerFired;
     private ShellViews _shells = null!;
     private TargetRange _targets = null!;
@@ -60,9 +62,12 @@ public partial class SandboxMain : Node3D
     private float _aimYaw;
     private float _aimPitch;
 
+    /// <summary>Hands over Main's launch options, whose unreadable values Main has already reported; call before adding the node to the tree.</summary>
+    public void Setup(LaunchOptions options) => _given = options;
+
     public override void _Ready()
     {
-        _options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
+        _options = _given ?? LaunchOptions.Parse(OS.GetCmdlineUserArgs());
         GetWindow().Title = "坦克 3D · 试驾场";
         SandboxInput.RegisterActions();
         _automation = new SandboxAutomation(_options, this, standStill: HasPreset);
@@ -80,8 +85,8 @@ public partial class SandboxMain : Node3D
         _groundAt = _sim.Field.Terrain.HeightAt;
         _aimYaw = _current.Yaw;
 
-        _world = Add(new SandboxWorld());
-        _world.Build(_sim.Field, _current, CameraPresets.StreamsAroundCamera(_options.CameraPreset));
+        _world = Add(new BattleWorld());
+        _world.Build(_sim.Field, _current, MapStyle.Sandbox, CameraPresets.StreamsAroundCamera(_options.CameraPreset));
         BuildTank(start);
         _shells = Add(new ShellViews());
         _fx = Add(new BattleFx());
@@ -91,7 +96,7 @@ public partial class SandboxMain : Node3D
         _hud = Add(new SandboxHud());
         _hud.Build(_camera, _targets, _sim.Field, _vision, _current.Id, _options.SpotDebug);
 
-        _automation.ReportBadOptions();
+        _automation.ReportBadOptions(unreadOptions: _given is null);
         if (!_options.AutoDrive && !IgnoresInput) Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
@@ -104,7 +109,7 @@ public partial class SandboxMain : Node3D
     {
         if (IgnoresInput) return;
         // Releases always pass so a held fire can end; presses only count while captured (the capturing click must not shoot).
-        if (e.IsActionReleased(SandboxInput.FireGun) || Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
+        if (e.IsActionReleased(DriveInput.FireGun) || Input.MouseMode == Input.MouseModeEnum.Captured) _input.OnInputEvent(e);
     }
 
     public override void _Notification(int what)
@@ -131,9 +136,13 @@ public partial class SandboxMain : Node3D
                 GetViewport().SetInputAsHandled();
                 break;
         }
-        if (e.IsActionPressed(SandboxInput.SniperToggle)) _camera.ToggleSniper();
+        if (e.IsActionPressed(DriveInput.SniperToggle)) _camera.ToggleSniper();
         if (e.IsActionPressed(SandboxInput.SpotDebug)) _hud.ToggleSpotDebug();
-        if (e.IsActionPressed(SandboxInput.UiCancel)) Input.MouseMode = Input.MouseModeEnum.Visible;
+        if (e.IsActionPressed(DriveInput.UiCancel))
+        {
+            if (captured) Input.MouseMode = Input.MouseModeEnum.Visible;
+            else ExitRequested?.Invoke();
+        }
     }
 
     public override void _Process(double delta)
@@ -184,17 +193,14 @@ public partial class SandboxMain : Node3D
         _sim.ChangeSpec(_current.Id, spec);
         _input.ResetAmmo();   // the new tank starts with AP loaded; still asking for HE would cost it a full reload
         _previous = _current = _sim.Tanks[0];
-        _tank.QueueFree();   // the dust trail goes with it
+        _tank.QueueFree();   // the smoke and the dust trail go with it
         BuildTank(spec);
     }
 
     private void BuildTank(TankSpec spec)
     {
-        _tank = Add(new TankModel());
+        _tank = Add(new TankActor());
         _tank.Build(spec);
-        _dust = new DustTrail();
-        _tank.AddChild(_dust);
-        _dust.Build(TankLooks.For(spec.Id).TrackX, spec.HullLength / 2f);
     }
 
     private void OnEvent(in GameEvent e)
@@ -205,7 +211,7 @@ public partial class SandboxMain : Node3D
             case GameEventType.ShellFired when e.TankId == _current.Id:
                 // Flash at the visible barrel tip (the sim event keeps its own muzzle position): spawned after this frame's pose update.
                 _playerFired = true;
-                _tank.Fire(_current.TurretYaw);
+                _tank.Kick(_current.TurretYaw);
                 break;
             case GameEventType.ShellFired:
                 _fx.Muzzle(new Transform3D(Basis.Identity, e.Position.ToGodot()));   // no barrel pose for other tanks yet
@@ -219,7 +225,7 @@ public partial class SandboxMain : Node3D
                 _fx.Explosion(e.Position.ToGodot(), PuffColor.Grey, ArmorHitSize);
                 break;
         }
-        _hud.OnEvent(e);
+        _hud.OnShotEvent(e);
         _targets.OnEvent(e, _sim, _fx);
         _world.OnEvent(e);
         PropFx.OnEvent(e, _sim.Field, _fx);
@@ -228,16 +234,13 @@ public partial class SandboxMain : Node3D
     /// <summary>Poses and animates the player's tank, with the muzzle blast of a shot fired this frame; hidden in the sniper sight.</summary>
     private void ShowPlayer(in TankState tank, TankPose pose, float delta)
     {
-        _tank.Apply(pose, tank.TurretYaw, tank.GunPitch);
-        _tank.Animate(tank.Speed, Angles.Wrap(_current.Yaw - _previous.Yaw) / SimConstants.Dt, delta);
-        _dust.Update(tank.Speed);
+        _tank.Present(tank, pose, Angles.Wrap(_current.Yaw - _previous.Yaw) / SimConstants.Dt, delta, shown: !_camera.Sniper);
         if (_playerFired)
         {
             _fx.Muzzle(_tank.MuzzleTransform, withSmoke: !_camera.Sniper);   // own puffs would block the scope
             _camera.Shake(FireShake, FireShakeSeconds);
             _playerFired = false;
         }
-        _tank.Visible = !_camera.Sniper;
     }
 
     /// <summary>Follows the tank (or looks from a fixed preset), then lays the gun where the camera looks unless a script aims it.</summary>
@@ -253,25 +256,9 @@ public partial class SandboxMain : Node3D
         else if (_automation.Demo is null && !_input.FreeLook) UpdateAim(pose, tank.Spec);
     }
 
-    /// <summary>Casts from the orbit focus along the camera's view; the turret then chases that point.</summary>
-    private void UpdateAim(TankPose pose, TankSpec spec)
-    {
-        Camera3D cam = _camera.Camera;
-        SN.Vector3 look = (-cam.GlobalBasis.Z).ToSim();
-        SN.Vector3 origin = cam.GlobalPosition.ToSim() + look * (_camera.Sniper ? 0f : _camera.Distance);
-        SN.Vector3 end = origin + look * AimRange;
-        SN.Vector3 target = _sim.Field.Raycast(origin, end, out RayHit hit) ? hit.Point : end;
-        SN.Vector3 trunnion = pose.Trunnion(spec);
-        // Looking steeply down puts the target almost under the turret, where yaw swings wildly; keep it at least MinAimDistance out.
-        SN.Vector2 flat = new(target.X - trunnion.X, target.Z - trunnion.Z);
-        if (flat.Length() < MinAimDistance)
-        {
-            SN.Vector2 dir = new(look.X, look.Z);
-            dir = dir.LengthSquared() > 1e-6f ? SN.Vector2.Normalize(dir) : Angles.Forward(_aimYaw);
-            target = new SN.Vector3(trunnion.X + dir.X * MinAimDistance, target.Y, trunnion.Z + dir.Y * MinAimDistance);
-        }
-        (_aimYaw, _aimPitch) = Angles.AimAngles(target - trunnion, _aimYaw);
-    }
+    /// <summary>Lays the gun where the camera looks (<see cref="AimSolver"/>); the turret then chases that point.</summary>
+    private void UpdateAim(TankPose pose, TankSpec spec) =>
+        (_aimYaw, _aimPitch) = AimSolver.Solve(_camera, _sim.Field, pose.Trunnion(spec), _aimYaw);
 
     private T Add<T>(T node) where T : Node
     {

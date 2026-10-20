@@ -68,10 +68,10 @@ public sealed partial class BattleClient
         for (int i = 0; i < own.Count; i++)
         {
             PredictedShell s = own[i];
-            if (!s.Ended) _shellViews.Add(new ShellView(s.Shell.Id, s.Shell.OwnerTankId, s.Previous, s.Shell.Position, s.Shell.Velocity, s.Shell.Ammo, true));
+            if (!s.Ended) _shellViews.Add(new ShellView(s.Shell.Id, s.Shell.OwnerTankId, s.Previous, s.Shell.Position, s.Shell.Velocity, s.Shell.Ammo, true, s.Shell.Age));
         }
         foreach (RemoteShell s in _remoteShells)
-            if (!s.Ended) _shellViews.Add(new ShellView(s.Shell.Id, s.Shell.OwnerTankId, s.Previous, s.Shell.Position, s.Shell.Velocity, s.Shell.Ammo, false));
+            if (!s.Ended) _shellViews.Add(new ShellView(s.Shell.Id, s.Shell.OwnerTankId, s.Previous, s.Shell.Position, s.Shell.Velocity, s.Shell.Ammo, false, s.Shell.Age));
     }
 
     private void HandleMatchStart(MatchStartMessage msg)

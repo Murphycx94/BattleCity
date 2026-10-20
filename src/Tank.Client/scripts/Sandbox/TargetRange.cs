@@ -29,7 +29,6 @@ public partial class TargetRange : Node3D
     public const byte PlayerTeam = 0, TargetTeam = 1;
     public const float ReviveSeconds = 10f;
     private const float BlastSize = 1.8f;
-    private const float HeadMargin = 0.6f;   // the head point floats this far above the turret's armour box
     private static readonly TankPaint Paint = new(Palette.TargetBody, Palette.Track, Palette.TankHub);
 
     private readonly List<Target> _targets = new();
@@ -42,12 +41,9 @@ public partial class TargetRange : Node3D
         public required int Id;
         public required int Slot;   // index in Simulation.Tanks
         public required float Yaw;  // the heading it was placed with: a still target's gun stays straight ahead
-        public required TankModel Model;
-        public required WreckSmoke Smoke;
-        public DustTrail? Dust;     // the patrol's only
+        public required TankActor Actor;   // the patrol's alone kicks up dust
         public TankState Previous, Current;   // the last two ticks, drawn between
         public int WreckedTick = -1;
-        public Vector3 Head;        // world point over the turret, as of the latest Sync
         public float Health = 1f;   // share left, 0 … 1
         public bool Alive = true;
         public bool Shown = true;
@@ -75,25 +71,19 @@ public partial class TargetRange : Node3D
         }
         _driver = new PatrolDriver(SandboxMap.PatrolRoute);
         SN.Vector2 start = SandboxMap.PatrolStart;
-        Target patrol = Add(sim, SandboxMap.PatrolSpec, start, Angles.YawOf(SandboxMap.PatrolRoute[0].Position - start));
+        Target patrol = Add(sim, SandboxMap.PatrolSpec, start, Angles.YawOf(SandboxMap.PatrolRoute[0].Position - start), dust: true);
         if (parkPatrol) vision.SetWatching(patrol.Id, false);
-        patrol.Dust = new DustTrail();
-        patrol.Model.AddChild(patrol.Dust);
-        patrol.Dust.Build(TankLooks.For(SandboxMap.PatrolSpec.Id).TrackX, SandboxMap.PatrolSpec.HullLength / 2f);
     }
 
-    private Target Add(Simulation sim, TankSpec spec, SN.Vector2 position, float yaw)
+    private Target Add(Simulation sim, TankSpec spec, SN.Vector2 position, float yaw, bool dust = false)
     {
         int slot = sim.TankCount;
         int id = sim.AddTank(spec, position, yaw, TargetTeam);
-        var model = new TankModel();
-        AddChild(model);
-        model.Build(spec, Paint);
-        var smoke = new WreckSmoke();
-        model.AddChild(smoke);
-        smoke.Build(model.TurretRing);   // pours from the open turret ring (a casemate's roof)
-        var target = new Target { Id = id, Slot = slot, Yaw = yaw, Model = model, Smoke = smoke, Previous = sim.Tanks[slot], Current = sim.Tanks[slot] };
-        Observe(target, target.Current, sim.Field.Terrain);   // heads are known before the first Sync
+        var actor = new TankActor();
+        AddChild(actor);
+        actor.Build(spec, Paint, dust);
+        var target = new Target { Id = id, Slot = slot, Yaw = yaw, Actor = actor, Previous = sim.Tanks[slot], Current = sim.Tanks[slot] };
+        actor.Present(target.Current, Observe(target, target.Current, sim.Field.Terrain), 0f, 0f, shown: true);   // heads are known before the first Sync
         _targets.Add(target);
         return target;
     }
@@ -102,7 +92,7 @@ public partial class TargetRange : Node3D
     public (Vector3 Head, float Health, bool Alive, bool Shown) Status(int index)
     {
         Target target = _targets[index];
-        return (target.Head, target.Health, target.Alive, target.Shown);
+        return (target.Actor.Head, target.Health, target.Alive, target.Shown);
     }
 
     /// <summary>Target <paramref name="index"/>'s tank id.</summary>
@@ -112,7 +102,7 @@ public partial class TargetRange : Node3D
     public bool TryGetHead(int tankId, out Vector3 head)
     {
         Target? target = Find(tankId);
-        head = target?.Head ?? Vector3.Zero;
+        head = target?.Actor.Head ?? Vector3.Zero;
         return target is not null;
     }
 
@@ -165,14 +155,12 @@ public partial class TargetRange : Node3D
         if (e.Type == GameEventType.TankDestroyed)
         {
             target.WreckedTick = e.Tick;
-            target.Model.Wreck(sim.Tanks[target.Slot].TurretYaw);
-            target.Smoke.Emitting = true;
+            target.Actor.Wreck(sim.Tanks[target.Slot].TurretYaw);
             fx.Explosion(e.Position.ToGodot() + Vector3.Up * 1.2f, PuffColor.White, BlastSize);
         }
         else if (e.Type == GameEventType.TankRevived)
         {
-            target.Model.Restore();
-            target.Smoke.Emitting = false;
+            target.Actor.Restore();
         }
     }
 
@@ -186,26 +174,21 @@ public partial class TargetRange : Node3D
         {
             TankState state = TankInterpolation.Between(target.Previous, target.Current, alpha);
             bool shown = _vision.IsVisible(target.Id, PlayerTeam);
-            if (shown != target.Shown) target.Model.Visible = target.Shown = shown;
-            target.Model.Apply(Observe(target, state, sim.Field.Terrain), state.TurretYaw, state.GunPitch);
+            target.Shown = shown;
+            TankPose pose = Observe(target, state, sim.Field.Terrain);
             float yawRate = Angles.Wrap(target.Current.Yaw - target.Previous.Yaw) / SimConstants.Dt;
-            target.Model.Animate(state.Speed, yawRate, delta);
-            target.Dust?.Update(shown ? state.Speed : 0f);   // no trail from a hidden patrol, to pop in when it shows
+            target.Actor.Present(state, pose, yawRate, delta, shown);   // a hidden patrol leaves no trail, to pop in when it shows
         }
     }
 
-    /// <summary>Notes the target's head point and health from <paramref name="state"/>; returns its pose.</summary>
+    /// <summary>Notes the target's health from <paramref name="state"/>; returns its pose.</summary>
     private static TankPose Observe(Target target, in TankState state, HeightField terrain)
     {
         TankPose pose = TankPose.Compute(state, terrain);
-        target.Head = (pose.Position + SN.Vector3.UnitY * HeadHeight(state.Spec)).ToGodot();
         target.Health = state.Health / (float)state.Spec.MaxHealth;
         target.Alive = !state.IsDestroyed;
         return pose;
     }
-
-    /// <summary>Height of the head point over the hull origin: a margin above the turret's armour box (3.4 m on the medium tank).</summary>
-    private static float HeadHeight(TankSpec spec) => spec.TurretArmor.Top + HeadMargin;
 
     private Target? Find(int tankId)
     {

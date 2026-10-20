@@ -1,0 +1,51 @@
+using Godot;
+using Tank.Client.Sandbox;
+
+namespace Tank.Client.Bootstrap;
+
+/// <summary>
+/// The Godot side of a scripted run's captures, shared by the sandbox and the match: takes the screenshot the frame its
+/// <see cref="ShotPlan"/> says it falls due, logs render costs once a second with <c>--fps-log</c>
+/// (<see cref="FrameTimeLog"/>'s line) and quits the tree at <c>--quit-after</c>. Call <see cref="EndFrame"/> at the end
+/// of every frame with the owner's clock — wall time in the sandbox and a live match, the virtual clock of a loopback
+/// run — so the schedule matches what the mode simulates. Build it only once the host is in the tree: the fps log turns
+/// on render-time measuring for the host's viewport.
+/// </summary>
+public sealed class CaptureRun
+{
+    private readonly LaunchOptions _options;
+    private readonly Node _host;
+    private readonly ShotPlan _plan;
+    private readonly FrameTimeLog _frameLog = new();
+
+    /// <param name="host">The node whose viewport is captured and measured, and whose tree is quit.</param>
+    public CaptureRun(LaunchOptions options, Node host, ShotPlan plan)
+    {
+        (_options, _host, _plan) = (options, host, plan);
+        if (options.FpsLog) RenderingServer.ViewportSetMeasureRenderTime(host.GetViewport().GetViewportRid(), true);
+    }
+
+    /// <summary>Call at the end of every frame: logs render costs, takes the screenshot when due and quits when time is up.</summary>
+    public void EndFrame(double delta, double time)
+    {
+        if (_options.FpsLog) LogFrame(delta);
+        if (_options.ScreenshotPath is { } path && _plan.TakeScreenshot(time))
+        {
+            Error error = _host.GetViewport().GetTexture().GetImage().SavePng(path);
+            GD.Print(error == Error.Ok ? $"Screenshot saved: {path}" : $"Screenshot failed ({error}): {path}");
+        }
+        if (_plan.QuitDue(time)) _host.GetTree().Quit();
+    }
+
+    private void LogFrame(double delta)
+    {
+        Rid rid = _host.GetViewport().GetViewportRid();
+        string? line = _frameLog.Add(delta,
+            RenderingServer.ViewportGetMeasuredRenderTimeCpu(rid), RenderingServer.ViewportGetMeasuredRenderTimeGpu(rid),
+            Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0,
+            (long)RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalDrawCallsInFrame),
+            (long)RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalPrimitivesInFrame),
+            GC.GetTotalAllocatedBytes());   // the whole process's managed churn: the zero-allocation audit reads this
+        if (line is not null) GD.Print(line);
+    }
+}

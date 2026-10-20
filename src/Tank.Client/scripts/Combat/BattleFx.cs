@@ -14,17 +14,17 @@ public enum PuffColor { White, Grey }
 /// smoke, or grey dust off rock and armour) and 8 small stones thrown up under gravity.
 /// Debris (<see cref="Debris"/>): chunks thrown up and along a push (bricks, stones, wood chips, leaves), with an
 /// optional cloud of dust puffs; sized for a chip off a wall up to a whole wall coming down.
-/// Pool sizes (4 muzzle, 6 impact, 12 debris slots) are an estimate: highest fire rate (one shell per reload, ~4 s, plus
-/// a few other tanks) times the longest particle life (1.6 s) stays well under the slot count; debris comes in bursts,
-/// up to a dozen at once when an HE shell lands in a bush patch. If every slot is busy anyway, the one that started
-/// playing longest ago is reused (idle slots always win, being the oldest). Nothing allocates per shot: no tweens, no closures; each slot
-/// advances its own flash animation from <see cref="_Process"/>.
+/// Pool sizes (10 muzzle, 10 impact, 16 debris slots) are sized for a full match (blueprint §5 T10): ten tanks can all
+/// fire inside one muzzle life (~0.8 s), so there is a muzzle and an impact slot per possible shooter; debris comes in
+/// bursts, up to a dozen at once when an HE shell lands in a bush patch, with headroom for two overlapping. If every
+/// slot is busy anyway, the one that started playing longest ago is reused (idle slots always win, being the oldest).
+/// Nothing allocates per shot: no tweens, no closures; each slot advances its own flash animation from <see cref="_Process"/>.
 /// </summary>
 public partial class BattleFx : Node3D
 {
-    private const int MuzzleSlots = 4;
-    private const int ImpactSlots = 6;
-    private const int DebrisSlots = 12;
+    private const int MuzzleSlots = 10;   // one per tank of a full match: all ten can fire inside one muzzle life
+    private const int ImpactSlots = 10;   // likewise: their shells can all burst inside one impact life (~1.2 s)
+    private const int DebrisSlots = 16;
     private const float MuzzleFlashTime = 0.08f;
     private const float MuzzleFlashSize = 1.3f;
     private const float FireballGrowTime = 0.1f;

@@ -12,12 +12,14 @@
   <ItemGroup>
     <!-- The mesh library lives in the Godot client but must not depend on Godot; compiling it here, without Godot, enforces that. -->
     <Compile Include="..\..\src\Tank.Client\scripts\Art\Mesh\**\*.cs" LinkBase="Mesh" />
+    <!-- Anything under a Logic folder is engine-neutral by rule (no `using Godot`), so it is compiled here too. -->
+    <Compile Include="..\..\src\Tank.Client\scripts\**\Logic\**\*.cs" LinkBase="Logic" />
     <!-- The palette is engine-neutral too, so look data and vertex colours can use it. -->
     <Compile Include="..\..\src\Tank.Client\scripts\Art\Palette.cs" LinkBase="Art" />
-    <!-- So are the launch options (they need Tank.Core and Tank.Net for the old game's switches). -->
+    <!-- So are the launch options (they only need Tank.Sim and Tank.Net for the mode names and limits). -->
     <Compile Include="..\..\src\Tank.Client\scripts\Bootstrap\LaunchOptions.cs" LinkBase="Bootstrap" />
-    <!-- So are the scripted range demos and the tick interpolation (only sim maths). -->
-    <Compile Include="..\..\src\Tank.Client\scripts\Sandbox\RangeDemo.cs;..\..\src\Tank.Client\scripts\Sandbox\TankInterpolation.cs" LinkBase="Sandbox" />
+    <!-- So are the scripted range demos, the tick interpolation (only sim maths) and the fps log's text. -->
+    <Compile Include="..\..\src\Tank.Client\scripts\Sandbox\RangeDemo.cs;..\..\src\Tank.Client\scripts\Sandbox\TankInterpolation.cs;..\..\src\Tank.Client\scripts\Sandbox\FrameTimeLog.cs" LinkBase="Sandbox" />
     <!-- Popup timing curves and the spotting debug text are engine-neutral too. -->
     <Compile Include="..\..\src\Tank.Client\scripts\Overlay\PopupCurves.cs;..\..\src\Tank.Client\scripts\Overlay\SpotText.cs" LinkBase="Overlay" />
     <!-- Tank look data, part builders and animation state are engine-neutral too. -->

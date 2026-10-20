@@ -6,13 +6,16 @@ namespace Tank.Client.Overlay;
 /// Cartoon capsule health bars floating over other tanks' heads (and over damaged walls), in screen space: green, red
 /// when low (<see cref="HudStyle.HealthFill"/>), with a dark outline. Shown only for bars marked shown within
 /// <see cref="MaxRange"/> m of the camera and in front of it. Feed the bars every frame with <see cref="Set"/>, then they
-/// draw themselves.
+/// draw themselves. A bar can carry a label (a player's name), drawn centred above it.
 /// </summary>
 public partial class HealthBars : Control
 {
     private const float MaxRange = 250f;
     private const float Outline = 2.5f;
     private const int CornerDetail = 6;
+    private const int LabelSize = 18;
+    private const int LabelOutline = 4;
+    private const float LabelGap = 5f;   // between the bar's outline and the label's baseline
 
     private float _width = 64f, _height = 11f;
     private StyleBoxFlat _back = null!;
@@ -25,6 +28,8 @@ public partial class HealthBars : Control
         public bool Shown;
         public Vector3 Head;
         public float Share;
+        public string? Label;   // the caller's own string: kept by reference, never rebuilt per frame
+        public Color LabelColor;
     }
 
     public override void _Ready()
@@ -48,10 +53,12 @@ public partial class HealthBars : Control
     /// <param name="head">World point the bar sits on: just above a tank, or on a wall's face.</param>
     /// <param name="share">Health left, 0 … 1.</param>
     /// <param name="shown">False for no bar (a wreck, a wall that is down or unhurt).</param>
-    public void Set(int index, Vector3 head, float share, bool shown)
+    /// <param name="label">Text above the bar (a name), or null for the bar alone.</param>
+    /// <param name="labelColor">The label's colour; <see cref="HudStyle.Text"/> when omitted.</param>
+    public void Set(int index, Vector3 head, float share, bool shown, string? label = null, Color? labelColor = null)
     {
         bool wasShown = _bars[index].Shown;
-        _bars[index] = new Bar { Shown = shown, Head = head, Share = Math.Clamp(share, 0f, 1f) };
+        _bars[index] = new Bar { Shown = shown, Head = head, Share = Math.Clamp(share, 0f, 1f), Label = label, LabelColor = labelColor ?? HudStyle.Text };
         if (shown || wasShown) QueueRedraw();   // a bar that stays hidden changes nothing on screen
     }
 
@@ -66,6 +73,7 @@ public partial class HealthBars : Control
             if (!GetViewportRect().HasPoint(at)) continue;
             var back = new Rect2(at.X - _width / 2 - Outline, at.Y - _height / 2 - Outline, _width + 2 * Outline, _height + 2 * Outline);
             DrawStyleBox(_back, back);
+            if (bar.Label is not null) HudStyle.DrawOutlinedCentered(this, at.X, back.Position.Y - LabelGap, bar.Label, LabelSize, bar.LabelColor, LabelOutline);
             if (bar.Share <= 0f) continue;
             DrawStyleBox(_fill.For(bar.Share), new Rect2(at.X - _width / 2, at.Y - _height / 2, MathF.Max(_height, _width * bar.Share), _height));
         }

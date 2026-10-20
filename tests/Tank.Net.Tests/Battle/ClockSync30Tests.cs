@@ -50,12 +50,29 @@ public sealed class ClockSync30Tests
     }
 
     [Fact]
+    public void A_client_the_server_has_caught_up_with_resyncs_ahead_even_when_the_slack_feedback_is_quiet()
+    {
+        // A long frame the engine's clamped delta never made up for: the client's tick is behind the server's, every
+        // input it sends is late and rejected, and the server's slack reads 0 (nothing received), close to the target.
+        var clock = new ClockSync(30);
+        clock.OnServerFeedback(2, 100, 0.0);
+        Assert.Equal(102, clock.Tick);
+        clock.OnServerFeedback(0, 101, 0.0);   // still ahead by one: a normal frame
+        Assert.Equal(0, clock.HardResyncs);
+        clock.OnServerFeedback(0, 102, 0.0);   // the server reached the client's tick
+        Assert.Equal(1, clock.HardResyncs);
+        Assert.Equal(104, clock.Tick);         // ahead again by the two ticks of slack
+    }
+
+    [Fact]
     public void Slack_feedback_far_from_the_target_resyncs_at_20_ticks_which_is_two_thirds_of_a_second()
     {
         var clock = new ClockSync(30);
         clock.OnServerFeedback(2, 100, 0.05);
+        RunSecond(clock);   // the client keeps ticking along with the server
         clock.OnServerFeedback(2 + 20, 130, 0.05);   // exactly 20 off the target: not yet
         Assert.Equal(0, clock.HardResyncs);
+        RunSecond(clock);
         clock.OnServerFeedback(2 + 21, 160, 0.05);
         Assert.Equal(1, clock.HardResyncs);
         Assert.Equal(160 + 4, clock.Tick);   // ceil(0.05 * 30 + 2) = 4 ticks of lead
@@ -70,5 +87,12 @@ public sealed class ClockSync30Tests
         var early = new ClockSync(30);
         for (int i = 0; i < 40; i++) early.OnServerFeedback(-4, 100 + i, 0.05);
         Assert.InRange(early.Rate, 1.001, 1.06);
+    }
+
+    /// <summary>A second of frames as the client runs them: the ticks Advance asks for are each taken with NextTick.</summary>
+    private static void RunSecond(ClockSync clock)
+    {
+        int ticks = clock.Advance(1.0);
+        for (int i = 0; i < ticks; i++) clock.NextTick();
     }
 }

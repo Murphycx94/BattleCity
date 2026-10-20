@@ -1,284 +1,145 @@
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using Godot;
-using Tank.Client.Controls;
+using Tank.Client.Match;
+using Tank.Client.Online;
+using Tank.Client.Sandbox;
 using Tank.Client.UI;
-using Tank.Client.View;
-using Tank.Core.World;
-using Tank.Net.Client;
-using Tank.Net.Transport;
+using Tank.Net.Battle;
 
 namespace Tank.Client.Bootstrap;
 
-/// <summary>Root node: screen flow (menu → lobby → match), per-frame client update, bots and automation.</summary>
+/// <summary>
+/// Root node and screen flow: menu → connecting → room → match → room, plus the sandbox as a child. One
+/// <see cref="BattleSession"/> lives from "host" or "join" until leaving or a disconnect; the launch options drive the room
+/// through <see cref="AutoRoom"/>. The flow itself (start, leave, enter and leave the match) is in Main.Flow.cs, the
+/// update banner in Main.Update.cs.
+/// </summary>
 public partial class Main : Node
 {
-    private readonly Session _session = new();
-    private readonly InputSampler _input = new();
-    private readonly List<(GameClient Client, int Index)> _bots = new();
+    private const double VirtualFrame = 1.0 / 60;   // a loopback host steps by this, not by the frame time
+
     private LaunchOptions _options = new();
     private MenuScreen _menu = null!;
-    private LobbyScreen _lobby = null!;
-    private GameView? _game;
-    private Hud? _hud;
-    private LanDiscovery? _discovery;
-    private ServerStatsSource? _serverStats;
+    private RoomScreen _room = null!;
+    private LanBrowser? _lan;
+    private BattleSession? _session;
+    private AutoRoom? _auto;
+    private Reconnector? _reconnect;   // one per session: what to do when its connection dies
+    private SandboxMain? _sandbox;
+    private MatchMain? _matchView;
     private double _time;
-    private bool _netGraph;
-    private bool _autoStartSent;
-    private bool _screenshotTaken;
-    private double _nextStatsLog = 1;
+    private bool _screenshotTaken;   // the run's one screenshot: taken by Main, or by a match (read back as its scene goes)
+    private bool _matchEntered;      // a match scene has been entered: Main no longer takes the screenshot
 
     public override void _Ready()
     {
         _options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
         foreach (string warning in _options.Warnings) GD.PushWarning(warning);
-        _netGraph = _options.NetGraph;
-        GetWindow().Title = "坦克 3D";
+        GetWindow().Title = AppTitle;
         _menu = new MenuScreen();
-        _menu.HostRequested += (name, mode) => Host(name, mode);
-        _menu.JoinRequested += (name, host, port) => Join(name, host, port);
+        _menu.HostRequested += Host;
+        _menu.JoinRequested += Join;
+        _menu.SandboxRequested += EnterSandbox;
         AddChild(_menu);
         _menu.PlayerName = _options.Name ?? System.Environment.UserName;
 
-        _lobby = new LobbyScreen { Visible = false, LocalAddresses = string.Join(", ", LocalIPv4()) };
-        _lobby.LeaveRequested += () => LeaveToMenu("已离开房间。");
-        AddChild(_lobby);
+        _room = new RoomScreen { Visible = false };
+        _room.LeaveRequested += () => LeaveSession("已离开房间。");
+        AddChild(_room);
 
-        if (_options.Host) Host(_menu.PlayerName, _options.Mode);
+        if (_options.HudDemo is { } demo)
+        {
+            EnterGallery(demo);
+            return;   // a gallery run has no session, no update check
+        }
+        if (_options.Sandbox) EnterSandbox();
+        else if (_options.Host) Host(_menu.PlayerName);
         else if (_options.JoinAddress is { } address) JoinAddress(address);
         InitUpdates();
     }
 
-    public override void _Input(InputEvent e) => _input.OnInputEvent(e);
-
     public override void _UnhandledInput(InputEvent e)
     {
-        if (e.IsActionPressed("toggle_netgraph")) _netGraph = !_netGraph;
-        if (e.IsActionPressed("toggle_camera")) _game?.Rig.Toggle();
-        if (e.IsActionPressed("ui_cancel") && _session.Client is not null) LeaveToMenu("已离开房间。");
+        // In the room Esc leaves it; the match's own Esc handling comes with the match scene.
+        if (e.IsActionPressed("ui_cancel") && _session is not null && _matchView is null) LeaveSession("已离开房间。");
     }
 
     public override void _Process(double delta)
     {
         _time += delta;
-        var client = _session.Client;
-        if (client is null)
+        if (_sandbox is null)
         {
-            PollDiscovery();
-            PollUpdates();
-        }
-        else
-        {
-            var input = client.Phase == ClientPhase.InMatch ? _input.Sample() : LocalInput.None;
-            client.Update(delta, input);
-            foreach (var (bot, index) in _bots) bot.Update(delta, BotDriver.Think(index, _time));
-            UpdateScreens(client, delta);
+            if (_session is null)
+            {
+                PollLan();
+                PollUpdates();
+            }
+            else RunSession(delta);
         }
         RunAutomation();
     }
 
     public override void _ExitTree()
     {
-        foreach (var (bot, _) in _bots) bot.Dispose();
-        _discovery?.Dispose();
+        _lan?.Dispose();
         _update?.Dispose();
-        _session.Dispose();
+        _session?.Dispose();
     }
 
-    private void UpdateScreens(GameClient client, double delta)
+    /// <summary>One frame with a session: the host's world, the room's launch options, the client, then whichever screen the phase calls for.</summary>
+    private void RunSession(double delta)
     {
+        BattleSession session = _session!;
+        BattleClient client = session.Client;
+        if (_matchView is null)
+        {
+            // The match scene owns Advance and Update while it exists: the client must see exactly one Update per frame (R1).
+            double dt = session.IsVirtualClock ? VirtualFrame : delta;
+            session.Advance(dt);
+            client.Update(dt, LocalCommand.None);
+        }
         switch (client.Phase)
         {
-            case ClientPhase.Connecting:
-            case ClientPhase.Lobby:
-                ShowLobby(client);
-                if (_options.AutoStart && !_autoStartSent && client.IsHost && client.Lobby?.Players.Count >= 1 + _bots.Count)
-                {
-                    _autoStartSent = true;
-                    client.StartMatch();
-                }
+            case BattlePhase.Connecting:
                 break;
-            case ClientPhase.InMatch:
-                ShowGame();
-                _game!.Sync(client, (float)delta, _time);
-                _hud!.NetGraphVisible = _netGraph;
-                _hud.Refresh(client, delta, Godot.Input.IsActionPressed("scoreboard"), _serverStats);
-                if (_options.NetGraph && _time >= _nextStatsLog) LogStats(client);
+            case BattlePhase.Room:
+                _reconnect?.OnConnected();
+                if (_matchView is not null) LeaveMatch();
+                ShowRoom(client);
                 break;
-            case ClientPhase.Disconnected:
-                LeaveToMenu(client.DisconnectReason is { } r ? $"连接已断开：{DescribeDisconnect(r)}" : "连接已断开。", error: true);
+            case BattlePhase.InMatch:
+                _reconnect?.OnConnected();
+                if (_matchView is null) EnterMatch(client);   // the scene shows "loading" until the first snapshot brings the own tank
+                break;
+            case BattlePhase.Disconnected:
+                OnDisconnected(session, client);
                 break;
         }
     }
 
-    private void Host(string name, GameMode mode)
-    {
-        try
-        {
-            _session.Host(name, $"{name}的房间", _options.Port, mode);
-            var runner = _session.Runner!;
-            _serverStats = new ServerStatsSource(() => (runner.AverageTickMs, runner.MaxTickMs));
-            StopDiscovery();
-            for (int i = 0; i < _options.Bots; i++)
-            {
-                var bot = new GameClient(new LiteNetClientTransport("127.0.0.1", _options.Port), $"机器人 {i + 1}", () => _session.Now);
-                _bots.Add((bot, i));
-            }
-            _menu.SetStatus("正在启动服务器…");
-        }
-        catch (InvalidOperationException ex)
-        {
-            _session.Leave();
-            _menu.SetStatus(ex.Message, error: true);
-        }
-    }
-
-    private void JoinAddress(string address)
-    {
-        int port = _options.Port;
-        int colon = address.LastIndexOf(':');
-        if (colon > 0 && int.TryParse(address[(colon + 1)..], out int p))
-        {
-            port = p;
-            address = address[..colon];
-        }
-        Join(_menu.PlayerName, address, port);
-    }
-
-    private void Join(string name, string host, int port)
-    {
-        StopDiscovery();
-        _session.Join(host, port, name);
-        _menu.SetStatus($"正在连接 {host}:{port}…");
-    }
-
-    private void LeaveToMenu(string message, bool error = false)
-    {
-        foreach (var (bot, _) in _bots) bot.Dispose();
-        _bots.Clear();
-        _session.Leave();
-        _serverStats = null;
-        _autoStartSent = false;
-        HideGame();
-        _lobby.Visible = false;
-        _menu.Visible = true;
-        _menu.SetStatus(message, error);
-    }
-
-    private void ShowLobby(GameClient client)
-    {
-        _menu.Visible = false;
-        EnsureGameView();
-        _hud!.Visible = false;
-        if (client.Lobby is { } lobby) _game!.ShowPreview(lobby.MapName, (float)GetProcessDeltaTime(), _time);
-        if (!_lobby.Visible)
-        {
-            _lobby.Bind(client);
-            _lobby.Visible = true;
-        }
-        _lobby.Refresh();
-    }
-
-    private void ShowGame()
-    {
-        _menu.Visible = false;
-        _lobby.Visible = false;
-        EnsureGameView();
-        _hud!.Visible = true;
-    }
-
-    private void EnsureGameView()
-    {
-        if (_game is not null) return;
-        _game = new GameView();
-        AddChild(_game);
-        MoveChild(_game, 0); // draw the 3D world behind the UI screens
-        if (_options.ChaseCamera) _game.Rig.Mode = CameraMode.Chase;
-        _hud = new Hud();
-        AddChild(_hud);
-    }
-
-    private void HideGame()
-    {
-        _game?.QueueFree();
-        _game = null;
-        _hud?.QueueFree();
-        _hud = null;
-    }
-
-    private void PollDiscovery()
+    private void PollLan()
     {
         if (!_menu.Visible) return;
-        try
-        {
-            _discovery ??= new LanDiscovery();
-            _discovery.Poll();
-            _menu.ShowRooms(_discovery.Rooms);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or SocketException)
-        {
-            _menu.SetStatus($"局域网搜索不可用（{ex.Message}），仍可通过地址加入。", error: true);
-            _discovery?.Dispose();
-            _discovery = null;
-        }
-    }
-
-    private void StopDiscovery()
-    {
-        _discovery?.Dispose();
-        _discovery = null;
+        _lan ??= new LanBrowser();
+        _lan.Poll();
+        _menu.ShowRooms(_lan.Rows, _lan.Error);
     }
 
     private void RunAutomation()
     {
-        if (_options.ScreenshotPath is { } path && !_screenshotTaken && _time >= _options.ScreenshotAt)
+        // One screenshot per run (T9). Main takes a plain --screenshot-at on its own clock while no match has been entered
+        // — the menu, the room, the HUD gallery; once a match scene is entered, the matches own it (counted from the scene's
+        // creation, and --shot-after and --fx-shot wait for moments only a match or the sandbox has), and whoever takes
+        // it first is the only one: Main hands its flag to each match and reads the match's back. A sandbox run schedules
+        // its own. The timed quit stays here, on the process clock: --autostart starts match after match, and a quit
+        // counted from each match's creation would never fall due were the match to keep ending sooner.
+        if (_sandbox is null && !_matchEntered && !_screenshotTaken && _options.ScreenshotPath is { } path
+            && ShotPlan.StartScheduleOnly(_options) && _time >= _options.ScreenshotAt)
         {
             _screenshotTaken = true;
-            var image = GetViewport().GetTexture().GetImage();
-            var err = image.SavePng(path);
+            Image image = GetViewport().GetTexture().GetImage();
+            Error err = image.SavePng(path);
             GD.Print(err == Error.Ok ? $"screenshot saved: {path}" : $"screenshot failed: {err}");
         }
         if (_options.QuitAfter > 0 && _time >= _options.QuitAfter) GetTree().Quit();
-    }
-
-    private void LogStats(GameClient client)
-    {
-        _nextStatsLog = _time + 1;
-        var s = client.Stats;
-        GD.Print($"[net] t={_time:F1} fps={Engine.GetFramesPerSecond()} rtt={s.RttMs} jitter={s.JitterMs:F1} interp={s.InterpDelayMs:F0} " +
-                 $"slack={s.InputSlackTicks:F2} rate={s.ClockRate:F3} snaps={s.SnapshotsPerSecond} corr={s.Mispredictions} " +
-                 $"extrap={s.Extrapolations} down={s.BytesInPerSecond / 1024:F1}KB/s");
-    }
-
-    /// <summary>Turns a transport disconnect code into player-facing text; server reject reasons pass through as-is.</summary>
-    private static string DescribeDisconnect(string reason) => reason switch
-    {
-        "ConnectionFailed" => "无法连接到房主。",
-        "Timeout" => "连接超时。",
-        "HostUnreachable" or "NetworkUnreachable" or "UnknownHost" => "找不到房主，请检查地址和网络。",
-        "RemoteConnectionClose" => "房主关闭了房间。",
-        "DisconnectPeerCalled" => "已断开。",
-        "ConnectionRejected" => "房主拒绝了连接。",
-        "InvalidProtocol" => "协议不兼容。",
-        _ => reason,
-    };
-
-    private static IEnumerable<string> LocalIPv4()
-    {
-        try
-        {
-            return NetworkInterface.GetAllNetworkInterfaces()
-                .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-                .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
-                .Select(a => a.Address.ToString())
-                .Distinct()
-                .ToList();
-        }
-        catch (NetworkInformationException)
-        {
-            return Array.Empty<string>();
-        }
     }
 }

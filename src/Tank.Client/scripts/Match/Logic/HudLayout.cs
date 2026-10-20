@@ -1,0 +1,82 @@
+using System.Numerics;
+
+namespace Tank.Client.Match;
+
+/// <summary>A screen rectangle in the HUD's base units (the 1600×900 canvas, stretched to the window).</summary>
+public readonly record struct HudRect(float X, float Y, float Width, float Height)
+{
+    public float Right => X + Width;
+    public float Bottom => Y + Height;
+    public Vector2 Position => new(X, Y);
+    public Vector2 Size => new(Width, Height);
+    public float CenterX => X + Width / 2;
+
+    public bool Intersects(HudRect o) => X < o.Right && o.X < Right && Y < o.Bottom && o.Y < Bottom;
+
+    /// <summary>Whether the rectangle lies wholly inside a screen of <paramref name="screen"/>.</summary>
+    public bool FitsIn(Vector2 screen) => X >= 0 && Y >= 0 && Right <= screen.X && Bottom <= screen.Y;
+}
+
+/// <summary>Where every HUD block goes on one screen size.</summary>
+public readonly record struct HudBoxes(
+    HudRect ScorePlate, HudRect ModeLabel, HudRect KillFeed, HudRect NetPanel, HudRect Banner, HudRect SpectateBar,
+    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable)
+{
+    /// <summary>Row <paramref name="index"/> (0 = top) of the kill feed.</summary>
+    public HudRect KillRow(int index) => new(KillFeed.X, KillFeed.Y + index * (HudLayout.KillRowHeight + HudLayout.KillRowGap), KillFeed.Width, HudLayout.KillRowHeight);
+}
+
+/// <summary>
+/// The HUD's layout (blueprint §4.2) in base units: blocks hang off the screen's edges and centre, so a wider or taller
+/// window just moves them; only the banner scales with the height (0.28 of it down). The 1600×900 canvas is what
+/// <c>canvas_items</c> + <c>expand</c> gives the HUD whatever the window, so nothing here scales by the window's pixels.
+/// </summary>
+public static class HudLayout
+{
+    public const float Margin = 24f;
+    public const float Top = 16f;
+
+    public const float PlateWidth = 360f, PlateHeight = 72f;
+    public const float PlateSideWidth = 112f;   // each score block; the clock takes what is left in the middle
+    public const float ModeLabelHeight = 24f, ModeLabelGap = 4f;
+
+    public const int KillRows = 5;
+    public const float KillWidth = 440f, KillRowHeight = 36f, KillRowGap = 6f;
+
+    public const float NetWidth = 500f, NetHeight = 280f;
+
+    public const float BannerWidth = 420f, BannerHeight = 210f, BannerTopShare = 0.28f;
+
+    public const float SpectateWidth = 680f, SpectateHeight = 56f, SpectateFromBottom = 36f;
+
+    // The board hangs below the mode label (which ends at 116), clear of it.
+    public const float ScoreboardWidth = 900f, ScoreboardTop = 120f, ScoreboardHeight = 576f;
+
+    // The results screen (§4.2): a 960-wide column from y 60; title and subtitle baselines, the table (the scoreboard's, at its own
+    // top) and the footer's baseline are measured from the column's top.
+    public const float ResultsWidth = 960f, ResultsTop = 60f, ResultsHeight = 780f;
+    public const float ResultsTitleBaseline = 80f, ResultsSubtitleBaseline = 128f, ResultsTableTop = 164f, ResultsFooterBaseline = 752f;
+
+    /// <summary>The status panel's room, its vehicle name above and the lamp included (see <c>StatusPanel</c>: 24 from the edges, 178 tall, about 360 wide).</summary>
+    public const float StatusWidth = 360f, StatusHeight = 178f, StatusNameRoom = 36f;
+
+    public static HudBoxes For(Vector2 size)
+    {
+        float cx = size.X / 2;
+        var plate = new HudRect(cx - PlateWidth / 2, Top, PlateWidth, PlateHeight);
+        var label = new HudRect(plate.X, plate.Bottom + ModeLabelGap, PlateWidth, ModeLabelHeight);
+        var results = new HudRect(cx - ResultsWidth / 2, ResultsTop, ResultsWidth, ResultsHeight);
+        float feedHeight = KillRows * KillRowHeight + (KillRows - 1) * KillRowGap;
+        return new HudBoxes(
+            plate,
+            label,
+            new HudRect(size.X - Margin - KillWidth, Top, KillWidth, feedHeight),
+            new HudRect(Margin, Top, NetWidth, NetHeight),
+            new HudRect(cx - BannerWidth / 2, size.Y * BannerTopShare, BannerWidth, BannerHeight),
+            new HudRect(cx - SpectateWidth / 2, size.Y - SpectateFromBottom - SpectateHeight, SpectateWidth, SpectateHeight),
+            new HudRect(cx - ScoreboardWidth / 2, ScoreboardTop, ScoreboardWidth, ScoreboardHeight),
+            new HudRect(Margin, size.Y - Margin - StatusHeight - StatusNameRoom, StatusWidth, StatusHeight + StatusNameRoom),
+            results,
+            new HudRect(cx - ScoreboardWidth / 2, results.Y + ResultsTableTop, ScoreboardWidth, ScoreboardHeight));
+    }
+}

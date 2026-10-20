@@ -11,6 +11,7 @@ namespace Tank.Client.Combat;
 public partial class WreckSmoke : Node3D
 {
     private GpuParticles3D _emitter = null!;
+    private bool _settledStart;
 
     /// <param name="at">Hull-space spot the smoke pours from (the open turret ring).</param>
     public void Build(Vector3 at)
@@ -46,6 +47,17 @@ public partial class WreckSmoke : Node3D
         AddChild(_emitter);
     }
 
+    /// <summary>
+    /// Starts a column that is already full height, as if the wreck had smoked for a while (a wreck first seen dead, so
+    /// there is no build-up to watch). Does nothing while smoking already.
+    /// </summary>
+    public void StartSettled()
+    {
+        if (_emitter.Emitting) return;
+        _settledStart = true;
+        Emitting = true;
+    }
+
     /// <summary>On starts a fresh column; off stops it and clears the puffs already in the air. Setting the current state does nothing.</summary>
     public bool Emitting
     {
@@ -54,7 +66,13 @@ public partial class WreckSmoke : Node3D
         {
             if (value == _emitter.Emitting) return;   // a column already rising keeps rising
             _emitter.Visible = value;
-            if (value) _emitter.Restart();   // clears leftover puffs (a hidden emitter isn't simulated) and starts emitting
+            if (value)
+            {
+                // The engine reads the pre-process time when it handles the restart, so it stays set until the next one rewrites it.
+                _emitter.Preprocess = _settledStart ? _emitter.Lifetime : 0.0;
+                _settledStart = false;
+                _emitter.Restart();   // clears leftover puffs (a hidden emitter isn't simulated) and starts emitting
+            }
             else _emitter.Emitting = false;
         }
     }

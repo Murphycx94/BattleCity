@@ -53,6 +53,17 @@ public static class Palette
     public static readonly Vector3 Wood = Hex("B9844F");         // fences, and the chips off them
     public static readonly Vector3 BrickDust = Hex("E0A88C");    // dust off a brick wall
 
+    // Team colours in a match, seen from the player's seat (the player's own tank is TankBody). Declared after the
+    // entries they alias: static initialisers run in textual order.
+    public static readonly Vector3 AllyBody = TargetBody;        // a teammate: the same blue-grey as the practice targets
+    public static readonly Vector3 EnemyBody = Hex("D8344A");    // an opponent: a red apart from the brick, the orange and the blue-grey
+
+    // Menus, room and scoreboard.
+    public static readonly Vector3 UiBackground = Hex("0B0E16"); // the dark backdrop behind menu and room screens
+    public static readonly Vector3 UiDim = Hex("8C94A3");        // secondary text, disabled controls
+    public static readonly Vector3 UiGood = Hex("73E68C");       // ready, joinable, a win
+    public static readonly Vector3 UiDanger = HitPierced;        // errors, a loss: the same red as damage numbers
+
     /// <summary>"RRGGBB" (an optional leading '#') to sRGB 0–1.</summary>
     public static Vector3 Hex(string hex)
     {

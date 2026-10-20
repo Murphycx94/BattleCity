@@ -20,6 +20,7 @@ public partial class TankModel : Node3D
     private const float RimStrength = 0.25f;
     private const int PaintMode = 0, WheelMode = 1, TrackMode = 2;   // tank_toon.gdshader "mode"
     private const float CharSeconds = 0.6f;
+    private const float SettledSeconds = TurretToss.FlightTime + CharSeconds;   // a wreck this old has landed and finished charring
     private static readonly StringName CharAmount = new("char_amount");   // cached: a string would make a new StringName per call
 
     private readonly Node3D _body = new() { Name = "Body" };
@@ -104,10 +105,14 @@ public partial class TankModel : Node3D
 
     public bool IsWrecked => _wreckTime >= 0f;
 
-    /// <summary>Knocks the tank out: the turret (if any) flies off and the paint chars black over <see cref="CharSeconds"/>.</summary>
-    public void Wreck(float turretYaw)
+    /// <summary>
+    /// Knocks the tank out: the turret (if any) flies off and the paint chars black over <see cref="CharSeconds"/>. With
+    /// <paramref name="settled"/> (a wreck first seen already dead) the flight and the charring are skipped: the turret lies
+    /// where it lands and the paint is black from the first frame drawn.
+    /// </summary>
+    public void Wreck(float turretYaw, bool settled = false)
     {
-        _wreckTime = 0f;
+        _wreckTime = settled ? SettledSeconds : 0f;
         _tossYaw = turretYaw;
     }
 

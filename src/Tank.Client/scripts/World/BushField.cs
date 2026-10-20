@@ -104,21 +104,23 @@ public partial class BushField : Node3D
     }
 
     /// <param name="camera">Camera position this frame.</param>
-    /// <param name="hull">The player's tank hull footprint.</param>
-    public void Update(Vector3 camera, Obb2 hull, float delta)
+    /// <param name="followed">The followed tank's hull footprint; null for a free camera, where only the camera clears bushes.</param>
+    public void Update(Vector3 camera, Obb2? followed, float delta)
     {
+        Obb2 hull = followed ?? default;
+        bool hasHull = followed is not null;
         Obb2 own = hull with { HalfExtents = hull.HalfExtents + new SN.Vector2(OwnTankMargin) };
         Obb2 pushing = hull with { HalfExtents = hull.HalfExtents + new SN.Vector2(PushMargin) };
         var eye = new SN.Vector2(camera.X, camera.Z);
         foreach (Bush bush in _bushes)
         {
             if (!bush.Shown) continue;   // shot away: nothing to fade or push, nothing to upload
-            bool clear = DistanceToBush(camera, bush) < NearCamera || own.IntersectsCircle(bush.Center, bush.Radius)
-                || SegmentDistance(bush.Center, eye, hull.Center) <= bush.Radius;
+            bool clear = DistanceToBush(camera, bush) < NearCamera
+                || (hasHull && (own.IntersectsCircle(bush.Center, bush.Radius) || SegmentDistance(bush.Center, eye, hull.Center) <= bush.Radius));
             float target = clear ? SeeThrough : 1f;
             bush.Opacity = Mathf.MoveToward(bush.Opacity, target, (1f - SeeThrough) * delta / FadeSeconds);
 
-            if (pushing.IntersectsCircle(bush.Center, bush.Radius))
+            if (hasHull && pushing.IntersectsCircle(bush.Center, bush.Radius))
             {
                 bush.PushFrom = hull.Center;
                 bush.Push = Mathf.MoveToward(bush.Push, 1f, delta / GrowSeconds);

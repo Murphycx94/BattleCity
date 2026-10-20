@@ -51,6 +51,26 @@ public class PaletteTests
         Assert.True(Luminance(Palette.Stone) - Luminance(Palette.StoneMortar) > 0.15f, "dark joints show up on the stones");
     }
 
+    [Fact]
+    public void Team_colours_keep_enemies_apart_from_everything_else_on_the_field()
+    {
+        Assert.Equal(Palette.TargetBody, Palette.AllyBody);
+        Assert.True(Vector3.Distance(Palette.EnemyBody, Palette.Brick) >= 0.15f, "an enemy is not mistaken for a brick wall");
+        Assert.True(Vector3.Distance(Palette.EnemyBody, Palette.TankBody) >= 0.3f, "an enemy is not mistaken for the player's orange tank");
+        Assert.True(Vector3.Distance(Palette.EnemyBody, Palette.AllyBody) >= 0.25f, "an enemy is not mistaken for a teammate");
+        Assert.True(Vector3.Distance(Palette.EnemyBody, Palette.HitPierced) >= 0.12f, "an enemy hull is not the red of a damage number");
+    }
+
+    [Fact]
+    public void Ui_colours_are_the_designed_ones()
+    {
+        Assert.Equal(Palette.Hex("0B0E16"), Palette.UiBackground);
+        Assert.Equal(Palette.Hex("8C94A3"), Palette.UiDim);
+        Assert.Equal(Palette.Hex("73E68C"), Palette.UiGood);
+        Assert.Equal(Palette.HitPierced, Palette.UiDanger);
+        Assert.Equal(Palette.Hex("D8344A"), Palette.EnemyBody);
+    }
+
     /// <summary>Relative luminance (Rec. 709 weights on the linear colour) of an sRGB palette entry.</summary>
     private static float Luminance(Vector3 srgb) => Vector3.Dot(Palette.Linear(srgb), new Vector3(0.2126f, 0.7152f, 0.0722f));
 

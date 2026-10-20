@@ -57,7 +57,11 @@ public sealed class ClockSync
             Initialize(serverTick, rttSeconds);
             return;
         }
-        if (System.Math.Abs(inputSlack - TargetSlackTicks) > HardResyncThreshold)
+        // The server has reached (or passed) the client's own tick: the client fell behind (a long frame the engine's
+        // clamped delta never made up for), so its inputs arrive late and are dropped. The slack feedback then says
+        // nothing, as no input is received at all, so this is the only sign; start again ahead of the server.
+        bool behind = serverTick >= Tick;
+        if (behind || System.Math.Abs(inputSlack - TargetSlackTicks) > HardResyncThreshold)
         {
             HardResyncs++;
             Initialize(serverTick, rttSeconds);

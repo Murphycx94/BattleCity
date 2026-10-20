@@ -79,24 +79,29 @@ public sealed class ClockSyncTests
     [Fact]
     public void LowSlack_SpeedsUp_HighSlack_SlowsDown()
     {
+        // The server's ticks stay well below the client's, as they do while the client leads: only the slack moves the
+        // rate (a server tick at or past the client's would take the "fell behind" hard resync instead).
         var clock = new ClockSync();
-        clock.Initialize(0, 0);
+        clock.Initialize(1000, 0);
         for (int i = 0; i < 50; i++) clock.OnServerFeedback(-1, i, 0);
         Assert.True(clock.Rate > 1.0);
 
-        for (int i = 0; i < 100; i++) clock.OnServerFeedback(8, i, 0);
+        for (int i = 0; i < 100; i++) clock.OnServerFeedback(8, 50 + i, 0);
         Assert.True(clock.Rate < 1.0);
         Assert.InRange(clock.Rate, 0.95, 1.05);
+        Assert.Equal(0, clock.HardResyncs);   // all of it on the dilation path
     }
 
     [Fact]
     public void HugeError_HardResyncs()
     {
         var clock = new ClockSync();
-        clock.Initialize(0, 0);
-        clock.OnServerFeedback(-100, 500, 0);
+        clock.Initialize(500, 0);              // the client at 502
+        clock.OnServerFeedback(2, 490, 0);     // the same server tick with the slack on target: the server isn't caught up…
+        Assert.Equal(0, clock.HardResyncs);
+        clock.OnServerFeedback(-100, 490, 0);  // … so this resync is the slack's alone
         Assert.Equal(1, clock.HardResyncs);
-        Assert.Equal(502, clock.Tick);
+        Assert.Equal(492, clock.Tick);
     }
 
     [Fact]

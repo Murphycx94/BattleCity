@@ -321,4 +321,26 @@ public sealed class BattleIntegrationTests
         Assert.True(seenRemoteShell > 0, "B's shells flew on A's client");
         Assert.Contains(fxA, e => e.Type == GameEventType.ShellFired && e.TankId == tankB);
     }
+
+    [Fact]
+    public void A_shell_in_flight_carries_its_age_and_the_age_grows_between_updates()
+    {
+        var h = new BattleHarness();
+        BattleClient a = h.AddClient("A");
+        h.AddClient("B");
+        h.StartMatch(BattleMode.TeamBattle);
+        float aim = h.ServerTankOf(a).Yaw;
+        var ages = new List<float>();
+        LocalCommand FireOften(int c, double t)
+        {
+            foreach (ShellView s in a.Shells)
+                if (s.Own) ages.Add(s.Age);
+            // Fires in a short window every 2.5 s, aimed a little below level along the hull, as the other shell tests do.
+            return new LocalCommand(0, 0, c == 0 ? aim : aim + 3.1f, -0.02f, (int)(t * 10) % 25 == 0);
+        }
+        h.Run(12.0, FireOften);
+        Assert.NotEmpty(ages);
+        Assert.Contains(ages, age => age > 0f);
+        Assert.True(ages.Max() > ages.First(age => age > 0f), "the age grew while the shell flew");
+    }
 }

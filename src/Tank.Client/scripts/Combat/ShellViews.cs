@@ -2,7 +2,9 @@ using Godot;
 using Tank.Client.Art;
 using Tank.Client.World;
 using Tank.Sim;
+using Tank.Net.Battle;
 using Tank.Sim.Combat;
+using SN = System.Numerics;
 
 namespace Tank.Client.Combat;
 
@@ -52,29 +54,50 @@ public partial class ShellViews : Node3D
     /// <param name="frameDelta">Render frame time, seconds; the tracer covers at least the distance flown in one frame.</param>
     public void Sync(ReadOnlySpan<Shell> shells, float alpha, float frameDelta)
     {
-        while (_pool.Count < shells.Length) _pool.Add(NewTracer());
-        for (int i = 0; i < _pool.Count; i++)
+        int shown = PrepareTracers(shells.Length);
+        for (int i = 0; i < shown; i++)
         {
-            Tracer tracer = _pool[i];
-            Node3D root = tracer.Root;
-            MeshInstance3D trail = tracer.Trail;
-            root.Visible = i < shells.Length;
-            if (!root.Visible) continue;
             Shell shell = shells[i];
-            if (shell.Ammo != tracer.Ammo) Paint(tracer, shell.Ammo);
-            float age = MathF.Max(shell.Age - (1f - alpha) * SimConstants.Dt, 0f);
-            Vector3 position = (shell.Position - shell.Velocity * ((1f - alpha) * SimConstants.Dt)).ToGodot();
-            float speed = shell.Velocity.Length();
-            Vector3 heading = speed > 0.01f ? shell.Velocity.ToGodot() / speed : Vector3.Zero;
-            if (heading == Vector3.Zero) root.Position = position;
-            else if (Mathf.Abs(heading.Y) < 0.99f) root.LookAtFromPosition(position, position + heading, Vector3.Up);
-            else root.Position = position;
-            // At least TrailLength, and never shorter than the distance covered per render frame, so the tracer has no gaps.
-            float length = MathF.Min(MathF.Max(TrailLength, speed * Mathf.Clamp(frameDelta, 1f / 240f, 1f / 30f)), age * speed);
-            trail.Visible = length > 0.5f;
-            trail.Scale = new Vector3(1, MathF.Max(length, 0.01f), 1);
-            trail.Position = new Vector3(0, 0, length / 2);
+            Draw(_pool[i], shell.Ammo, shell.Position, shell.Velocity, shell.Age, alpha, frameDelta);
         }
+    }
+
+    /// <summary>The same tracers for a client's shells (own predicted and others'), as <c>BattleClient.Shells</c> lists them.</summary>
+    public void Sync(IReadOnlyList<ShellView> shells, float alpha, float frameDelta)
+    {
+        int shown = PrepareTracers(shells.Count);
+        for (int i = 0; i < shown; i++)
+        {
+            ShellView shell = shells[i];
+            Draw(_pool[i], shell.Ammo, shell.Position, shell.Velocity, shell.Age, alpha, frameDelta);
+        }
+    }
+
+    /// <summary>Grows the pool to <paramref name="count"/> tracers and hides the unused ones; returns how many are in use.</summary>
+    private int PrepareTracers(int count)
+    {
+        while (_pool.Count < count) _pool.Add(NewTracer());
+        for (int i = 0; i < _pool.Count; i++) _pool[i].Root.Visible = i < count;
+        return count;
+    }
+
+    private void Draw(Tracer tracer, AmmoType ammoType, SN.Vector3 shellPosition, SN.Vector3 shellVelocity, float shellAge, float alpha, float frameDelta)
+    {
+        Node3D root = tracer.Root;
+        MeshInstance3D trail = tracer.Trail;
+        if (ammoType != tracer.Ammo) Paint(tracer, ammoType);
+        float age = MathF.Max(shellAge - (1f - alpha) * SimConstants.Dt, 0f);
+        Vector3 position = (shellPosition - shellVelocity * ((1f - alpha) * SimConstants.Dt)).ToGodot();
+        float speed = shellVelocity.Length();
+        Vector3 heading = speed > 0.01f ? shellVelocity.ToGodot() / speed : Vector3.Zero;
+        if (heading == Vector3.Zero) root.Position = position;
+        else if (Mathf.Abs(heading.Y) < 0.99f) root.LookAtFromPosition(position, position + heading, Vector3.Up);
+        else root.Position = position;
+        // At least TrailLength, and never shorter than the distance covered per render frame, so the tracer has no gaps.
+        float length = MathF.Min(MathF.Max(TrailLength, speed * Mathf.Clamp(frameDelta, 1f / 240f, 1f / 30f)), age * speed);
+        trail.Visible = length > 0.5f;
+        trail.Scale = new Vector3(1, MathF.Max(length, 0.01f), 1);
+        trail.Position = new Vector3(0, 0, length / 2);
     }
 
     private void Paint(Tracer tracer, AmmoType ammo)

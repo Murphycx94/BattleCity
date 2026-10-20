@@ -1,0 +1,179 @@
+using System.Globalization;
+using Godot;
+using Tank.Client.Art;
+using Tank.Client.Overlay;
+using Tank.Net.Battle;
+using Tank.Sim.Modes;
+
+namespace Tank.Client.Match;
+
+/// <summary>
+/// The scoreboard (blueprint §4.2): a header (名次 / 名字 / 车型 / 击毁 / 阵亡 / 状态), in the team modes a banner per team
+/// (我方 first, then 敌方, in the sides' colours) and one line per player, the player's own tinted in the accent colour
+/// and the fallen dimmed. It shows while Tab is held and, in the same shape at the results position, once the match has
+/// ended. The lines are rebuilt only when the scoreboard's numbers, the names or the own respawn second change, and the
+/// view redraws only then (or when shown or resized): nothing here allocates on a quiet frame.
+/// </summary>
+public partial class ScoreboardView : HudPanel
+{
+    private const float HeaderHeight = 56f, TeamBannerHeight = 38f, RowHeight = 42f, PadBottom = 14f;
+    private const int HeaderSize = 20, BodySize = 24, StatusSize = 22, TeamSize = 22, TextOutline = 4;
+    private const float RankX = 64f, NameX = 112f, TankX = 350f, KillX = 600f, DeathX = 685f, StatusX = 745f;
+    private const float NameWidth = TankX - NameX - 12f;
+    private const int PanelRadius = 24, RowRadius = 12;
+    private const float PanelAlpha = 0.88f, TeamAlpha = 0.3f, OwnAlpha = 0.3f, DeadAlpha = 0.5f, DividerInset = 18f;
+
+    private static readonly string[] Headers = { "名次", "名字", "车型", "击毁", "阵亡", "状态" };
+    private static readonly Func<string, float> MeasureBody = text => HudStyle.TextWidth(text, BodySize);   // cached: one delegate, not one per name
+
+    private struct Line
+    {
+        public string Rank, Name, Tank, Kills, Deaths, Status;
+        public Color NameColor;
+        public bool Own, Dim, TeamStart, FirstGroup;
+    }
+
+    private readonly ScoreRow[] _rows = new ScoreRow[BattleProtocol.MaxPlayers];
+    private readonly Line[] _lines = new Line[BattleProtocol.MaxPlayers];
+    private readonly PlayerStats[] _seenPlayers = new PlayerStats[BattleProtocol.MaxPlayers];
+    private readonly string?[] _seenNames = new string?[BattleProtocol.MaxPlayers];
+    private readonly Func<byte, string?> _nameOf;
+    private readonly StyleBoxFlat _panel = HudStyle.RoundedBox(new Color(HudStyle.Panel, PanelAlpha), PanelRadius, 8);
+    private readonly StyleBoxFlat _ownRow = HudStyle.RoundedBox(new Color(HudStyle.Accent, OwnAlpha), RowRadius, 6);
+    private readonly StyleBoxFlat _allyBanner = HudStyle.RoundedBox(new Color(MatchColors.Ui(Side.Ally).ToColor(), TeamAlpha), RowRadius, 6);
+    private readonly StyleBoxFlat _enemyBanner = HudStyle.RoundedBox(new Color(MatchColors.Ui(Side.Enemy).ToColor(), TeamAlpha), RowRadius, 6);
+    private string?[] _names = Array.Empty<string?>();
+    private int _count, _groups;
+    private bool _hasLines, _teams, _results;
+    private BattleMode _mode;
+    private byte _ownSlot, _ownTeam;
+    private bool _ended;
+    private int _respawnSeconds;
+
+    public ScoreboardView()
+    {
+        _nameOf = slot => slot < _names.Length ? _names[slot] : null;
+        Visible = false;
+    }
+
+    /// <summary>Call once a frame. <paramref name="tabHeld"/> shows the board; so does the end of the match (then at the results position).</summary>
+    public void Update(in MatchHudFrame frame, bool tabHeld)
+    {
+        bool ended = frame.Phase == MatchPhase.Ended;
+        if (!tabHeld && !ended)
+        {
+            Visible = false;   // the lines are left as they were: the next show compares them with the frame's and rebuilds if they differ
+            return;
+        }
+        bool wasVisible = Visible;
+        Visible = true;
+        int respawnSeconds = HudText.CeilSeconds(frame.RespawnIn);
+        bool changed = !wasVisible || ended != _results;
+        if (!_hasLines || Differs(frame, ended, respawnSeconds))
+        {
+            Rebuild(frame, ended, respawnSeconds);
+            changed = true;
+        }
+        _results = ended;
+        if (changed) QueueRedraw();
+    }
+
+    private bool Differs(in MatchHudFrame frame, bool ended, int respawnSeconds)
+    {
+        if (frame.Mode != _mode || frame.OwnSlot != _ownSlot || frame.OwnTeam != _ownTeam || ended != _ended || respawnSeconds != _respawnSeconds) return true;
+        for (int i = 0; i < _seenPlayers.Length; i++)
+            if (!_seenPlayers[i].Equals(frame.Players[i]) || !ReferenceEquals(_seenNames[i], frame.Names[i])) return true;
+        return false;
+    }
+
+    private void Rebuild(in MatchHudFrame frame, bool ended, int respawnSeconds)
+    {
+        (_mode, _ownSlot, _ownTeam, _ended, _respawnSeconds, _hasLines) = (frame.Mode, frame.OwnSlot, frame.OwnTeam, ended, respawnSeconds, true);
+        Array.Copy(frame.Players, _seenPlayers, _seenPlayers.Length);
+        Array.Copy(frame.Names, _seenNames, _seenNames.Length);
+        _names = frame.Names;
+        _teams = ModeRules.HasTeams(frame.Mode);
+        _count = ScoreboardModel.Build(frame.Mode, frame.OwnSlot, frame.OwnTeam, frame.Players, _nameOf, ended, frame.RespawnIn, _rows);
+        _groups = 0;
+        for (int i = 0; i < _count; i++)
+        {
+            ScoreRow row = _rows[i];
+            bool start = _teams && (i == 0 || row.Team != _rows[i - 1].Team);
+            if (start) _groups++;
+            _lines[i] = new Line
+            {
+                Rank = Number(row.Rank), Name = Fit(row.Name), Tank = row.TankName, Kills = Number(row.Kills), Deaths = Number(row.Deaths),
+                Status = row.Status, NameColor = NameColor(row), Own = row.Slot == frame.OwnSlot, Dim = !row.Alive,
+                TeamStart = start, FirstGroup = _groups == 1,
+            };
+        }
+    }
+
+    private Color NameColor(in ScoreRow row) => _teams ? MatchColors.Ui(row.Side).ToColor() : row.Side == Side.Own ? HudStyle.Accent : HudStyle.Text;
+
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>The name cut to the name column, with an ellipsis where it was cut.</summary>
+    private static string Fit(string name) => HudText.Fit(name, NameWidth, MeasureBody);
+
+    public override void _Draw()
+    {
+        if (!_hasLines) return;
+        HudRect table = _results ? Boxes.ResultsTable : Boxes.Scoreboard;
+        float height = HeaderHeight + _groups * TeamBannerHeight + _count * RowHeight + PadBottom;
+        DrawStyleBox(_panel, new Rect2(table.X, table.Y, table.Width, height));
+        DrawHeader(table);
+        float y = table.Y + HeaderHeight;
+        for (int i = 0; i < _count; i++)
+        {
+            ref readonly Line line = ref _lines[i];
+            if (line.TeamStart)
+            {
+                DrawTeamBanner(table, y, line.FirstGroup);
+                y += TeamBannerHeight;
+            }
+            DrawPlayerLine(table, y, line);
+            y += RowHeight;
+        }
+    }
+
+    private void DrawHeader(HudRect table)
+    {
+        float baseline = table.Y + HudStyle.Baseline(HeaderHeight / 2, HeaderSize);
+        Color dim = Palette.UiDim.ToColor();
+        HudStyle.DrawOutlinedCentered(this, table.X + RankX, baseline, Headers[0], HeaderSize, dim, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + NameX, baseline), Headers[1], HeaderSize, dim, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + TankX, baseline), Headers[2], HeaderSize, dim, TextOutline);
+        HudStyle.DrawOutlinedCentered(this, table.X + KillX, baseline, Headers[3], HeaderSize, dim, TextOutline);
+        HudStyle.DrawOutlinedCentered(this, table.X + DeathX, baseline, Headers[4], HeaderSize, dim, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + StatusX, baseline), Headers[5], HeaderSize, dim, TextOutline);
+        float rule = table.Y + HeaderHeight - 2;
+        DrawLine(new Vector2(table.X + DividerInset, rule), new Vector2(table.Right - DividerInset, rule), new Color(HudStyle.OutlineColor, 0.8f), 2f);
+    }
+
+    private void DrawTeamBanner(HudRect table, float y, bool own)
+    {
+        var box = new Rect2(table.X + DividerInset / 2, y + 3, table.Width - DividerInset, TeamBannerHeight - 6);
+        DrawStyleBox(own ? _allyBanner : _enemyBanner, box);
+        Color color = MatchColors.Ui(own ? Side.Ally : Side.Enemy).ToColor();
+        HudStyle.DrawOutlined(this, new Vector2(box.Position.X + 16, y + HudStyle.Baseline(TeamBannerHeight / 2, TeamSize)), own ? "我方" : "敌方", TeamSize, color, TextOutline);
+    }
+
+    private void DrawPlayerLine(HudRect table, float y, in Line line)
+    {
+        if (line.Own) DrawStyleBox(_ownRow, new Rect2(table.X + DividerInset / 2, y + 2, table.Width - DividerInset, RowHeight - 4));
+        float baseline = y + HudStyle.Baseline(RowHeight / 2, BodySize);
+        float statusBaseline = y + HudStyle.Baseline(RowHeight / 2, StatusSize);
+        float alpha = line.Dim ? DeadAlpha : 1f;
+        Color text = new(HudStyle.Text, alpha), name = new(line.NameColor, alpha), dim = new(Palette.UiDim.ToColor(), alpha);
+        HudStyle.DrawOutlinedCentered(this, table.X + RankX, baseline, line.Rank, BodySize, text, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + NameX, baseline), line.Name, BodySize, name, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + TankX, baseline), line.Tank, BodySize, dim, TextOutline);
+        HudStyle.DrawOutlinedCentered(this, table.X + KillX, baseline, line.Kills, BodySize, text, TextOutline);
+        HudStyle.DrawOutlinedCentered(this, table.X + DeathX, baseline, line.Deaths, BodySize, text, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + StatusX, statusBaseline), line.Status, StatusSize, StatusColor(line, alpha), TextOutline);
+    }
+
+    private static Color StatusColor(in Line line, float alpha) =>
+        line.Dim ? new Color(Palette.UiDanger.ToColor(), alpha) : new Color(Palette.UiGood.ToColor(), alpha);
+}
