@@ -14,7 +14,7 @@
 | 美术 | 代码程序化生成网格（`Art/Mesh`），卡通着色器 | 不用外部模型和贴图；唯一的外部素材是界面字体 |
 | 在线升级 | `Tank.Update`：签名清单 + 整包替换 | 见根目录 README |
 | 测试 | xUnit；Coverlet 收集覆盖率；自研网络压测 `Tank.Soak` | 见 [04 §5](04-architecture-and-plan.md#5-测试) |
-| CI | GitHub Actions：单元测试、soak、编译服务器和客户端；发布工作流打包三平台客户端和四平台服务器 | |
+| CI | GitHub Actions：单元测试、soak、编译服务器和客户端；发布工作流打包 macOS 客户端和 macOS 服务器（只支持 macOS） | |
 
 > 锁定的版本：Godot 4.7.2 .NET 版（`Tank.Client.csproj` 的 `Godot.NET.Sdk/4.7.2`）、.NET SDK 8.0.425（`global.json`，`rollForward: latestFeature`：可用更高的 8.0 SDK）、LiteNetLib 2.1.4、xUnit 2.9.3（`Directory.Packages.props`）。
 
@@ -58,7 +58,7 @@ Godot 的高层多人 API 适合回合制和休闲游戏，做不出射击游戏
 | 数值 | `float` + `MathF` | 不做锁步，不要求各平台逐位一致；客户端的微小偏差由对账修正 |
 | 物理 | 贴地运动学 + OBB 碰撞 + 解析弹道 | 引擎物理不确定，预测和对账会一直打架；客户端也不用 Godot 物理，碎片、飞起的炮塔都是按曲线算的纯表现 |
 | 随机数 | 种子化 XorShift；射击的种子由 `(tick, 车号, 第几发)` 推出 | 客户端能预测出和服务器一样的散布 |
-| 地图 | 服务器生成后把高度（1 cm 精度）和物件表整个发给客户端 | Mac（ARM）和 Windows（x64）上 `MathF` 可能有末位差别；地图生成里一处判断不同，物件编号就全对不上了 |
+| 地图 | 服务器生成后把高度（1 cm 精度）和物件表整个发给客户端 | 不同 CPU（Apple 芯片和 Intel 的 Mac）上 `MathF` 可能有末位差别；地图生成里一处判断不同，物件编号就全对不上了 |
 
 `Tank.Sim` 不许引用引擎和网络库，不许用系统时间和 `System.Random`；`tests/Tank.Sim.Tests/ArchitectureTests.cs` 按程序集引用和字段类型（没有 `Random`/`DateTime`/`Stopwatch` 字段）检查。
 

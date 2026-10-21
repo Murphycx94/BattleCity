@@ -116,7 +116,7 @@ tools/ship.sh bump 0.2.0 "新增：……"   # 改 build.json 并提交
 git push                               # CI 自动打包、发布
 ```
 
-附件：三平台客户端（macOS 通用版、Windows x64、Linux x64）、四平台专用服务器（自带运行时）、`SHA256SUMS.txt`。
+附件：macOS 客户端（通用版，Apple 芯片与 Intel）、macOS 专用服务器（arm64、x64，自带运行时）、`SHA256SUMS.txt`。目前只支持 macOS，不打 Windows / Linux 的包。
 发布说明默认按模板生成；想自己写就放在 `docs/releases/v<version>.md`。
 
 本机也能走同一套流程（需要 Godot 4.7.2 .NET 版和同版本导出模板）：
@@ -140,5 +140,5 @@ tools/ship.sh github                 # 建 tag 和 Release（可重复运行；R
 - **开发时不更新**：编辑器和源码运行不检查；正式包可加 `--no-update` 跳过。
 - **本地测试更新源**：`TANK_UPDATE_FEED=http://127.0.0.1:8765/stable/` 指向自己起的静态服务器（回环地址允许 http，签名照样校验）。
 
-发布时 `tools/ship.sh feed`（CI 里自动执行）把三平台客户端发到更新仓库的 Release，生成并签名 `stable/manifest.json`。
+发布时 `tools/ship.sh feed`（CI 里自动执行）把 macOS 客户端发到更新仓库的 Release，生成并签名 `stable/manifest.json`。
 签名私钥在 `~/.config/tank3d/update_signing_key.pem`，**不进仓库**；丢了就只能换公钥，老版本玩家需要手动装一次新版。

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 发布一个已提交的版本：在该提交的干净 worktree 里跑测试、打包客户端（macOS / Windows / Linux）
-# 和专用服务器（macOS arm64/x64、Windows x64、Linux x64），再建 GitHub Release。
+# 发布一个已提交的版本：在该提交的干净 worktree 里跑测试、打包 macOS 客户端（通用版）
+# 和 macOS 专用服务器（arm64/x64），再建 GitHub Release。只支持 macOS：不打 Windows / Linux 的包。
 # - 版本号只写在 build.json；打包时才写进 worktree 里的 project.godot 和 export_presets.cfg，工作区不受影响；
 # - 工作区里没提交的改动永远不会进包；产物先放临时目录，全部成功后才换掉 <OUT>/release；
 # - github 可以重复运行：Release 已存在且附件一致时只做核对（REPAIR=1 时用本地文件覆盖对不上的附件）。
@@ -23,7 +23,7 @@ OUT="${SHIP_OUT:-$ROOT/build}"
 REMOTE="origin"
 APP="Tank3D"
 MAX_NOTES_CHARS=80
-SERVER_RIDS=(osx-arm64 osx-x64 win-x64 linux-x64)
+SERVER_RIDS=(osx-arm64 osx-x64)
 UPDATES_REPO="${UPDATES_REPO:-Murphycx94/BattleCity-updates}"
 UPDATE_KEY="${TANK_UPDATE_KEY:-$HOME/.config/tank3d/update_signing_key.pem}"
 FEED_DIR="stable"
@@ -110,7 +110,7 @@ cmd_test() {
 	dotnet run --project "$WT/tests/Tank.Soak" -c Release
 }
 
-# 把 build.json 的版本写进 worktree 里的 Godot 工程（Windows 文件版本只能是四段纯数字）
+# 把 build.json 的版本写进 worktree 里的 Godot 工程（macOS 的版本号只能是纯数字）
 stamp_version() {
 	local numeric="${VERSION%%-*}"
 	python3 - "$WT/src/Tank.Client" "$VERSION" "$numeric" <<'PY'
@@ -127,18 +127,13 @@ sub(f"{root}/project.godot", [(r'^config/version=".*"$', f'config/version="{vers
 sub(f"{root}/export_presets.cfg", [
     (r'^application/short_version=".*"$', f'application/short_version="{numeric}"'),
     (r'^application/version=".*"$', f'application/version="{numeric}"'),
-    (r'^application/file_version=".*"$', f'application/file_version="{numeric}.0"'),
-    (r'^application/product_version=".*"$', f'application/product_version="{numeric}.0"'),
 ])
 PY
 }
 
-has_assemblies() {  # has_assemblies <预设> <导出产物>
-	case "$1" in
-		# 先取完整列表再匹配：pipefail 下 `unzip | grep -q` 会因 SIGPIPE 误判失败
-		macOS) [[ "$(unzip -Z1 "$2")" == *"/Tank.Client.dll"* ]] ;;
-		*) ls "$(dirname "$2")"/data_Tank.Client_*/Tank.Client.dll >/dev/null 2>&1 ;;
-	esac
+has_assemblies() {  # has_assemblies <导出的 macOS zip>
+	# 先取完整列表再匹配：pipefail 下 `unzip | grep -q` 会因 SIGPIPE 误判失败
+	[[ "$(unzip -Z1 "$1")" == *"/Tank.Client.dll"* ]]
 }
 
 # 在 macOS 上把导出的安装包真正启动一次：开房、加一个机器人、开局，房主自己的客户端进入对局画面，确认能玩再发
@@ -163,34 +158,24 @@ cmd_build() {
 	stamp_version
 	local stage="$OUT/release.tmp"
 	rm -rf "$stage" "$WT/build"
-	mkdir -p "$stage" "$WT/build/client/macos" "$WT/build/client/windows" "$WT/build/client/linux"
+	mkdir -p "$stage" "$WT/build/client/macos"
 
 	step "导出客户端（Godot ${GODOT_VERSION}）"
 	# 首次导入编辑器在退出时可能崩溃，不影响导入结果；后面的导出会校验产物
 	"$GODOT" --headless --path "$WT/src/Tank.Client" --import >/dev/null 2>&1 || true
-	local preset target
-	for preset in macOS Windows Linux; do
-		case "$preset" in
-			macOS) target="$WT/build/client/macos/$APP.zip" ;;
-			Windows) target="$WT/build/client/windows/$APP.exe" ;;
-			Linux) target="$WT/build/client/linux/$APP.x86_64" ;;
-		esac
-		"$GODOT" --headless --path "$WT/src/Tank.Client" --export-release "$preset" "$target" >"$WT/build/export-$preset.log" 2>&1 || true
-		[ -s "$target" ] || { tail -30 "$WT/build/export-$preset.log" >&2; die "导出 $preset 失败"; }
-		# Godot 在 C# 部分出错时仍会产出引擎和 pck，但游戏打不开：必须确认程序集进了包
-		has_assemblies "$preset" "$target" || { grep -m5 "ERROR" "$WT/build/export-$preset.log" >&2 || true; die "导出 $preset 的包里没有 C# 程序集"; }
-		ok "$preset"
-	done
-	# 字体的 OFL 许可证和第三方署名随包分发（pck 里也有一份），放在可执行文件旁边
+	local target="$WT/build/client/macos/$APP.zip"
+	"$GODOT" --headless --path "$WT/src/Tank.Client" --export-release macOS "$target" >"$WT/build/export-macOS.log" 2>&1 || true
+	[ -s "$target" ] || { tail -30 "$WT/build/export-macOS.log" >&2; die "导出 macOS 失败"; }
+	# Godot 在 C# 部分出错时仍会产出引擎和 pck，但游戏打不开：必须确认程序集进了包
+	has_assemblies "$target" || { grep -m5 "ERROR" "$WT/build/export-macOS.log" >&2 || true; die "导出 macOS 的包里没有 C# 程序集"; }
+	ok "macOS"
+	# 字体的 OFL 许可证和第三方署名随包分发（pck 里也有一份）
 	local legal
 	for legal in "$WT/src/Tank.Client/assets/fonts/OFL.txt" "$WT/src/Tank.Client/assets/CREDITS.md"; do
-		cp "$legal" "$WT/build/client/windows/" && cp "$legal" "$WT/build/client/linux/"
-		zip -qj "$WT/build/client/macos/$APP.zip" "$legal"
+		zip -qj "$target" "$legal"
 	done
-	smoke_test_macos "$WT/build/client/macos/$APP.zip"
-	cp "$WT/build/client/macos/$APP.zip" "$stage/$APP-v$VERSION-macos-universal.zip"
-	(cd "$WT/build/client/windows" && rm -f ./*.log && zip -qr "$stage/$APP-v$VERSION-windows-x64.zip" .)
-	(cd "$WT/build/client/linux" && chmod +x "$APP.x86_64" && tar -czf "$stage/$APP-v$VERSION-linux-x64.tar.gz" .)
+	smoke_test_macos "$target"
+	cp "$target" "$stage/$APP-v$VERSION-macos-universal.zip"
 
 	step "发布专用服务器（自带 .NET 运行时）"
 	local rid dir name
@@ -200,9 +185,7 @@ cmd_build() {
 			-p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none \
 			-p:Version="${VERSION%%-*}" -p:InformationalVersion="$VERSION" -o "$dir" --nologo -v q
 		name="$APP-Server-v$VERSION-$rid"
-		if [[ "$rid" == win-* ]]; then (cd "$dir" && zip -qr "$stage/$name.zip" .)
-		else (cd "$dir" && tar -czf "$stage/$name.tar.gz" .)
-		fi
+		(cd "$dir" && tar -czf "$stage/$name.tar.gz" .)
 		ok "$rid"
 	done
 
@@ -235,9 +218,7 @@ $NOTES
 | 文件 | 说明 |
 |---|---|
 | \`$APP-v$VERSION-macos-universal.zip\` | macOS 客户端（Apple 芯片与 Intel） |
-| \`$APP-v$VERSION-windows-x64.zip\` | Windows 客户端 |
-| \`$APP-v$VERSION-linux-x64.tar.gz\` | Linux 客户端 |
-| \`$APP-Server-v$VERSION-<平台>\` | 无头专用服务器，自带运行时 |
+| \`$APP-Server-v$VERSION-osx-arm64.tar.gz\` / \`osx-x64\` | macOS 无头专用服务器（Apple 芯片 / Intel），自带运行时 |
 
 校验：\`SHA256SUMS.txt\`。
 MD
@@ -322,18 +303,18 @@ cmd_feed() {
 	check_update_key
 	step "更新源 ${UPDATES_REPO}：v$VERSION"
 
-	local mac="$APP-v$VERSION-macos-universal.zip" win="$APP-v$VERSION-windows-x64.zip" linux="$APP-v$VERSION-linux-x64.tar.gz"
+	local mac="$APP-v$VERSION-macos-universal.zip"
 	local base="https://github.com/$UPDATES_REPO/releases/download/$TAG"
 	local stage; stage="$(mktemp -d "${TMPDIR:-/tmp}/tank_feed.XXXXXX")"
-	python3 - "$rel" "$VERSION" "$NOTES" "$base" "$mac" "$win" "$linux" > "$stage/manifest.json" <<'PY'
+	python3 - "$rel" "$VERSION" "$NOTES" "$base" "$mac" > "$stage/manifest.json" <<'PY'
 import hashlib, json, os, sys
-rel, version, notes, base, mac, win, linux = sys.argv[1:8]
+rel, version, notes, base, mac = sys.argv[1:6]
 built = json.load(open(os.path.join(rel, "RELEASE.json"), encoding="utf-8"))["built_at"]
 def pkg(name):
     path = os.path.join(rel, name)
     return {"url": f"{base}/{name}", "sha256": hashlib.sha256(open(path, "rb").read()).hexdigest(), "size": os.path.getsize(path)}
 manifest = {"version": version, "notes": notes, "published_at": built,
-            "platforms": {"macos": pkg(mac), "windows": pkg(win), "linux": pkg(linux)}}
+            "platforms": {"macos": pkg(mac)}}
 print(json.dumps(manifest, ensure_ascii=False, indent=2))
 PY
 	openssl dgst -sha256 -sign "$UPDATE_KEY" -out "$stage/manifest.der" "$stage/manifest.json"
@@ -358,13 +339,13 @@ sys.exit(0 if key(sys.argv[1]) <= key(sys.argv[2]) else 1)' "$live_version" "$VE
 	fi
 
 	if [ "${DRY_RUN:-0}" = 1 ]; then
-		echo "DRY_RUN：会发布 Release $UPDATES_REPO@${TAG}（${mac}、${win}、${linux}），并推送 $FEED_DIR/manifest.json："
+		echo "DRY_RUN：会发布 Release $UPDATES_REPO@${TAG}（${mac}），并推送 $FEED_DIR/manifest.json："
 		sed 's/^/  | /' "$stage/manifest.json"
 		rm -rf "$stage"
 		return 0
 	fi
 
-	local assets=("$rel/$mac" "$rel/$win" "$rel/$linux")
+	local assets=("$rel/$mac")
 	if gh release view "$TAG" -R "$UPDATES_REPO" >/dev/null 2>&1; then
 		gh release upload "$TAG" -R "$UPDATES_REPO" "${assets[@]}" --clobber
 		ok "Release $TAG 已存在：附件已更新"
