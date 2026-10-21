@@ -1,5 +1,5 @@
-using Tank.Core.Math;
 using Tank.Net.Protocol;
+using Tank.Sim.Geometry;
 
 namespace Tank.Net.Transport;
 
@@ -16,9 +16,15 @@ public sealed record LinkConditions(double LatencyMs = 0, double JitterMs = 0, d
 /// </summary>
 public sealed class LoopbackNetwork
 {
+    /// <summary>Delivery order: arrival time, then send order (unique, so the unstable sort is deterministic).</summary>
+    private static readonly Comparison<Packet> ByArrival = (a, b) =>
+        a.ArrivalTime != b.ArrivalTime ? a.ArrivalTime.CompareTo(b.ArrivalTime) : a.Sequence.CompareTo(b.Sequence);
+
     private readonly List<Packet> _inFlight = new();
+    private readonly List<Packet> _due = new();
     private XorShift _rng;
     private long _sequence;
+    private bool _delivering;
 
     public LoopbackNetwork(uint seed = 1) => _rng = new XorShift(seed);
 
@@ -49,32 +55,52 @@ public sealed class LoopbackNetwork
         {
             arrival = System.Math.Max(arrival, lastReliableArrival); // keep ordered
         }
-        else if (link.LossPercent > 0 && _rng.Next(10_000) < link.LossPercent * 100)
+        else if (link.LossPercent > 0 && NextBelow(10_000) < link.LossPercent * 100)
         {
             return;
         }
         _inFlight.Add(new Packet(fromPeer, toPeer, toServer, data.ToArray(), arrival, _sequence++));
     }
 
+    /// <summary>
+    /// Hands this endpoint's due packets to <paramref name="deliver"/> by arrival time, then send order. Packets sent
+    /// from inside <paramref name="deliver"/> wait for a later call. If <paramref name="deliver"/> throws, the packets
+    /// after the one it threw on stay in flight. Not re-entrant.
+    /// </summary>
     internal void Deliver(bool toServer, int peerId, Action<Packet> deliver)
     {
-        // Collect due packets for this endpoint, ordered by arrival time then send order.
-        var due = _inFlight
-            .Where(p => p.ToServer == toServer && (toServer || p.ToPeer == peerId) && p.ArrivalTime <= Now)
-            .OrderBy(p => p.ArrivalTime).ThenBy(p => p.Sequence)
-            .ToList();
-        foreach (var p in due)
+        if (_delivering) throw new InvalidOperationException("LoopbackNetwork.Deliver is not re-entrant.");
+        _delivering = true;
+        int handed = 0;
+        try
         {
-            _inFlight.Remove(p);
-            deliver(p);
+            int kept = 0;
+            for (int i = 0; i < _inFlight.Count; i++)
+            {
+                Packet p = _inFlight[i];
+                if (p.ToServer == toServer && (toServer || p.ToPeer == peerId) && p.ArrivalTime <= Now) _due.Add(p);
+                else _inFlight[kept++] = p;
+            }
+            _inFlight.RemoveRange(kept, _inFlight.Count - kept);
+            _due.Sort(ByArrival);
+            while (handed < _due.Count) deliver(_due[handed++]);
+        }
+        finally
+        {
+            for (int i = handed; i < _due.Count; i++) _inFlight.Add(_due[i]);   // only after a throw
+            _due.Clear();
+            _delivering = false;
         }
     }
 
     private double Delay(LinkConditions link)
     {
-        double jitter = link.JitterMs > 0 ? (_rng.Next(10_001) / 10_000.0) * link.JitterMs : 0;
+        double jitter = link.JitterMs > 0 ? (NextBelow(10_001) / 10_000.0) * link.JitterMs : 0;
         return (link.LatencyMs + jitter) / 1000.0;
     }
+
+    /// <summary>Uniform in [0, <paramref name="max"/>); the draws the xorshift32 generator has always made here, so seeded runs replay unchanged.</summary>
+    private int NextBelow(int max) => (int)(_rng.NextUInt() % (uint)max);
 
     internal sealed record Packet(int FromPeer, int ToPeer, bool ToServer, byte[] Data, double ArrivalTime, long Sequence);
 }

@@ -51,7 +51,9 @@ GODOT_VERSION="$(at_ref src/Tank.Client/Tank.Client.csproj | sed -n 's#.*Sdk="Go
 
 worktree() {  # 该提交的干净 worktree，整个脚本只建一次，退出时删掉
 	[ -z "$WT" ] || return 0
-	WT="$(mktemp -d "${TMPDIR:-/tmp}/tank_ship.XXXXXX")"
+	# 取物理路径：macOS 的 $TMPDIR 在 /var（指向 /private/var 的符号链接）下，NuGet 还原时对不上被引用项目的路径，
+	# 会丢掉项目引用和它们带来的包（比如 Tank.Net 的 LiteNetLib），测试项目就编译不过
+	WT="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/tank_ship.XXXXXX")" && pwd -P)"
 	trap 'git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true; rm -rf "$WT"' EXIT
 	git -C "$ROOT" worktree add -q --detach "$WT" "$REF_SHA"
 }
@@ -100,7 +102,8 @@ cmd_check() {
 cmd_test() {
 	worktree
 	step "单元与集成测试"
-	dotnet test "$WT/tests/Tank.Core.Tests" -c Release --nologo -v q
+	dotnet test "$WT/tests/Tank.Sim.Tests" -c Release --nologo -v q
+	dotnet test "$WT/tests/Tank.Art.Tests" -c Release --nologo -v q
 	dotnet test "$WT/tests/Tank.Net.Tests" -c Release --nologo -v q
 	dotnet test "$WT/tests/Tank.Update.Tests" -c Release --nologo -v q
 	step "网络压测（docs/03 §11）"
@@ -138,17 +141,18 @@ has_assemblies() {  # has_assemblies <预设> <导出产物>
 	esac
 }
 
-# 在 macOS 上把导出的安装包真正启动一次：开房、加一个机器人、开局，确认能玩再发
+# 在 macOS 上把导出的安装包真正启动一次：开房、加一个机器人、开局，房主自己的客户端进入对局画面，确认能玩再发
 smoke_test_macos() {
 	[ "$(uname -s)" = Darwin ] || { echo "! 不是 macOS，跳过安装包启动测试"; return 0; }
 	local dir; dir="$(mktemp -d "${TMPDIR:-/tmp}/tank_smoke.XXXXXX")"
 	ditto -x -k "$1" "$dir"
 	local exe; exe="$(find "$dir" -path "*.app/Contents/MacOS/*" -type f | head -1)"
 	local log="$dir/smoke.log"
-	"$exe" --headless -- --host --port 27091 --bots 1 --autostart --quit-after 4 >"$log" 2>&1 || true
-	grep -q "match started" "$log" || { tail -20 "$log" >&2; rm -rf "$dir"; die "macOS 安装包启动测试失败：没能开局"; }
+	"$exe" --headless -- --host --port 27091 --bots 1 --autostart --quit-after 10 >"$log" 2>&1 || true
+	grep -q "^\[server\] match started" "$log" || { tail -20 "$log" >&2; rm -rf "$dir"; die "macOS 安装包启动测试失败：服务器没能开局"; }
+	grep -q "^\[match\] entered match" "$log" || { tail -20 "$log" >&2; rm -rf "$dir"; die "macOS 安装包启动测试失败：客户端没进入对局"; }
 	rm -rf "$dir"
-	ok "macOS 安装包启动测试：开房、机器人加入、开局正常"
+	ok "macOS 安装包启动测试：开房、机器人加入、开局、进入对局画面正常"
 }
 
 # —— build：check + test + 打包 ——

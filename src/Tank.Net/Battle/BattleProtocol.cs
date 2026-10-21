@@ -4,8 +4,7 @@ using Tank.Sim.Modes;
 namespace Tank.Net.Battle;
 
 /// <summary>
-/// Message ids of the battle protocol (stage 4 design §5.2). The first byte of every packet. Discovery shares its
-/// request with the old game (<see cref="Protocol.MessageType.Discover"/>); a battle room answers with <see cref="RoomInfo"/>.
+/// Message ids of the battle protocol (stage 4 design §5.2). The first byte of every packet.
 /// </summary>
 public enum BattleMessage : byte
 {
@@ -24,6 +23,8 @@ public enum BattleMessage : byte
     Events = 25,
 
     // unconnected (LAN discovery)
+    /// <summary>A broadcast asking rooms to answer. A room only reads this byte, so 4B clients (which send 40 then version 1) still find it.</summary>
+    Discover = 40,
     RoomInfo = 42,
 }
 
@@ -31,6 +32,10 @@ public enum BattleMessage : byte
 public static class BattleProtocol
 {
     public const int Version = 2;
+
+    /// <summary>The UDP port a room listens on unless told otherwise; discovery broadcasts only reach rooms on it.</summary>
+    public const int DefaultPort = 27015;
+
     public const string ConnectKey = "tank3d-v2";
     public const int MaxPlayers = ModeRules.MaxPlayers;
     public const int MaxRedundantInputs = 4;

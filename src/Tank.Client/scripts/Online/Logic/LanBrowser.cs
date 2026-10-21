@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Net.Sockets;
-using Tank.Net.Protocol;
+using Tank.Net.Battle;
 using Tank.Net.Transport;
 
 namespace Tank.Client.Online;
@@ -18,11 +18,11 @@ public sealed class LanBrowser : IDisposable
     private readonly int _port;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private LanDiscovery? _discovery;
-    private DiscoveredBattleRoom[] _heard = Array.Empty<DiscoveredBattleRoom>();   // what Rows was built from
+    private DiscoveredRoom[] _heard = Array.Empty<DiscoveredRoom>();   // what Rows was built from
     private double _retryAt;
 
     /// <param name="port">The port rooms are listening for discovery on (only the default one is broadcast to).</param>
-    public LanBrowser(int port = ProtocolInfo.DefaultPort) => _port = port;
+    public LanBrowser(int port = BattleProtocol.DefaultPort) => _port = port;
 
     /// <summary>The battle rooms heard from lately, by name.</summary>
     public IReadOnlyList<LanRoomRow> Rows { get; private set; } = Array.Empty<LanRoomRow>();
@@ -38,9 +38,9 @@ public sealed class LanBrowser : IDisposable
         {
             _discovery ??= new LanDiscovery(_port);
             _discovery.Poll();
-            if (!SameAsHeard(_discovery.BattleRooms))
+            if (!SameAsHeard(_discovery.Rooms))
             {
-                _heard = _discovery.BattleRooms.ToArray();
+                _heard = _discovery.Rooms.ToArray();
                 Rows = _heard.OrderBy(r => r.Info.RoomName, StringComparer.Ordinal).ThenBy(r => r.EndPoint.ToString(), StringComparer.Ordinal)
                     .Select(LanRoomRow.From).ToList();
             }
@@ -59,12 +59,12 @@ public sealed class LanBrowser : IDisposable
     }
 
     /// <summary>Whether the discovered rooms are the very records the rows were built from (none came, went or replied since).</summary>
-    private bool SameAsHeard(IReadOnlyCollection<DiscoveredBattleRoom> rooms)
+    private bool SameAsHeard(IReadOnlyCollection<DiscoveredRoom> rooms)
     {
         if (rooms.Count != _heard.Length) return false;
         if (_heard.Length == 0) return true;   // nothing out there: not even an enumerator
         int i = 0;
-        foreach (DiscoveredBattleRoom room in rooms)
+        foreach (DiscoveredRoom room in rooms)
             if (!ReferenceEquals(room, _heard[i++])) return false;
         return true;
     }
@@ -72,7 +72,7 @@ public sealed class LanBrowser : IDisposable
     private void Fail(string message, double now)
     {
         Dispose();
-        _heard = Array.Empty<DiscoveredBattleRoom>();
+        _heard = Array.Empty<DiscoveredRoom>();
         Rows = Array.Empty<LanRoomRow>();
         Error = $"无法搜索局域网：{message}";
         _retryAt = now + RetrySeconds;

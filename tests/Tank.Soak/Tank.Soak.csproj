@@ -3,8 +3,6 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Tank.Core\Tank.Core.csproj" />
     <ProjectReference Include="..\..\src\Tank.Net\Tank.Net.csproj" />
-    <ProjectReference Include="..\..\src\Tank.Server\Tank.Server.csproj" />
   </ItemGroup>
 </Project>

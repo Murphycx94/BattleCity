@@ -210,7 +210,7 @@ public partial class Main
     private string LocalAddresses(BattleSession session)
     {
         if (!session.IsHosting) return "";
-        string suffix = _options.Port == Net.Protocol.ProtocolInfo.DefaultPort ? "" : $":{_options.Port}";
+        string suffix = _options.Port == BattleProtocol.DefaultPort ? "" : $":{_options.Port}";
         return string.Join(", ", LocalIPv4().Select(a => a + suffix));
     }
 

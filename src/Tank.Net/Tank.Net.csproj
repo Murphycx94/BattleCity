@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <ProjectReference Include="..\Tank.Core\Tank.Core.csproj" />
     <ProjectReference Include="..\Tank.Sim\Tank.Sim.csproj" />
     <PackageReference Include="LiteNetLib" />
   </ItemGroup>

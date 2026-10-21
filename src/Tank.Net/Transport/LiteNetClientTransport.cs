@@ -10,7 +10,8 @@ public sealed class LiteNetClientTransport : IClientTransport
     private NetPeer? _server;
     private ITransportHandler? _handler;
 
-    public LiteNetClientTransport(string host, int port, string connectKey = ProtocolInfo.ConnectKey)
+    /// <param name="connectKey">What the server asks for (<see cref="Battle.BattleProtocol.ConnectKey"/>).</param>
+    public LiteNetClientTransport(string host, int port, string connectKey)
     {
         _manager = new NetManager(_listener)
         {

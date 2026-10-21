@@ -1,5 +1,5 @@
-using Tank.Net.Client;
 using Tank.Net.Protocol;
+using Tank.Net.Timing;
 using Tank.Net.Transport;
 using Tank.Sim;
 using Tank.Sim.Modes;

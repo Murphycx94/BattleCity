@@ -2,7 +2,7 @@
 
 > 每完成一个小节点就更新本文件。中断后，先读这里，再从“下一步”接着做。
 
-最后更新：2026-10-21（main 上合入后验证通过；用户说“继续开发”，进入清理和 4C）
+最后更新：2026-10-21（main 上 4B 合入后验证通过；4C 清理开工）
 
 ## 当前位置
 
@@ -13,8 +13,8 @@
 - **下一步（新会话从这里接）**：
   1. ~~合入后的验证~~ ✅ 2026-10-21 在 main `9cec686` 上：客户端、服务器、soak 0 警告；Sim 637、Net 210、Art 882、Core 62、Update 42 全过；回环冒烟 20 秒截图计时 6:40、橙车与 HUD 正常；歼灭结算“平局 · 时间到，胜负未分”、房主页脚有 Enter；沙盒六张（`build/shots/main4b-sandbox/`）与 base 逐张看过一致，差异 orbit 30% / heavy 28% 与 main 自己重拍两次的差异（31% / 24%）同量级，是环绕镜头时间差、灌木摇动和粒子。
   2. **用户试玩 4B**：照设计文档 §7.3 的手动验收清单（两台机器局域网、阵亡复活、观战与自由视角、暂停层、房主离开、冻结房主 / 客户端的重连、Tab、被点亮灯、四种车、失焦、中途加入、十车开火、结算 Enter）。试玩发现的问题直接在 main 上修。
-  3. 清理：删草稿 worktree 和分支（`BattleCity-stage4b-draft` / `draft/stage4b-client-match`）、计数 worktree `BattleCity-stage4b-counts`；`BattleCity-stage4a` 已合入可删；feat 分支保留。
-  4. **4C 清理**（设计 §8，衔接清单在设计 §8.1）。
+  3. 清理：删草稿 worktree 和分支（`BattleCity-stage4b-draft` / `draft/stage4b-client-match`）、计数 worktree `BattleCity-stage4b-counts`、已合入的 `BattleCity-stage4a`；feat 分支保留。**2026-10-21 想删时被自动模式的安全检查拦下（不可恢复的本地删除），留给用户决定**：三个目录都没有未提交改动，草稿 / feat / main 的 src、tests 逐字相同。命令：`git worktree remove ../BattleCity-stage4b-draft && git worktree remove ../BattleCity-stage4b-counts && git worktree remove ../BattleCity-stage4a && git branch -D draft/stage4b-client-match`
+  4. **4C 清理**：⏳ 进行中，见下方“4C 节点记录”。计划 `docs/superpowers/plans/2026-10-21-stage4c-cleanup.md`（T1～T7）；分支 `feat/stage4c-cleanup`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage4c`。
   - 环境备注：main 工作目录跑 Godot 前若缺 `src/Tank.Client/.godot/imported/ZCOOLKuaiLe-Regular.ttf-*.fontdata`，从草稿 worktree 同目录拷 `.fontdata` 和 `.md5` 过来（被忽略的目录）。
 - **上一阶段**：3 点亮已 squash 合入 main（`cf0d593`），节点记录见下方“3 节点记录”。分支 `feat/stage3-spotting` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage3` 还在，不再需要时可删
 
@@ -31,6 +31,19 @@
 | 4 联网 | ⏳ 4A、4B 已合入 main（4B `c00908e`，待用户试玩），4C 未开始 | 本文件“当前位置” |
 | 5 5v5 | ⏳ 未开始 | |
 | 6 吃鸡 | ⏳ 未开始 | |
+
+## 4C 节点记录
+
+| # | 节点 | 状态 | 提交 | 说明 |
+|---|---|---|---|---|
+| 1 | 调研 + 计划 | ✅ | `4eead51` | 按设计 §8、§8.1 调研 main `363524c`：新代码引用到的旧件只有 §8.1 列的那些；`ship.sh` 的安装包冒烟测试等 “match started”，4B 后已经等不到（新日志是 “[match] entered match”），`ship.sh test` 也没跑 Sim、Art；两个 `XorShift` 的 `NextUInt` 逐字相同。删代码为主，不走草稿 → 导出计划 → 重放，直接在 feat 分支按任务提交，做完统一审查。`Tank.Net` 整理成 `Protocol`（位流、通道）/ `Transport` / `Timing`（新：`ServerRunner`、`ClockSync`）/ `Battle` 四个命名空间 |
+| 2 | T1 服务器和 Soak 只留新跑法 | ✅ | `2f6b1fd` | `Tank.Server` 只开对局服务器（`--mode coop` 等旧名报“unknown mode”退出 2，`--mode ffa --bots 3` 起来、SIGTERM 正常退出）；Soak 直接跑对局 soak（`--battle` 照收不管）；两者不再引用 `Tank.Core`。soak 四种链路 PASS，数字与 4A 验收逐项相同 |
+| 3 | T2 客户端删旧代码 | ✅ | `0ad1992` | 删 `View/`、`Controls/`、`UI/Hud`、`UI/LobbyScreen`、`Bootstrap/{BotDriver,Session}`；`project.godot` 删 `move_*`、`fire`、`toggle_camera`（`scoreboard`、`toggle_netgraph` 留着）；客户端不再引用 `Tank.Core`（`.sln` 按原 CRLF + BOM 改）。客户端 0 警告，Art 882；回环冒烟画面与 main 一致 |
+| 4 | T3 `Tank.Net` 删旧代码、整理命名空间 | ✅ | `068fa29` | 按计划表：`Protocol`（位流、`Channel`）/ `Transport`（服务器传输口令必填、去掉 `IRoomInfoProvider`；`LanDiscovery` 只列对局房间，`DiscoveredRoom`/`Rooms`）/ `Timing`（新，`ServerRunner`、`ClockSync`，tick 频率必填且须为正）/ `Battle`（`BattleMessage.Discover = 40`、`BattleProtocol.DefaultPort`）；`LoopbackNetwork` 换 `Tank.Sim` 的 `XorShift`、`Deliver` 不再 LINQ（不可重入，重入抛异常）。测试：删旧的，位流 4 条、60 Hz 时钟 4 条保留，`ClockSync30Tests` 挪到 `Timing/`；新增发现请求字节、真 UDP 上房间只回发现请求（4B 客户端的 “40, 1” 也回；拒答时不回）、回环到达顺序、发送中再发要等下一次、种子 7 丢包序列（7、8、13，与旧生成器相同）、tick 频率非正被拒；变异（改随机数、去掉排序）各被抓到。Net 210 → 168。soak 确定性数字与 T1 逐项相同；真 UDP 房主对局 F3 对账 0、丢包 0。`DriveInput` 注释里“旧游戏的键位”一句改掉 |
+| 5 | T4 删 `Tank.Core` | ✅ | `bcd6837` | 删 `src/Tank.Core`（含 3 张旧地图）、`tests/Tank.Core.Tests`、`tools/genmaps.py`，`Tank.sln` 去掉两项；纯度测试挪到 `tests/Tank.Sim.Tests/ArchitectureTests.cs`（只引用基础库、无 `Random`/`DateTime`/`Stopwatch` 字段；往 `SimConstants` 加 `Random` 字段被抓到）。CI 和 `ship.sh` 的测试列表同提交改成 Sim/Art/Net/Update（免得这个提交的 CI 跑不了）。计划里“再加一条不引用 Godot 的断言”没加：引用检查已覆盖。Sim 637 → 639 |
+| 6 | T5 发布脚本 | ✅ | `1464a82` | 安装包冒烟测试要求 “[server] match started” 和 “[match] entered match” 都有，`--quit-after 6`（源码目录 `--headless` 同参数跑过两行都在）。**更正调研结论**：旧冒烟测试没坏，服务器那行一直匹配。实跑 `ship.sh test` 每次都在 `Tank.Art.Tests` 报 CS0012（缺 LiteNetLib）：macOS 的 `$TMPDIR` 在 `/var`→`/private/var` 符号链接下，NuGet 还原对不上被引用项目的路径，`project.assets.json` 的项目引用为空，传递来的包丢了（以前 `ship.sh` 不跑 Art、Net 测试也没直接用 LiteNetLib，所以没暴露；Linux CI 不受影响）；worktree 改取 `pwd -P` 物理路径后连跑 3 次全过（Sim 639、Art 882、Net 168、Update 42，soak 四种 PASS）。另见过一次 `VisionTrackerTests.Updating_allocates_nothing` 在 Release 下失败（约 24 次 Release 运行里 1 次，之后新建构建 5 次、热运行 10 次、`ship.sh` 3 次都没再出现；`Tank.Sim` 没有可变静态状态，像是运行时 JIT/分层编译在测量窗口里分配），记为遗留，没改测试 |
+| 7 | T7 验收（进行中） | ⏳ | | 沙盒六张（`build/shots/t7-sandbox/`）与 main 的差异同量级，kill / wall 看过；歼灭结算正确；**局域网发现**：两实例，房主 `--host --mode ffa`，另一实例停在菜单，列表出现“murphy的房间 各自为战 1/10 等待中 33ms”；**专用服务器** `--mode ffa --bots 3 --port 27094` + 客户端 `--join 127.0.0.1:27094 --autostart` 进局，服务器日志断线、30 秒保留到期、回房正常；**两实例联机**（`pair4b.sh`，团队对战 30 秒）两端进局、结算回房、自动开第二局。客户端 F3 对账 29 次、平均 0.37 m、最大 0.46 m：同参数 `--seed 7` 在 main 上逐项相同，不是 4C 引入的（`--autodrive` 撞车撞物件） |
+| 8 | 审查跟进 + 试玩包 | ✅ | `ca1ffba` | 代码审查无 CRITICAL/HIGH，跟进：发现测试原先“不回别的包”那半句测不到（改顺序，去掉 id 检查的变异被抓到）；`LanDiscovery` 加内部单播目标，新测试：列出回应的房间、忽略坏回应；`Deliver` 处理者抛异常时后面的包留在路上（有测试、变异被抓到）；去掉“旧游戏”字样和 soak 的 `--battle`；冒烟 `--quit-after 10`；`project.godot` 的描述改成新游戏。Net 170。**试玩包**（用户要求先打一个能玩的包）：`/Users/murphy/Desktop/dev/BattleCity-playtest/0.3.0-playtest/`，HEAD `ca1ffba`，三平台 zip + 解压好的 macOS app，版本戳 `0.3.0-playtest`（在线更新源最新是旧游戏的 v0.2.0，版本更高就不会提示“更新”回旧版），安装包冒烟通过。脚本在 scratchpad `playtest_pkg.sh`（会话结束会丢，需要时照 `ship.sh build` 的导出段重写）。`ship.sh build` 本身被检查拦下：远端已有 v0.2.0 指向别的提交，正式发版要先改 `build.json` 版本（没改、没推）。待办：文档审查的约 30 条更正（机器人是房主设定数量不是自动补、看不见的敌人计分块里仍有车号、“准备”不是开局条件、断线保留 30 秒只在对局中、Release 只在改了 build.json 时触发等），改完提交文档，再 squash 合入 main |
 
 ## 4B 节点记录
 

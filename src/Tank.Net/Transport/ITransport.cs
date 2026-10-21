@@ -39,9 +39,3 @@ public interface IClientTransport : IDisposable
 
     TransportStats Stats { get; }
 }
-
-/// <summary>Builds the room description answered to LAN discovery broadcasts.</summary>
-public interface IRoomInfoProvider
-{
-    RoomInfoMessage GetRoomInfo();
-}

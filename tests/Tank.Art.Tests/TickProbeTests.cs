@@ -1,5 +1,5 @@
 using Tank.Client.Online;
-using Tank.Net.Server;
+using Tank.Net.Timing;
 
 namespace Tank.Art.Tests;
 

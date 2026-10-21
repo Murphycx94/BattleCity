@@ -286,6 +286,13 @@ public static class BattleMessages
 
     // ---- Discovery ----
 
+    /// <summary>The broadcast that asks rooms to answer with their <see cref="RoomInfoMessage"/>: the id, then the version (rooms answer whatever it says).</summary>
+    public static void WriteDiscover(BitWriter w)
+    {
+        w.WriteByte((byte)BattleMessage.Discover);
+        w.WriteVarUInt(BattleProtocol.Version);
+    }
+
     public static void Write(BitWriter w, RoomInfoMessage m)
     {
         w.WriteByte((byte)BattleMessage.RoomInfo);

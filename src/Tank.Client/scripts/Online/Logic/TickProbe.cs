@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Tank.Net.Server;
+using Tank.Net.Timing;
 
 namespace Tank.Client.Online;
 

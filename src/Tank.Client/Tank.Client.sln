@@ -5,8 +5,6 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tank.Client", "Tank.Client.csproj", "{1E7408FB-582B-46FA-83B9-FFE2E6AB019E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tank.Core", "..\Tank.Core\Tank.Core.csproj", "{E75B6AAA-CFB0-4E13-9B75-ECE30D1D31A2}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tank.Net", "..\Tank.Net\Tank.Net.csproj", "{29125B4D-1076-4C9D-874A-85E4C2C4973D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tank.Update", "..\Tank.Update\Tank.Update.csproj", "{E6AECBF5-95C5-4300-AB88-9DFB385573DC}"
@@ -24,10 +22,6 @@ Global
 		{1E7408FB-582B-46FA-83B9-FFE2E6AB019E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1E7408FB-582B-46FA-83B9-FFE2E6AB019E}.Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{1E7408FB-582B-46FA-83B9-FFE2E6AB019E}.Release|Any CPU.Build.0 = Debug|Any CPU
-		{E75B6AAA-CFB0-4E13-9B75-ECE30D1D31A2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{E75B6AAA-CFB0-4E13-9B75-ECE30D1D31A2}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{E75B6AAA-CFB0-4E13-9B75-ECE30D1D31A2}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{E75B6AAA-CFB0-4E13-9B75-ECE30D1D31A2}.Release|Any CPU.Build.0 = Release|Any CPU
 		{29125B4D-1076-4C9D-874A-85E4C2C4973D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{29125B4D-1076-4C9D-874A-85E4C2C4973D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{29125B4D-1076-4C9D-874A-85E4C2C4973D}.Release|Any CPU.ActiveCfg = Release|Any CPU

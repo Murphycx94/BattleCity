@@ -1,33 +1,30 @@
 using System.Net;
 using LiteNetLib;
 using LiteNetLib.Utils;
+using Tank.Net.Battle;
 using Tank.Net.Protocol;
 
 namespace Tank.Net.Transport;
 
-/// <summary>UDP server on LiteNetLib. Also answers LAN discovery broadcasts.</summary>
+/// <summary>UDP server on LiteNetLib. Also answers LAN discovery broadcasts (<see cref="BattleMessage.Discover"/>).</summary>
 public sealed class LiteNetServerTransport : IServerTransport
 {
     private readonly EventBasedNetListener _listener = new();
     private readonly NetManager _manager;
     private readonly int _port;
-    private readonly IRoomInfoProvider? _roomInfo;
+    private readonly string _connectKey;
+    private readonly Func<BitWriter, bool>? _roomInfo;
     private readonly BitWriter _discoveryWriter = new(256);
     private readonly NetDataWriter _reply = new();
     private ITransportHandler? _handler;
 
-    private readonly string _connectKey;
-    private readonly Func<BitWriter, bool>? _battleRoomInfo;
-
-    /// <param name="connectKey">What a client must present to connect: the old game's key, or <c>BattleProtocol.ConnectKey</c>.</param>
-    /// <param name="battleRoomInfo">Writes a battle room's reply to a discovery broadcast, or returns false for none.</param>
-    public LiteNetServerTransport(int port, IRoomInfoProvider? roomInfo = null, int maxConnections = 8, string connectKey = ProtocolInfo.ConnectKey,
-        Func<BitWriter, bool>? battleRoomInfo = null)
+    /// <param name="connectKey">What a client must present to connect (<see cref="BattleProtocol.ConnectKey"/>).</param>
+    /// <param name="roomInfo">Writes the reply to a discovery broadcast, or returns false for none; null: discovery is not answered.</param>
+    public LiteNetServerTransport(int port, int maxConnections, string connectKey, Func<BitWriter, bool>? roomInfo = null)
     {
         _port = port;
-        _roomInfo = roomInfo;
         _connectKey = connectKey;
-        _battleRoomInfo = battleRoomInfo;
+        _roomInfo = roomInfo;
         _manager = new NetManager(_listener)
         {
             ChannelsCount = 2,
@@ -94,15 +91,14 @@ public sealed class LiteNetServerTransport : IServerTransport
 
     private void OnUnconnected(IPEndPoint remote, NetPacketReader reader, UnconnectedMessageType type)
     {
-        if (_roomInfo is null && _battleRoomInfo is null) return;
+        if (_roomInfo is null) return;
         var data = reader.GetRemainingBytesSpan();
         try
         {
             var r = new BitReader(data);
-            if ((MessageType)r.ReadByte() != MessageType.Discover) return;
+            if (r.ReadByte() != (byte)BattleMessage.Discover) return;
             _discoveryWriter.Reset();
-            if (_roomInfo is not null) Messages.Write(_discoveryWriter, _roomInfo.GetRoomInfo());
-            else if (!_battleRoomInfo!(_discoveryWriter)) return;
+            if (!_roomInfo(_discoveryWriter)) return;
             _reply.Reset();
             _reply.Put(_discoveryWriter.Data);
             _manager.SendUnconnectedMessage(_reply, remote);

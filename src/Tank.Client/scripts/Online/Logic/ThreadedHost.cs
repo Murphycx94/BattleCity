@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using Tank.Net.Battle;
-using Tank.Net.Server;
+using Tank.Net.Timing;
 using Tank.Net.Transport;
 using Tank.Sim;
 
@@ -25,7 +25,7 @@ internal sealed class ThreadedHost : IHostBackend
     {
         BattleServer? server = null;
         // Discovery replies come from the runner thread's Poll, after `server` is assigned below.
-        var transport = new LiteNetServerTransport(settings.Port, null, BattleProtocol.MaxPlayers, BattleProtocol.ConnectKey,
+        var transport = new LiteNetServerTransport(settings.Port, BattleProtocol.MaxPlayers, BattleProtocol.ConnectKey,
             w => server!.WriteRoomInfo(w));
         try
         {

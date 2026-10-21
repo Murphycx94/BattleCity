@@ -10,7 +10,7 @@ public class LanRoomRowTests
 {
     private static LanRoomRow Row(string name = "Alpha", BattleMode mode = BattleMode.TeamBattle, int players = 3, bool running = false,
         int version = BattleProtocol.Version, int ping = 7) =>
-        LanRoomRow.From(new DiscoveredBattleRoom(new IPEndPoint(IPAddress.Parse("192.168.1.20"), 47001),
+        LanRoomRow.From(new DiscoveredRoom(new IPEndPoint(IPAddress.Parse("192.168.1.20"), 47001),
             new RoomInfoMessage(version, name, mode, players, BattleProtocol.MaxPlayers, running, 47001), ping, 0));
 
     [Fact]

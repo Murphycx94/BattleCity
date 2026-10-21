@@ -10,7 +10,6 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Tank.Core\Tank.Core.csproj" />
     <ProjectReference Include="..\..\src\Tank.Net\Tank.Net.csproj" />
   </ItemGroup>
   <ItemGroup>

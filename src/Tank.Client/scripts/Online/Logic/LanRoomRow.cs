@@ -16,7 +16,7 @@ public sealed record LanRoomRow(IPEndPoint EndPoint, string Text, bool Joinable,
 {
     private const int NameColumns = 18, ModeColumns = 12, StateColumns = 7;
 
-    public static LanRoomRow From(DiscoveredBattleRoom room)
+    public static LanRoomRow From(DiscoveredRoom room)
     {
         RoomInfoMessage info = room.Info;
         bool versionOk = info.ProtocolVersion == BattleProtocol.Version;

@@ -6,7 +6,7 @@ namespace Tank.Client.Driving;
 /// <summary>
 /// The keys and buttons for driving and shooting, shared by the sandbox and a match: W/A/S/D, the left button to fire,
 /// the right button for free look, 1 and 2 to pick AP or HE (kept until changed) and Shift for the sniper sight. The
-/// actions are registered at runtime so project.godot and the old game's bindings stay untouched. A fire click shorter
+/// actions are registered at runtime (<see cref="RegisterActions"/>), not in project.godot. A fire click shorter
 /// than a tick is latched (<see cref="FireLatch"/>); a caller that may see frames without a tick uses <see cref="Peek"/>
 /// each frame and <see cref="EndTick"/> only after a tick has run, one that samples once per tick uses <see cref="Sample"/>.
 /// </summary>

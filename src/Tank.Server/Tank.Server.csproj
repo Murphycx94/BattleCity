@@ -5,7 +5,6 @@
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Tank.Core\Tank.Core.csproj" />
     <ProjectReference Include="..\Tank.Net\Tank.Net.csproj" />
   </ItemGroup>
 </Project>

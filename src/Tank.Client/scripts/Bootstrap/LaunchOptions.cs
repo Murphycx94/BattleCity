@@ -1,6 +1,5 @@
 using System.Globalization;
 using Tank.Net.Battle;
-using Tank.Net.Protocol;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
@@ -32,7 +31,7 @@ public sealed record LaunchOptions
     public string? Name { get; init; }
     public bool Host { get; init; }
     public string? JoinAddress { get; init; }
-    public int Port { get; init; } = ProtocolInfo.DefaultPort;
+    public int Port { get; init; } = BattleProtocol.DefaultPort;
 
     /// <summary>The mode to host (and the host's auto-room to set); null leaves the server's default.</summary>
     public BattleMode? Mode { get; init; }

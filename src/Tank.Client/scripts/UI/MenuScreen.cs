@@ -1,7 +1,7 @@
 using System.Net;
 using Godot;
 using Tank.Client.Online;
-using Tank.Net.Protocol;
+using Tank.Net.Battle;
 
 namespace Tank.Client.UI;
 
@@ -168,7 +168,7 @@ public partial class MenuScreen : Control
         row.AddChild(_address);
         row.AddChild(UiKit.Button("加入", JoinByAddress));
         col.AddChild(row);
-        var note = UiKit.Label($"房间靠 UDP 广播被发现，只会搜到使用默认端口 {ProtocolInfo.DefaultPort} 的房间：房主改了端口时，请输入“地址:端口”加入。" +
+        var note = UiKit.Label($"房间靠 UDP 广播被发现，只会搜到使用默认端口 {BattleProtocol.DefaultPort} 的房间：房主改了端口时，请输入“地址:端口”加入。" +
                                "访客 Wi-Fi 或开启了 AP 隔离的网络也搜不到，同样请用地址加入。", 13, UiKit.Dim);
         note.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         col.AddChild(note);
@@ -217,7 +217,7 @@ public partial class MenuScreen : Control
             SetStatus("请输入房主的 IP 地址。", error: true);
             return;
         }
-        int port = ProtocolInfo.DefaultPort;
+        int port = BattleProtocol.DefaultPort;
         int colon = text.LastIndexOf(':');
         if (colon > 0 && int.TryParse(text[(colon + 1)..], out int p))
         {

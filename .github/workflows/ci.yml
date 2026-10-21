@@ -15,7 +15,6 @@ jobs:
           global-json-file: global.json
       - name: Unit + integration tests (with coverage)
         run: |
-          dotnet test tests/Tank.Core.Tests --collect:"XPlat Code Coverage" --results-directory coverage/core
           dotnet test tests/Tank.Sim.Tests --collect:"XPlat Code Coverage" --results-directory coverage/sim
           dotnet test tests/Tank.Art.Tests --collect:"XPlat Code Coverage" --results-directory coverage/art
           dotnet test tests/Tank.Net.Tests --collect:"XPlat Code Coverage" --results-directory coverage/net

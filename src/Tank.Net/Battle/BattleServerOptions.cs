@@ -1,4 +1,3 @@
-using Tank.Net.Protocol;
 using Tank.Sim.Modes;
 
 namespace Tank.Net.Battle;
@@ -6,7 +5,7 @@ namespace Tank.Net.Battle;
 public sealed record BattleServerOptions
 {
     public string RoomName { get; init; } = "坦克 3D";
-    public int Port { get; init; } = ProtocolInfo.DefaultPort;
+    public int Port { get; init; } = BattleProtocol.DefaultPort;
     public BattleMode Mode { get; init; } = BattleMode.TeamBattle;
 
     /// <summary>Bots added when a match starts, filling the thinner team first.</summary>

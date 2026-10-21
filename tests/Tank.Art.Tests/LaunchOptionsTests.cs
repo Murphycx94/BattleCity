@@ -88,7 +88,7 @@ public class LaunchOptionsTests
     }
 
     [Theory]
-    [InlineData("coop")]   // the old game's mode
+    [InlineData("coop")]   // a mode the first version of the game had
     [InlineData("")]
     public void A_bad_mode_warns_with_the_valid_ones_and_leaves_the_default(string value)
     {
