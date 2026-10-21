@@ -5,7 +5,7 @@
 ```text
 BattleCity/
 ├── Tank.sln
-├── global.json                    # 锁定 .NET SDK 8.0.4xx
+├── global.json                    # .NET SDK 8.0.425 起（可用更高的 8.0）
 ├── Directory.Build.props          # net8.0、C# 12
 ├── Directory.Packages.props       # 统一管理 NuGet 包版本
 ├── build.json                     # 版本号和一句话说明（发布用）
@@ -30,7 +30,7 @@ BattleCity/
 │   └── Tank.Client/               # Godot 4 工程（project.godot + C#）
 │       ├── scenes/                # Main.tscn（主场景）、Sandbox.tscn（试驾场，可直接启动）
 │       ├── scripts/               # 见 §3
-│       ├── shaders/               # 卡通着色器：地形、坦克、草、草丛、岩石、墙、树、天空、烟团
+│       ├── shaders/               # 卡通着色器：地形、远景地面、坦克、草、草丛、岩石、墙、树、天空、烟团
 │       └── assets/fonts/          # 站酷快乐体和 OFL 许可证
 ├── tests/
 │   ├── Tank.Sim.Tests/            # 仿真规则，含 ArchitectureTests（纯度检查）
@@ -58,7 +58,7 @@ flowchart LR
   ArtTests[Tank.Art.Tests] -. 编译客户端的 Logic/ 等源文件 .-> Client
 ```
 
-- **`Tank.Sim` 不依赖任何东西**：只引用基础库，不许用系统时间、`Stopwatch` 和 `System.Random`。`tests/Tank.Sim.Tests/ArchitectureTests.cs` 检查。这样服务器和客户端预测跑的是同一份可重放的代码，测试也都可复现。
+- **`Tank.Sim` 不依赖任何东西**：只引用基础库，不许用系统时间、`Stopwatch` 和 `System.Random`。`tests/Tank.Sim.Tests/ArchitectureTests.cs` 按程序集引用和字段类型检查（直接调用 `DateTime.Now` 查不出来，靠审查）。这样服务器和客户端预测跑的是同一份可重放的代码，测试也都可复现。
 - **`Tank.Net` 不依赖 Godot**：`BattleServer`、`BattleClient` 在测试和 soak 里直接用。
 - **客户端的 `Logic/` 目录不许 `using Godot`**：所有 `scripts/**/Logic/**` 和网格库 `Art/Mesh/**`，以及几个点名的文件（`Art/Palette.cs`、`Bootstrap/LaunchOptions.cs`、车辆外观数据等），由 `Tank.Art.Tests.csproj` 直接编译进测试项目。里面一旦用了 Godot 就编译不过。
 - 客户端只负责显示和采集输入，**不做玩法判定**；试驾场在本地跑 `Simulation`，对局只读 `BattleClient`。
@@ -105,14 +105,14 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 
 ## 5. 测试
 
-全部测试不需要 Godot，`dotnet test` 就能跑。CI（`.github/workflows/ci.yml`）每次推送和 PR 都跑四个测试项目（收集覆盖率，没有门禁）、soak，再编译专用服务器和客户端程序集。
+全部测试不需要 Godot，`dotnet test` 就能跑。CI（`.github/workflows/ci.yml`）推到 main 和每个 PR 都跑四个测试项目（收集覆盖率，没有门禁）、soak，再编译专用服务器和客户端程序集。
 
 | 项目 | 内容 | 例子 |
 |---|---|---|
 | `Tank.Sim.Tests` | 仿真的每条规则：地形采样和求交、平地和坡上的运动、爬坡上限、碰撞、弹道、装甲盒求交、击穿和跳弹的边界、高爆弹衰减、散布、墙和草丛被毁、撞墙、点亮公式和视线、三种模式的规则、机器人、出生点和路点、架构纯度 | `PenetrationTests`、`SpottingTests`、`MatchRulesTests`、`SkirmishBotTests` |
 | `Tank.Net.Tests` | 位流；输入、快照（完整和增量）、事件、地图、房间消息的编码往返和截断乱包；可见性裁剪（字节流里搜不到看不见的敌人）；预测和对账（完美网络零修正、坏网络下有上限并收敛）；插值；时钟同步；发现；回环网络下三种模式各打完一局；断线重连、中途加入、版本不符、房间已满；服务器每 tick 零分配 | `BattleIntegrationTests`、`BattleServerTests`、`ClockSync30Tests` |
 | `Tank.Art.Tests` | 网格库的各种形状、调色板和着色器默认值一致、车辆外观数据、HUD 布局（1600×900、1600×1200、2100×900）、启动参数解析、房间规则、观战状态、重连逻辑、房主线程 | `HudLayoutTests`、`LaunchOptionsTests`、`ReconnectorTests` |
-| `Tank.Update.Tests` | 版本比较、清单解析和签名校验、解包（含防路径穿越）、找安装目录、替换和失败回退 | `UpdateTests` |
+| `Tank.Update.Tests` | 版本比较、清单解析和签名校验、解包（含防路径穿越）、找安装目录、替换和失败回退 | `UpdaterTests`、`ManifestAndSignatureTests` |
 | `Tank.Soak` | 4 个脚本客户端 + 4 个机器人，团队对战，四种模拟链路各 60 秒，超标就非零退出 | 验收表见 [03 §11](03-netcode.md#11-网络手感验收标准) |
 
 **Godot 截图自动化**：画面相关的改动靠启动参数跑出截图人工比对（参数全表在 `Bootstrap/LaunchOptions.cs` 文件头）：
@@ -122,7 +122,7 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 - `--hud-demo NAME`：HUD 画廊，用预制数据在纯色底上画 HUD 的各种状态（`timer`、`feed`、`respawn`、`spectate`、`scoreboard`、`results-win` 等）；
 - 试驾场：`--sandbox`、`--camera-preset NAME`（固定机位）、`--range-demo NAME`（自动打靶、撞墙、看点亮）、`--fps-log`（每秒打印帧时间）。
 
-**打包冒烟**：`tools/ship.sh build` 在 macOS 上把导出的游戏启动一次（`--host --bots 1 --autostart`），日志里要先后出现服务器开局和“[match] entered match”，才算打包成功。
+**打包冒烟**：`tools/ship.sh build` 在 macOS 上把导出的游戏启动一次（`--headless -- --host --port 27091 --bots 1 --autostart --quit-after 10`），日志里要同时有“[server] match started”和“[match] entered match”，才算打包成功。
 
 **人工验收**：每个阶段结束时用户试玩。联网的手动清单见 [阶段 4 联网设计 §7.3](superpowers/specs/2026-10-18-stage4-networking-design.md)。
 
