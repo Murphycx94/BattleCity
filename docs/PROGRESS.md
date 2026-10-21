@@ -2,7 +2,7 @@
 
 > 每完成一个小节点就更新本文件。中断后，先读这里，再从“下一步”接着做。
 
-最后更新：2026-10-20（4B 全部代码已 squash 合入 main `c00908e`，按用户要求暂停开发）
+最后更新：2026-10-21（main 上合入后验证通过；用户说“继续开发”，进入清理和 4C）
 
 ## 当前位置
 
@@ -11,7 +11,7 @@
 - **用户的选择**：三种模式都做（团队对战可复活、团队歼灭不复活、各自为战最后存活者赢）；简单的服务器端机器人；主菜单加试驾场；一局最多 10 辆车；各自为战不缩圈、限时 10 分钟；用试驾场地图去掉靶车
 - **进度**：4A 已 squash 合入 main（`44bfda6`）。**4B 客户端对局：Task 1～11 全部完成，按用户要求 squash 合入 main（`c00908e`），暂停开发。** feat 分支 `feat/stage4b-client-match`（目录 `/Users/murphy/Desktop/dev/BattleCity-stage4b`，HEAD `ade7d49`）：蓝图 `6c4d020`、计划 `3f53024`、Task 1 `f3f501b`、2 `a473cd5`、3 `efbbd54`、4 `5779bcb`、5 `1e5be48`、6 `0f5e864`、7 `ee3e0a5`、8 `0a901a7`、9 `7295e1d`、10 `1c85191`、11 `ade7d49`。Task 3～11 是用户说“全部合到 main”后由主会话直接按计划用 `plan_step.py` 机械应用、按计划的提交命令提交的（没有逐任务派实现者、没逐任务截图），每个任务都与草稿对应提交 0 差异；合入前在 feat 上验证：三个项目 0 警告，Sim 637、Net 210、Art 882、Core 62、Update 42 全过。草稿 `draft/stage4b-client-match`（`/Users/murphy/Desktop/dev/BattleCity-stage4b-draft`，HEAD `87be7ea`）与计数 worktree `BattleCity-stage4b-counts` 还保留着，没删。开发脚本在 `/Users/murphy/Desktop/dev/BattleCity-dev-scripts/`
 - **下一步（新会话从这里接）**：
-  1. **合入后的验证（还没做）**：在 main 上 `dotnet build src/Tank.Client` 后跑 Godot 冒烟（回环 `--loopback --host --bots 3 --autostart --seed 7 --autodrive`、结算 `--mode annihilation --bots 1 --match-seconds 20 --shot-after ended:3`）和沙盒六张回归（`baseline4b.sh`）；草稿上这些都验证过，main 的代码与草稿逐字一致，跑一遍只为确认。新 worktree 跑 Godot 要先有 `.godot/` 字体导入缓存（见下）。
+  1. ~~合入后的验证~~ ✅ 2026-10-21 在 main `9cec686` 上：客户端、服务器、soak 0 警告；Sim 637、Net 210、Art 882、Core 62、Update 42 全过；回环冒烟 20 秒截图计时 6:40、橙车与 HUD 正常；歼灭结算“平局 · 时间到，胜负未分”、房主页脚有 Enter；沙盒六张（`build/shots/main4b-sandbox/`）与 base 逐张看过一致，差异 orbit 30% / heavy 28% 与 main 自己重拍两次的差异（31% / 24%）同量级，是环绕镜头时间差、灌木摇动和粒子。
   2. **用户试玩 4B**：照设计文档 §7.3 的手动验收清单（两台机器局域网、阵亡复活、观战与自由视角、暂停层、房主离开、冻结房主 / 客户端的重连、Tab、被点亮灯、四种车、失焦、中途加入、十车开火、结算 Enter）。试玩发现的问题直接在 main 上修。
   3. 清理：删草稿 worktree 和分支（`BattleCity-stage4b-draft` / `draft/stage4b-client-match`）、计数 worktree `BattleCity-stage4b-counts`；`BattleCity-stage4a` 已合入可删；feat 分支保留。
   4. **4C 清理**（设计 §8，衔接清单在设计 §8.1）。
