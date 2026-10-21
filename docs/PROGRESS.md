@@ -2,7 +2,7 @@
 
 > 每完成一个小节点就更新本文件。中断后，先读这里，再从“下一步”接着做。
 
-最后更新：2026-10-21（4C 已 squash 合入 main `88044b6`；用户要求发版，v0.3.0 已推送，GitHub Release 工作流在跑）
+最后更新：2026-10-21（v0.3.0 已发版：GitHub Release + 游戏内更新源；文档更正已推送）
 
 ## 当前位置
 
@@ -14,7 +14,7 @@
   1. ~~合入后的验证~~ ✅ 2026-10-21 在 main `9cec686` 上：客户端、服务器、soak 0 警告；Sim 637、Net 210、Art 882、Core 62、Update 42 全过；回环冒烟 20 秒截图计时 6:40、橙车与 HUD 正常；歼灭结算“平局 · 时间到，胜负未分”、房主页脚有 Enter；沙盒六张（`build/shots/main4b-sandbox/`）与 base 逐张看过一致，差异 orbit 30% / heavy 28% 与 main 自己重拍两次的差异（31% / 24%）同量级，是环绕镜头时间差、灌木摇动和粒子。
   2. **用户试玩 4B**：照设计文档 §7.3 的手动验收清单（两台机器局域网、阵亡复活、观战与自由视角、暂停层、房主离开、冻结房主 / 客户端的重连、Tab、被点亮灯、四种车、失焦、中途加入、十车开火、结算 Enter）。试玩发现的问题直接在 main 上修。
   3. 清理：删草稿 worktree 和分支（`BattleCity-stage4b-draft` / `draft/stage4b-client-match`）、计数 worktree `BattleCity-stage4b-counts`、已合入的 `BattleCity-stage4a`；feat 分支保留。**2026-10-21 想删时被自动模式的安全检查拦下（不可恢复的本地删除），留给用户决定**：三个目录都没有未提交改动，草稿 / feat / main 的 src、tests 逐字相同。命令：`git worktree remove ../BattleCity-stage4b-draft && git worktree remove ../BattleCity-stage4b-counts && git worktree remove ../BattleCity-stage4a && git branch -D draft/stage4b-client-match`
-  4. **4C 清理**：✅ 已 squash 合入 main（`88044b6`），见下方“4C 节点记录”。**v0.3.0 已发版**（用户 2026-10-21 要求“直接发个版，推送到 github 上发版”）：发布说明 `docs/releases/v0.3.0.md`（`ccef974`），`ship.sh bump` 提交 `6df003c`，推送 main 触发 Release 工作流。**下一步**：确认 Release 工作流成功、Release 页面和更新源都有 v0.3.0；按文档审查的约 30 条更正 `docs/01～04`、README（见 4C 节点 8）；用户试玩反馈。计划 `docs/superpowers/plans/2026-10-21-stage4c-cleanup.md`（T1～T7）；分支 `feat/stage4c-cleanup`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage4c`。
+  4. **4C 清理**：✅ 已 squash 合入 main（`88044b6`），见下方“4C 节点记录”。**v0.3.0 已发版**（用户 2026-10-21 要求“直接发个版，推送到 github 上发版”）：发布说明 `docs/releases/v0.3.0.md`（`ccef974`），`ship.sh bump` 提交 `6df003c`，推送 main 触发 Release 工作流：CI 和 Release 都成功，https://github.com/Murphycx94/BattleCity/releases/tag/v0.3.0 （预发布，三平台客户端 + 四平台服务器 + SHA256SUMS；CI 上的 macOS 安装包冒烟“开房、机器人加入、开局、进入对局画面正常”）。**更新源**：仓库没配 `UPDATES_TOKEN` secret，工作流跳过了这一步（v0.2.0 当时也是本机补发的）；本机补发：从 Release 下载附件（`SHA256SUMS.txt` 校验通过，CI 产物下载太慢只有约 70 KB/s 所以没用），按 CI 格式重建 `build/release/RELEASE.json`（commit `6df003c`，built_at 取 CI 日志的 06:58:12），`DRY_RUN` 核对后 `tools/ship.sh feed`：BattleCity-updates 的 Release v0.3.0 已建、`stable/manifest.json` 已推送，玩家已能读到。文档按审查改完（`fdf2510`）。以后发版想让 CI 自己推更新源，要在仓库里配 `UPDATES_TOKEN`。**下一步**：用户试玩 v0.3.0 的反馈（设计 §7.3 清单）；之后阶段 5。计划 `docs/superpowers/plans/2026-10-21-stage4c-cleanup.md`（T1～T7）；分支 `feat/stage4c-cleanup`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage4c`。
   - 环境备注：main 工作目录跑 Godot 前若缺 `src/Tank.Client/.godot/imported/ZCOOLKuaiLe-Regular.ttf-*.fontdata`，从草稿 worktree 同目录拷 `.fontdata` 和 `.md5` 过来（被忽略的目录）。
 - **上一阶段**：3 点亮已 squash 合入 main（`cf0d593`），节点记录见下方“3 节点记录”。分支 `feat/stage3-spotting` 保留；工作目录 `/Users/murphy/Desktop/dev/BattleCity-stage3` 还在，不再需要时可删
 
