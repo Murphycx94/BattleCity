@@ -77,15 +77,24 @@ public sealed partial class BattleClient
     private void HandleMatchStart(MatchStartMessage msg)
     {
         // Build and check everything before touching any state: a bad map or prop id must leave the match as it was.
-        Battlefield field = BuildField(msg.Map);
+        bool sameMatch = Phase == BattlePhase.InMatch && MatchInfo is { } current && current.MatchNumber == msg.MatchNumber;
+        Battlefield field;
+        if (msg.Map is { } map) field = BuildField(map);
+        else if (sameMatch && Field is { } kept) field = kept.Fresh();   // a resync without the map: ours, every prop as new, as Build() would give
+        else
+        {
+            // The server thinks this connection has the map, and we don't: drop it and ask for the state with the map.
+            _needMap = true;
+            throw new ProtocolException($"A match start without the map for match {msg.MatchNumber}, which we have no map of.");
+        }
         ApplyProps(field, msg.Props);
 
         // Same match number (and not a gap of many seconds either way): the server is resyncing us (a reconnect), the store stays.
         // Anything else is a new match.
-        bool resync = Phase == BattlePhase.InMatch && MatchInfo is { } current && current.MatchNumber == msg.MatchNumber
-            && (Store.NewestTick < 0 || System.Math.Abs((long)msg.CurrentTick - Store.NewestTick) <= BattleProtocol.MaxTickLead);
-        MatchInfo = msg;
+        bool resync = sameMatch && (Store.NewestTick < 0 || System.Math.Abs((long)msg.CurrentTick - Store.NewestTick) <= BattleProtocol.MaxTickLead);
+        MatchInfo = msg.Map is null ? msg with { Map = MatchInfo!.Map } : msg;   // MatchInfo always carries the map
         Field = field;
+        _needMap = false;
         OwnTankId = msg.MyTankId;
         _pendingEvents.Clear();
         _remoteShells.Clear();
@@ -102,6 +111,7 @@ public sealed partial class BattleClient
     private void LeaveMatch()
     {
         Phase = BattlePhase.Room;
+        _needMap = false;   // no match to ask about
         MatchInfo = null;
         Field = null;
         OwnTankId = 0;

@@ -15,12 +15,13 @@ using SN = System.Numerics;
 namespace Tank.Client.Sandbox;
 
 /// <summary>
-/// The practice targets, all of team <see cref="TargetTeam"/>: blue-grey tanks of every kind on
-/// <see cref="SandboxMap.TargetSpots"/> that sit still with their guns straight ahead and watch nobody, and then the
-/// patrolling target (stage 3 design §4.2), a light tank that a <see cref="PatrolDriver"/> drives round
-/// <see cref="SandboxMap.PatrolRoute"/> from <see cref="SandboxMap.PatrolStart"/>, firing short of the player from the
-/// bushes; while parked it holds still at its start instead. A knocked-out target blows up, throws its turret (a tank
-/// destroyer has none), chars and smokes; ten seconds later it is revived where it stands (the patrol then drives on).
+/// The practice targets, all of team <see cref="TargetTeam"/>: blue-grey tanks of every kind on the map's
+/// <see cref="MapSite.Targets"/> that sit still with their guns straight ahead and watch nobody, and then, on a map whose
+/// site <see cref="MapSite.HasPatrol"/> (the sandbox's), the patrolling target (stage 3 design §4.2), a light tank that a
+/// <see cref="PatrolDriver"/> drives round <see cref="SandboxMap.PatrolRoute"/> from <see cref="SandboxMap.PatrolStart"/>,
+/// firing short of the player from the bushes; while parked it holds still at its start instead. A knocked-out target
+/// blows up, throws its turret (a tank destroyer has none), chars and smokes; ten seconds later it is revived where it
+/// stands (the patrol then drives on).
 /// A target the player's team doesn't see (<see cref="VisionTracker"/>) isn't drawn. Each <see cref="Sync"/> also notes
 /// every target's head point, health and whether it is shown, for the HUD.
 /// </summary>
@@ -33,7 +34,7 @@ public partial class TargetRange : Node3D
 
     private readonly List<Target> _targets = new();
     private VisionTracker _vision = null!;
-    private PatrolDriver _driver = null!;
+    private PatrolDriver? _driver;   // null without a patrol
     private bool _patrolParked;
 
     private sealed class Target
@@ -49,26 +50,28 @@ public partial class TargetRange : Node3D
         public bool Shown = true;
     }
 
-    /// <summary>How many targets there are: the still ones, in <see cref="SandboxMap.TargetSpots"/> order, then the patrol.</summary>
+    /// <summary>How many targets there are: the still ones, in the site's <see cref="MapSite.Targets"/> order, then the patrol if any.</summary>
     public int Count => _targets.Count;
 
-    /// <summary>The index of the patrolling target, after the still ones.</summary>
-    public static int PatrolIndex => SandboxMap.TargetSpots.Count;
+    /// <summary>The index of the patrolling target, after the still ones; −1 on a map without one.</summary>
+    public int PatrolIndex { get; private set; } = -1;
 
     /// <summary>
-    /// Adds the targets to the simulation (after the player, so they take the next slots), tells
-    /// <paramref name="vision"/> the still ones watch nobody, and builds their models. With <paramref name="parkPatrol"/>
-    /// the patrol stays at its start, holds its fire and watches nobody either (range demos other than the spotting one,
-    /// so their screenshots stay as they were, the spotted lamp included).
+    /// Adds <paramref name="site"/>'s targets to the simulation (after the player, so they take the next slots), tells
+    /// <paramref name="vision"/> the still ones watch nobody, and builds their models; then the patrol, if the site has
+    /// one. With <paramref name="parkPatrol"/> the patrol stays at its start, holds its fire and watches nobody either
+    /// (range demos other than the spotting one, so their screenshots stay as they were, the spotted lamp included).
     /// </summary>
-    public void Build(Simulation sim, VisionTracker vision, bool parkPatrol)
+    public void Build(Simulation sim, VisionTracker vision, bool parkPatrol, MapSite site)
     {
         (_vision, _patrolParked) = (vision, parkPatrol);
-        foreach (TargetSpot spot in SandboxMap.TargetSpots)
+        foreach (TargetSpot spot in site.Targets)
         {
             Target target = Add(sim, spot.Spec, spot.Position, spot.Yaw);
             vision.SetWatching(target.Id, false);
         }
+        if (!site.HasPatrol) return;
+        PatrolIndex = _targets.Count;
         _driver = new PatrolDriver(SandboxMap.PatrolRoute);
         SN.Vector2 start = SandboxMap.PatrolStart;
         Target patrol = Add(sim, SandboxMap.PatrolSpec, start, Angles.YawOf(SandboxMap.PatrolRoute[0].Position - start), dust: true);
@@ -111,13 +114,13 @@ public partial class TargetRange : Node3D
 
     /// <summary>
     /// The targets' commands for <paramref name="tick"/>; <paramref name="commands"/> starts at the first target's slot.
-    /// The still ones hold with their guns straight ahead; the patrol drives, firing short of <paramref name="player"/>,
-    /// unless parked.
+    /// The still ones hold with their guns straight ahead; the patrol (if there is one) drives, firing short of
+    /// <paramref name="player"/>, unless parked.
     /// </summary>
     public void FillInputs(Span<InputCmd> commands, int tick, Simulation sim, SN.Vector2 player)
     {
         for (int i = 0; i < _targets.Count; i++) commands[i] = new InputCmd(tick, 0, 0, _targets[i].Yaw, 0f, false);
-        if (!_patrolParked)
+        if (_driver is not null && !_patrolParked)
         {
             Target patrol = _targets[PatrolIndex];
             commands[PatrolIndex] = _driver.Command(sim.Tanks[patrol.Slot], sim.Field, tick, player);
@@ -131,7 +134,7 @@ public partial class TargetRange : Node3D
     }
 
     /// <summary>
-    /// Revives wrecks that have lain for <see cref="ReviveSeconds"/>, and restocks the patrol once its AP racks are empty.
+    /// Revives wrecks that have lain for <see cref="ReviveSeconds"/>, and restocks the patrol (if any) once its AP racks are empty.
     /// Call before stepping the simulation.
     /// </summary>
     public void ReviveDue(Simulation sim)
@@ -143,6 +146,7 @@ public partial class TargetRange : Node3D
                 sim.Revive(t.Id);
                 t.WreckedTick = -1;
             }
+        if (PatrolIndex < 0) return;
         Target patrol = _targets[PatrolIndex];
         if (sim.Tanks[patrol.Slot].ApLeft == 0) sim.Restock(patrol.Id);   // it fires AP for as long as the sandbox runs
     }

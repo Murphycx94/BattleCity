@@ -1,5 +1,6 @@
 using System.Globalization;
 using Tank.Net.Battle;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
@@ -13,9 +14,11 @@ namespace Tank.Client.Bootstrap;
 /// --netgraph（F3 网络面板一开始就打开）  --screenshot FILE（一次运行只截一张）  --screenshot-at SECONDS（还没进过对局时从启动起算，在菜单、房间或 HUD 画廊里截；
 /// 一进对局就交给对局，从对局场景创建起算；--shot-after、--fx-shot 只由对局或试驾场截）  --quit-after SECONDS
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场和对局：自动驾驶并开火，用于截图）
-/// --camera-preset front|side|close|closerear|sprocket|hill|spin|orbit|bush|target|yard|gate|patrol（试驾场和对局：固定镜头，用于截图和测帧）  --fps-log（试驾场和对局：每秒打印平均和最差帧时间）
+/// --map sandbox|riverland（开房时房间的地图，默认 riverland；试驾场用哪张地图，默认 sandbox；写错时警告并用默认的）
+/// --camera-preset front|side|close|closerear|sprocket|spin|orbit|target，试驾场地图另有 hill|bush|yard|gate|patrol，河谷另有 overview|town|ford|forest|plateau|dunes|map（试驾场和对局：固定镜头，用于截图和测帧）  --fps-log（试驾场和对局：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场和对局：以狙击镜视角启动，用于截图）
-/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp（试驾场：自动对靶车开炮或开车撞墙，用于截图）
+/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp，河谷上是 house|ram-house|trees|ford
+/// （试驾场：自动对靶车开炮、开车撞墙，河谷上打塌、撞塌房子、开进树林、涉过浅滩，用于截图）
 /// --shot-after fire|hit|kill|prop|down|death|ended:SECONDS（玩家第一次开炮、第一次命中坦克、第一次击毁坦克、第一次有墙受伤（prop，仅试驾场）、第一次有物件被毁（down，仅试驾场）、
 /// 自己的坦克第一次被击毁（death，仅对局）或对局结算开始（ended，仅对局）后再过 SECONDS 秒截图）
 /// --tank light|medium|heavy|td（开局的车型：试驾场里默认中坦；房间里则在连上后自动选这辆）  --spot-debug（试驾场：一开始就显示点亮调试文字，同 V 键）
@@ -49,6 +52,9 @@ public sealed record LaunchOptions
 
     /// <summary>Start straight in the sandbox (<c>--sandbox</c>).</summary>
     public bool Sandbox { get; init; }
+
+    /// <summary>The <see cref="MapCatalog"/> id of the map to use (<c>--map</c>), in the catalog's spelling; null when not given or not a known map.</summary>
+    public string? Map { get; init; }
 
     /// <summary>A match length in seconds that replaces the mode's (<c>--match-seconds</c>); null for the mode's own.</summary>
     public double? MatchSeconds { get; init; }
@@ -110,6 +116,7 @@ public sealed record LaunchOptions
                 "--autostart" => o with { AutoStart = true },
                 "--loopback" => o with { Loopback = true },
                 "--sandbox" => o with { Sandbox = true },
+                "--map" => ParseMap(o, Next(), warnings),
                 "--hud-demo" => o with { HudDemo = Next() },
                 "--netgraph" => o with { NetGraph = true },
                 "--no-update" => o with { NoUpdate = true },
@@ -213,6 +220,14 @@ public sealed record LaunchOptions
         if (TryParseSeconds(value, out double seconds) && seconds > 0 && seconds <= BattleServerOptions.MaxMatchSeconds)
             return o with { MatchSeconds = seconds };
         warnings.Add($"Bad --match-seconds '{value}'; use SECONDS above 0, e.g. 30. Using the mode's own length.");
+        return o;
+    }
+
+    private static LaunchOptions ParseMap(LaunchOptions o, string value, List<string> warnings)
+    {
+        if (MapCatalog.TryGet(value, out MapDefinition? map)) return o with { Map = map.Id };
+        // Map stays null: the sandbox then uses the sandbox map.
+        warnings.Add($"Bad --map '{value}'; use {string.Join("|", MapCatalog.All.Select(m => m.Id))}. Using the default map.");
         return o;
     }
 

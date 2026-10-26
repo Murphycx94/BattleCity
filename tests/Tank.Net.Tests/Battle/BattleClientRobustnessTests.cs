@@ -190,6 +190,121 @@ public sealed class BattleClientRobustnessTests
         Assert.Equal(BattlePhase.InMatch, a.Phase);
     }
 
+    // ---- match starts without the map ----
+
+    [Fact]
+    public void A_resync_comes_without_the_map_and_the_client_keeps_its_own()
+    {
+        BattleClient a = InMatch(out BattleHarness h);
+        Battlefield field = a.Field!;
+        MapData map = a.MatchInfo!.Map!;
+        int dropped = Dropped(a), resyncs = a.Resyncs;
+        a.OnData(0, SnapshotAgainstAMissingBaseline(a));   // the client asks for the match state again
+        Assert.Equal(resyncs + 1, a.Resyncs);
+
+        h.Run(0.5);
+
+        Assert.Equal(dropped + 1, Dropped(a));             // the bad snapshot only: the answer was taken
+        Assert.Equal(BattlePhase.InMatch, a.Phase);
+        Assert.NotSame(field, a.Field);                    // the resync's field: a fresh copy of the one it had…
+        Assert.Same(field.Terrain, a.Field!.Terrain);      // …on the same ground, not one built from a map sent again
+        Assert.Same(map, a.MatchInfo!.Map);
+        Assert.True(a.HasTank);
+        h.Run(0.5);
+        Assert.Equal(dropped + 1, Dropped(a));
+    }
+
+    [Fact]
+    public void A_match_start_without_the_map_resyncs_the_match_on_the_field_it_has()
+    {
+        BattleClient a = InMatch(out _);
+        Battlefield field = a.Field!;
+        MatchStartMessage info = a.MatchInfo!;
+        Prop wall = field.Props.First(p => p.IsDestructible);
+        int newest = a.Store.NewestTick;
+
+        a.OnData(0, MatchStart(info with { Map = null, CurrentTick = newest, Props = new[] { new PropState(wall.Id, 0) } }));
+
+        Assert.Null(a.LastPacketError);
+        Assert.Equal(BattlePhase.InMatch, a.Phase);
+        Assert.Same(field.Terrain, a.Field!.Terrain);
+        Assert.Equal(field.Props, a.Field.Props);
+        Assert.False(a.Field.IsStanding(wall.Id));
+        Assert.Same(info.Map, a.MatchInfo!.Map);           // the match info keeps the map it came with
+        Assert.Equal(newest, a.Store.NewestTick);          // a resync: the store stays
+    }
+
+    [Fact]
+    public void A_client_without_the_map_drops_a_match_start_without_it_and_asks_for_the_map_until_it_comes()
+    {
+        BattleClient a = InMatch(out BattleHarness h);
+        MatchStartMessage info = a.MatchInfo!;
+        a.OnData(0, RoomStatePacket(a.Room! with { MatchRunning = false }));   // somehow the client has left the match the server still runs
+        Assert.Equal(BattlePhase.Room, a.Phase);
+        Assert.Null(a.Field);
+        int dropped = Dropped(a), resyncs = a.Resyncs;
+
+        a.OnData(0, MatchStart(info with { Map = null }));   // what the server answers a connection it has sent the map
+
+        Assert.Equal(dropped + 1, Dropped(a));
+        Assert.Contains("without the map", a.LastPacketError);
+        Assert.Equal(BattlePhase.Room, a.Phase);
+        Assert.Null(a.Field);
+        Assert.Equal(resyncs + 1, a.Resyncs);              // asked at once, saying it needs the map
+
+        h.Run(1.0);
+
+        Assert.Equal(BattlePhase.InMatch, a.Phase);
+        Assert.NotNull(a.Field);
+        Assert.NotNull(a.MatchInfo!.Map);
+        Assert.Equal(info.MatchNumber, a.MatchInfo.MatchNumber);
+        Assert.True(a.HasTank);
+        int asked = a.Resyncs;
+        h.Run(2.5);
+        Assert.Equal(asked, a.Resyncs);                    // the map came: no more asking
+    }
+
+    [Fact]
+    public void A_client_that_lacks_the_map_keeps_asking_when_it_may_not_ask_at_once()
+    {
+        BattleClient a = InMatch(out BattleHarness h);
+        MatchStartMessage info = a.MatchInfo!;
+        a.OnData(0, SnapshotAgainstAMissingBaseline(a));   // a resync just now: the next request must wait a second
+        h.Run(0.1);
+        Assert.Equal(BattlePhase.InMatch, a.Phase);
+        int resyncs = a.Resyncs;
+        a.OnData(0, RoomStatePacket(a.Room! with { MatchRunning = false }));
+        a.OnData(0, MatchStart(info with { Map = null }));
+        Assert.Equal(resyncs, a.Resyncs);                  // rate-limited: not asked yet
+        Assert.Equal(BattlePhase.Room, a.Phase);
+
+        h.Run(2.5);                                        // the client asks once it may (and again if the server's own limit refused it)
+
+        Assert.True(a.Resyncs > resyncs);
+        Assert.Equal(BattlePhase.InMatch, a.Phase);
+        Assert.NotNull(a.Field);
+    }
+
+    private static byte[] RoomStatePacket(RoomStateMessage room)
+    {
+        var w = new Tank.Net.Protocol.BitWriter();
+        BattleMessages.Write(w, room);
+        return w.Data.ToArray();
+    }
+
+    private static byte[] SnapshotAgainstAMissingBaseline(BattleClient a)
+    {
+        var other = new BattleSnapshot();
+        other.CopyFrom(a.Latest!);
+        other.Tick = 4_000;
+        var s = new BattleSnapshot();
+        s.CopyFrom(a.Latest!);
+        s.Tick = a.Latest!.Tick + 1;
+        var w = new Tank.Net.Protocol.BitWriter(4096);
+        new BattleSnapshotCodec().Write(w, s, other, new ClientFeedback { LastProcessedInputTick = a.Latest.Tick });
+        return w.Data.ToArray();
+    }
+
     [Fact]
     public void Random_bytes_with_any_first_byte_never_throw_out_of_the_client()
     {

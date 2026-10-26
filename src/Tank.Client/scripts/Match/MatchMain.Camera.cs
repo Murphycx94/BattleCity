@@ -114,11 +114,12 @@ public partial class MatchMain
     {
         if (_automation.CameraAngles(own.Yaw) is { } angles) _camera.SetAngles(angles.Yaw, angles.Pitch);
         Vector3 pivot = pose.Position.ToGodot();
-        _camera.Follow(pivot, (pose.Trunnion(own.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain);
+        _camera.Follow(pivot, (pose.Trunnion(own.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain, field.WaterLevel);
         if (_automation.HasPreset)
         {
-            var (eye, target) = CameraPresets.Get(_automation.Preset!, pivot, own.Yaw, _time, _groundAt, targetIndex: 0);
-            _camera.Camera.LookAtFromPosition(eye, target, Vector3.Up);
+            string preset = _automation.Preset!;
+            var (eye, target) = CameraPresets.Get(preset, pivot, own.Yaw, _time, _groundAt, targetIndex: 0, site: _site);
+            _mapViewOn = CameraPresets.Look(_camera.Camera, preset, eye, target, _site, _world!, _mapViewOn);
         }
         else if (!own.IsDestroyed && !_input.FreeLook)
         {
@@ -148,7 +149,7 @@ public partial class MatchMain
             TankPose pose = TankPose.Compute(target, field.Terrain);
             _focus = target.Position;
             _spectateName = SpectateNameOf(target.Id);
-            _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(target.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain);
+            _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(target.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain, field.WaterLevel);
             return (target, pose);
         }
         if (_spectate.Current == SpectateState.Mode.Free)
@@ -156,8 +157,11 @@ public partial class MatchMain
             _spectateFree = true;
             var (throttle, steer, _) = Paused ? default : _input.Peek();
             _focus = SpectateState.MoveFocus(_focus, _camera.Yaw, throttle, steer, _input.SpectateFast, fdt, field);
-            Vector3 point = _focus.Ground(field.Terrain.HeightAt(_focus.X, _focus.Y));
-            _camera.Follow(point, point, field.Terrain);
+            // The focus rides on the water where there is some (stage 5 design §2), so the camera never sinks into it.
+            float surface = field.Terrain.HeightAt(_focus.X, _focus.Y);
+            if (field.WaterLevel is { } water) surface = MathF.Max(surface, water);
+            Vector3 point = _focus.Ground(surface);
+            _camera.Follow(point, point, field.Terrain, field.WaterLevel);
             return (null, null);
         }
         UpdateCamera(own, ownPose, field);   // the wreck close-up (and the odd frame a followed tank just vanished)

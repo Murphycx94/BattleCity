@@ -111,6 +111,31 @@ public class AutoRoomTests
     }
 
     [Fact]
+    public void A_map_that_failed_to_generate_holds_the_start_and_warns_once()
+    {
+        var auto = new AutoRoom(null, null, null, autoStart: true);
+        RoomStateMessage failed = Room() with { Map = "riverland", MapState = MapState.Failed };
+        Assert.Null(auto.TakeWarning());
+
+        Assert.Equal(AutoStepKind.Wait, auto.Next(failed, Me, true, 1).Kind);
+        string? warning = auto.TakeWarning();
+        Assert.NotNull(warning);
+        Assert.Contains("riverland", warning);
+        for (int i = 0; i < 5; i++) Assert.Equal(AutoStepKind.Wait, auto.Next(failed, Me, true, 1).Kind);
+        Assert.Null(auto.TakeWarning());
+        Assert.False(auto.Started);
+    }
+
+    [Fact]
+    public void A_map_still_generating_holds_the_start_without_a_warning()
+    {
+        var auto = new AutoRoom(null, null, null, autoStart: true);
+        Assert.Equal(AutoStepKind.Wait, auto.Next(Room() with { MapState = MapState.Generating }, Me, true, 1).Kind);
+        Assert.Null(auto.TakeWarning());
+        Assert.Equal(AutoStepKind.StartMatch, auto.Next(Room(), Me, true, 1).Kind);
+    }
+
+    [Fact]
     public void Without_autostart_the_room_is_set_up_but_never_started()
     {
         var auto = new AutoRoom(null, BattleMode.Annihilation, 2, autoStart: false);

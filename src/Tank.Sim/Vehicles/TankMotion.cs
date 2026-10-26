@@ -27,7 +27,7 @@ public static class TankMotion
     /// <summary>Top speed on rubble, as a share of the usual (design §3.2).</summary>
     public const float RubbleSpeedFactor = 0.7f;
 
-    /// <summary>Breaking through brick walls costs this share of the hull's speed (once a tick, however many it breaks).</summary>
+    /// <summary>Breaking through brick walls and houses costs this share of the hull's speed (once a tick, however many it breaks).</summary>
     private const float RamSpeedKept = 0.5f;
 
     public static Obb2 Footprint(TankSpec spec, Vector2 center, float yaw) =>
@@ -37,13 +37,20 @@ public static class TankMotion
     private const int MaxGivingWay = 16;
 
     /// <summary>
-    /// Applies throttle and steering, knocks down what gives way where the hull is going (any fence it touches, and brick
-    /// walls when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, at the cost of half its speed; their ids
-    /// are added to <paramref name="felled"/> if given), then moves the hull and pushes it out of standing solid props and
-    /// <paramref name="obstacles"/>. Knocking props down changes <paramref name="field"/> for everyone using it, so only
-    /// the simulation stepping the battle drives with <paramref name="knockDown"/>; a client predicting its own tank
-    /// drives without it: the props that would give way are then driven through as if down (the speed still halved for a
-    /// brick wall) but left standing, and whether they really fell is the server's to say.
+    /// A push-out iteration looks at the blockers this much beyond the hull's reach from where it started, room for the
+    /// pushes within one iteration; should they carry the hull further, it looks again (see <see cref="Resolve"/>).
+    /// </summary>
+    private const float ResolveSlack = 4f;
+
+    /// <summary>
+    /// Applies throttle and steering, knocks down what gives way where the hull is going (any fence or tree trunk it
+    /// touches, brick walls when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/> and houses when faster than
+    /// its <see cref="TankSpec.HouseRamSpeed"/>, those two at the cost of half its speed; their ids are added to
+    /// <paramref name="felled"/> if given), then moves the hull and pushes it out of standing solid props (never trees,
+    /// which always give way) and <paramref name="obstacles"/>. Knocking props down changes <paramref name="field"/> for
+    /// everyone using it, so only the simulation stepping the battle drives with <paramref name="knockDown"/>; a client
+    /// predicting its own tank drives without it: the props that would give way are then driven through as if down (the
+    /// speed still halved for a brick wall or house) but left standing, and whether they really fell is the server's to say.
     /// </summary>
     public static void Drive(ref TankState t, in InputCmd input, Battlefield field, ReadOnlySpan<Obb2> obstacles, List<int>? felled = null, bool knockDown = true)
     {
@@ -122,42 +129,66 @@ public static class TankMotion
     }
 
     /// <summary>
-    /// What gives way to a hull about to move from <paramref name="from"/> onto <paramref name="hull"/> (design §4.2): any
-    /// fence, and brick walls when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/>, which costs it half its
-    /// speed as it breaks into one (once, however many at a time). With <paramref name="knockDown"/> they go down before
-    /// the hull is pushed out of what still stands, so it drives on through; without it they are left standing and their
-    /// indices put in <paramref name="ignored"/> (as many as fit), for the collision to drive through them all the same.
-    /// A standing wall the hull is already inside can only be one it broke into without knocking down (the break cost it
-    /// half its speed, so it may now be under ram speed): it still gives way, at no further cost, or the hull would be
-    /// pushed back out and stall where the server drives on.
+    /// What gives way to a hull about to move from <paramref name="from"/> onto <paramref name="hull"/> (design §4.2,
+    /// riverland design §2.4–2.5): any fence, any tree whose trunk (the circle, not its square) it touches, brick walls
+    /// when it is faster than its <see cref="TankSpec.BrickWallRamSpeed"/> and houses when faster than its
+    /// <see cref="TankSpec.HouseRamSpeed"/>; breaking into either costs it half its speed (once, however many at a time).
+    /// With <paramref name="knockDown"/> they go down before the hull is pushed out of what still stands, so it drives on
+    /// through; without it they are left standing and their indices put in <paramref name="ignored"/> (as many as fit),
+    /// for the collision to drive through them all the same; trees need no place there, as the collision never meets
+    /// them. A standing brick wall or house the hull is already inside can only be one it broke into without knocking
+    /// down (the break cost it half its speed, so it may now be under ram speed): it still gives way, at no further cost,
+    /// or the hull would be pushed back out and stall where the server drives on.
     /// </summary>
     /// <returns>How many of <paramref name="ignored"/> were filled.</returns>
     private static int KnockDown(ref TankState t, in Obb2 from, in Obb2 hull, Battlefield field, List<int>? felled, bool knockDown, Span<int> ignored)
     {
-        bool ramming = MathF.Abs(t.Speed) > t.Spec.BrickWallRamSpeed;
+        float speed = MathF.Abs(t.Speed);
+        bool ramWall = speed > t.Spec.BrickWallRamSpeed, ramHouse = speed > t.Spec.HouseRamSpeed;
         bool broke = false;
         int count = 0;
-        foreach (int i in field.Blockers)
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
+        foreach (int i in field.Near(PropSet.Blockers, hull.Center, hull.HalfExtents.Length(), buffer))
         {
             ref readonly Prop prop = ref field.PropAt(i);
-            if (!field.StandingAt(i) || !Overlaps(hull, prop.Footprint)) continue;
-            bool inside = prop.Kind == PropKind.BrickWall && Overlaps(from, prop.Footprint);
-            bool givesWay = prop.Kind == PropKind.Fence || prop.Kind == PropKind.BrickWall && (ramming || (!knockDown && inside));
+            if (!field.StandingAt(i) || !Touches(hull, prop)) continue;
+            bool breaks = prop.Kind is PropKind.BrickWall or PropKind.House;
+            bool inside = breaks && Overlaps(from, prop.Footprint);
+            bool givesWay = prop.Kind switch
+            {
+                PropKind.Fence or PropKind.Tree => true,
+                PropKind.BrickWall => ramWall || (!knockDown && inside),
+                PropKind.House => ramHouse || (!knockDown && inside),
+                _ => false,
+            };
             if (!givesWay) continue;
             if (knockDown)
             {
                 field.Destroy(i);
                 felled?.Add(prop.Id);
             }
-            else if (count < ignored.Length)
+            else if (prop.Kind != PropKind.Tree && count < ignored.Length)
             {
                 ignored[count++] = i;
             }
-            broke |= prop.Kind == PropKind.BrickWall && !inside;
+            broke |= breaks && !inside;
         }
         if (broke) t.Speed *= RamSpeedKept;
         return count;
     }
+
+    /// <summary>The hull overlaps the prop: a tree's trunk circle, any other prop's footprint.</summary>
+    private static bool Touches(in Obb2 hull, in Prop prop) =>
+        prop.Kind == PropKind.Tree ? hull.IntersectsCircle(prop.Footprint.Center, prop.Footprint.HalfExtents.X) : Overlaps(hull, prop.Footprint);
+
+    /// <summary>
+    /// Whether the collision pushes a hull out of the prop at <paramref name="index"/>: a standing one, not driven through
+    /// (<paramref name="ignored"/>), and not a tree: a tree always gives way (<see cref="KnockDown"/>), so it never holds a
+    /// hull up, even where it is left standing (in a client's prediction, or a trunk whose square the hull overlaps but
+    /// not its circle).
+    /// </summary>
+    private static bool Blocks(Battlefield field, int index, ReadOnlySpan<int> ignored) =>
+        field.StandingAt(index) && field.PropAt(index).Kind != PropKind.Tree && !IsIgnored(index, ignored);
 
     private static bool IsIgnored(int index, ReadOnlySpan<int> ignored)
     {
@@ -168,7 +199,8 @@ public static class TankMotion
     /// <summary>The hull lies partly on the rubble of a wall.</summary>
     private static bool OnRubble(in Obb2 hull, Battlefield field)
     {
-        foreach (int i in field.Walls)
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
+        foreach (int i in field.Near(PropSet.Walls, hull.Center, hull.HalfExtents.Length(), buffer))
             if (!field.StandingAt(i) && Overlaps(hull, field.PropAt(i).RubbleFootprint)) return true;
         return false;
     }
@@ -179,11 +211,15 @@ public static class TankMotion
         return Vector2.DistanceSquared(a.Center, b.Center) <= reach * reach && Obb2.TryGetPenetration(a, b, out _);
     }
 
-    /// <summary>The speed the throttle asks for: lower on rubble (<see cref="RubbleSpeedFactor"/>) and uphill.</summary>
+    /// <summary>
+    /// The speed the throttle asks for: scaled by the ground or water under the hull's centre
+    /// (<see cref="Battlefield.SpeedFactorAt"/>), lower on rubble (<see cref="RubbleSpeedFactor"/>) and uphill.
+    /// </summary>
     private static float TargetSpeed(in TankState t, sbyte throttle, Battlefield field)
     {
         TankSpec spec = t.Spec;
         float target = throttle > 0 ? spec.MaxForwardSpeed : throttle < 0 ? -spec.MaxReverseSpeed : 0f;
+        if (target != 0) target *= field.SpeedFactorAt(t.Position);
         if (target != 0 && OnRubble(Footprint(spec, t.Position, t.Yaw), field)) target *= RubbleSpeedFactor;
         HeightField terrain = field.Terrain;
         float uphill = ForwardSlope(t, terrain) * MathF.Sign(target);
@@ -225,29 +261,53 @@ public static class TankMotion
         return best;
     }
 
-    /// <summary>Deepest overlap of <paramref name="box"/> with any standing solid prop (but those <paramref name="ignored"/>) or obstacle; 0 when clear.</summary>
+    /// <summary>Deepest overlap of <paramref name="box"/> with any standing solid prop that <see cref="Blocks"/> or obstacle; 0 when clear.</summary>
     private static float PenetrationDepth(in Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
     {
         float deepest = 0f;
-        foreach (int i in field.Blockers)
-            if (field.StandingAt(i) && !IsIgnored(i, ignored) && Obb2.TryGetPenetration(box, field.PropAt(i).Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
+        foreach (int i in field.Near(PropSet.Blockers, box.Center, box.HalfExtents.Length(), buffer))
+            if (Blocks(field, i, ignored) && Obb2.TryGetPenetration(box, field.PropAt(i).Footprint, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         foreach (Obb2 other in obstacles)
             if (Obb2.TryGetPenetration(box, other, out Vector2 push)) deepest = MathF.Max(deepest, push.Length());
         return deepest;
     }
 
+    /// <summary>
+    /// Pushes <paramref name="box"/> out of the standing blockers that <see cref="Blocks"/> and
+    /// <paramref name="obstacles"/>, each in turn, up to <see cref="CollisionIterations"/> times round. Each round looks
+    /// at the blockers within <see cref="ResolveSlack"/> of the hull's reach where the round starts, and again round the
+    /// hull, for the blockers after the one that pushed it, should it be pushed further than that: so every blocker it
+    /// meets is met in the same order, and at the same place, as when looking at them all.
+    /// </summary>
     private static Vector2 Resolve(Obb2 box, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
     {
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
         for (int iteration = 0; iteration < CollisionIterations; iteration++)
         {
             bool pushed = false;
-            foreach (int i in field.Blockers)
-                if (field.StandingAt(i) && !IsIgnored(i, ignored)) pushed |= PushOut(ref box, field.PropAt(i).Footprint);   // rubble, fallen fences and bushes don't block
+            Vector2 asked = box.Center;
+            ReadOnlySpan<int> near = NearBlockers(box, field, buffer);
+            for (int k = 0; k < near.Length; k++)
+            {
+                int i = near[k];
+                // Rubble, fallen fences and trees don't block (bushes aren't blockers at all).
+                if (!Blocks(field, i, ignored) || !PushOut(ref box, field.PropAt(i).Footprint)) continue;
+                pushed = true;
+                if (Vector2.DistanceSquared(box.Center, asked) <= ResolveSlack * ResolveSlack) continue;
+                asked = box.Center;
+                near = NearBlockers(box, field, buffer);
+                int next = near.BinarySearch(i);
+                k = (next >= 0 ? next + 1 : ~next) - 1;   // carry on after blocker i
+            }
             foreach (Obb2 other in obstacles) pushed |= PushOut(ref box, other);
             if (!pushed) break;
         }
         return box.Center;
     }
+
+    private static ReadOnlySpan<int> NearBlockers(in Obb2 box, Battlefield field, Span<int> buffer) =>
+        field.Near(PropSet.Blockers, box.Center, box.HalfExtents.Length() + ResolveSlack, buffer);
 
     private static bool PushOut(ref Obb2 box, in Obb2 obstacle)
     {

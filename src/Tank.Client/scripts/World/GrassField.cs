@@ -34,6 +34,8 @@ public partial class GrassField : Node3D
     private const float RandomTilt = 0.25f;
     private const float MinGrassWeight = 0.5f;   // the terrain's grass layer must be at least this strong for a clump to grow
     private const float RockMargin = 0.4f;
+    private static readonly float CellReach = CellSize * 0.5f * MathF.Sqrt(2f);   // centre to corner of a grass cell
+    private const float BucketSlack = 0.01f;   // m: no cell at the edge of a prop's reach is lost to rounding
     private const int Variants = 4;
     private const int FloatsPerInstance = 12 + 4;   // Transform3D rows (3x4) + custom data
 
@@ -44,6 +46,8 @@ public partial class GrassField : Node3D
     private readonly List<Vector2I> _dropped = new();
     private readonly List<Wanted> _wanted = new();
     private readonly List<Obb2> _nearRocks = new();
+    private List<Obb2>?[]? _rockBuckets;   // per grass cell (row-major), the grown solid footprints that may reach it; built on the first fill
+    private int _bucketsX;
     private float[][] _buffers = Array.Empty<float[]>();   // one reusable upload buffer per detail band, sized for its candidate count
     private HeightField _terrain = null!;
     private DirtMask _dirt = null!;
@@ -85,6 +89,7 @@ public partial class GrassField : Node3D
         _terrain = terrain;
         _dirt = dirt;
         _props = props;
+        _rockBuckets = null;
         _clumps = LodShape.Select(shape => Enumerable.Range(1, Variants)
             .Select(v => GrassClump.Build((uint)v * 7919u, shape.Segments, shape.Blades).ToArrayMesh()).ToArray()).ToArray();
         _buffers = LodDensity.Select(density => new float[(int)(CellSize * CellSize * density) * FloatsPerInstance]).ToArray();
@@ -220,18 +225,45 @@ public partial class GrassField : Node3D
         return length < 1e-4f ? Basis.Identity : new Basis(axis / length, MathF.Asin(Math.Min(length, 1f)) * 0.5f);
     }
 
-    /// <summary>Gathers the (grown) rock footprints that can touch this cell, once per fill.</summary>
+    /// <summary>
+    /// Gathers the (grown) solid footprints that can touch this cell, once per fill: the cell's bucket, filtered by the same
+    /// distance test a scan over every prop makes, so the list (and its order) is exactly what that scan would give.
+    /// </summary>
     private void CollectNearbyRocks(Vector2I key)
     {
         _nearRocks.Clear();
+        _rockBuckets ??= BucketRocks();
+        if (_rockBuckets[key.Y * _bucketsX + key.X] is not { } bucket) return;
         var center = new SN.Vector2((key.X + 0.5f) * CellSize, (key.Y + 0.5f) * CellSize);
-        float cellReach = CellSize * 0.5f * MathF.Sqrt(2f);
+        foreach (Obb2 grown in bucket)
+            if (SN.Vector2.Distance(grown.Center, center) <= CellReach + grown.HalfExtents.Length()) _nearRocks.Add(grown);
+    }
+
+    /// <summary>
+    /// Puts every solid prop (bushes don't count: grass grows on under them), grown by <see cref="RockMargin"/>, into the
+    /// bucket of each grass cell whose centre lies in the square around the prop's circumscribed circle widened by
+    /// <see cref="CellReach"/>: every cell the distance test can accept. Props go in in their order, so buckets keep it.
+    /// </summary>
+    private List<Obb2>?[] BucketRocks()
+    {
+        int cellsX = (int)MathF.Ceiling(_terrain.SizeX / CellSize), cellsZ = (int)MathF.Ceiling(_terrain.SizeZ / CellSize);
+        var buckets = new List<Obb2>?[cellsX * cellsZ];
+        _bucketsX = cellsX;
         foreach (Prop prop in _props)
         {
-            if (!prop.IsSolid) continue;   // grass grows on under bushes
+            if (!prop.IsSolid) continue;
             Obb2 grown = prop.Footprint with { HalfExtents = prop.Footprint.HalfExtents + new SN.Vector2(RockMargin) };
-            if (SN.Vector2.Distance(grown.Center, center) <= cellReach + grown.HalfExtents.Length()) _nearRocks.Add(grown);
+            float reach = CellReach + grown.HalfExtents.Length() + BucketSlack;
+            // Cell centres (k + 0.5) · CellSize within [centre − reach, centre + reach] on each axis, clamped to the map.
+            int x0 = Math.Max(0, (int)MathF.Ceiling((grown.Center.X - reach) / CellSize - 0.5f));
+            int x1 = Math.Min(cellsX - 1, (int)MathF.Floor((grown.Center.X + reach) / CellSize - 0.5f));
+            int z0 = Math.Max(0, (int)MathF.Ceiling((grown.Center.Y - reach) / CellSize - 0.5f));
+            int z1 = Math.Min(cellsZ - 1, (int)MathF.Floor((grown.Center.Y + reach) / CellSize - 0.5f));
+            for (int z = z0; z <= z1; z++)
+            for (int x = x0; x <= x1; x++)
+                (buckets[z * cellsX + x] ??= new List<Obb2>()).Add(grown);
         }
+        return buckets;
     }
 
     private bool InsideRock(float x, float z)

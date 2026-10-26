@@ -4,7 +4,9 @@ using Godot;
 using Tank.Client.Match;
 using Tank.Client.Online;
 using Tank.Client.Sandbox;
+using Tank.Client.UI;
 using Tank.Net.Battle;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Client.Bootstrap;
@@ -12,12 +14,12 @@ namespace Tank.Client.Bootstrap;
 /// <summary>Main's transitions: hosting and joining, leaving, entering and leaving the match, and the sandbox.</summary>
 public partial class Main
 {
-    private const string AppTitle = "坦克 3D";
-
     private void Host(string name)
     {
         LeaveOld();
-        var settings = new HostSettings(name, $"{name}的房间", _options.Port, _options.Mode ?? BattleMode.TeamBattle, _options.Bots, _options.Seed, _options.MatchSeconds);
+        // A room opens on --map when given, else on the riverland (stage 5 design §2).
+        var settings = new HostSettings(name, $"{name}的房间", _options.Port, _options.Mode ?? BattleMode.TeamBattle, _options.Bots, _options.Seed,
+            _options.MatchSeconds, _options.Map ?? MapCatalog.Riverland.Id);
         try
         {
             BattleSession session = _options.Loopback
@@ -97,6 +99,7 @@ public partial class Main
             _room.Visible = true;
         }
         _auto?.Next(client.Room, client.Slot, client.IsHost, _options.Players).SendTo(client);
+        if (_auto?.TakeWarning() is { } warning) GD.PushWarning(warning);
         _room.Refresh();
     }
 
@@ -105,7 +108,7 @@ public partial class Main
     {
         _menu.Visible = false;
         _room.Visible = false;
-        GD.Print($"[match] entered match {client.Room?.Mode} as slot {client.Slot}");
+        GD.Print($"[match] entered match {client.Room?.Mode} on {client.Room?.Map} as slot {client.Slot}");
         var match = new MatchMain();
         match.Setup(_session!, _options, _screenshotTaken);
         _matchEntered = true;   // from now on the matches own the screenshot (RunAutomation)
@@ -123,7 +126,7 @@ public partial class Main
         _matchView?.QueueFree();
         _matchView = null;
         Input.MouseMode = Input.MouseModeEnum.Visible;
-        GetWindow().Title = AppTitle;
+        WindowTitle.Set(this, MapText.AppTitle);
         _auto?.Reset();
     }
 
@@ -194,7 +197,7 @@ public partial class Main
         _sandbox?.QueueFree();
         _sandbox = null;
         Input.MouseMode = Input.MouseModeEnum.Visible;
-        GetWindow().Title = AppTitle;
+        WindowTitle.Set(this, MapText.AppTitle);
         _menu.Visible = true;
         _menu.SetStatus("");
     }

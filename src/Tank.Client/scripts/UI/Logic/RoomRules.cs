@@ -23,6 +23,11 @@ public static class RoomRules
     public static string? StartBlockReason(RoomStateMessage room)
     {
         if (room.MatchRunning) return "对局进行中，等这一局结束。";
+        switch (room.MapState)   // the server's "the map is still being generated" and "the map failed to generate"
+        {
+            case MapState.Generating: return "地图生成中…";
+            case MapState.Failed: return "地图生成失败，换一张图。";
+        }
         StartPlan plan = PlanFor(room);
         if (plan.Seated < ModeRules.MinPlayers) return "至少要有两辆坦克：等朋友加入，或加几个机器人。";
         if (ModeRules.HasTeams(room.Mode) && (plan.Team0 == 0 || plan.Team1 == 0))

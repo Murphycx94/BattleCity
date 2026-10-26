@@ -10,7 +10,8 @@ namespace Tank.Client.World;
 /// A deep forest band 8–90 m outside the playable area: a jittered grid of candidate spots thinned by a grove noise
 /// (so trees clump into stands with clearings between them) and by depth (dense at the inner edge, ragged at the
 /// outer). The band is split into square sectors, each with its own MultiMeshes per kind and variant, so frustum
-/// culling drops whole sectors, and each sector fades out beyond <see cref="VisibleRange"/>. No collision.
+/// culling drops whole sectors, and each sector fades out beyond <see cref="VisibleRange"/>. Spots on the map that are
+/// under water or on a road stay empty (a river or road runs out through the band). No collision.
 /// </summary>
 public partial class TreeLine : Node3D
 {
@@ -27,6 +28,16 @@ public partial class TreeLine : Node3D
 
     public int TreeCount { get; private set; }
     public int SectorCount { get; private set; }
+
+    /// <summary>
+    /// With <paramref name="far"/> every sector is drawn at any distance (the top-down map view); else each fades out
+    /// beyond <see cref="VisibleRange"/>, as built.
+    /// </summary>
+    public void SetFarView(bool far)
+    {
+        foreach (Node child in GetChildren())
+            if (child is MultiMeshInstance3D sector) sector.VisibilityRangeEnd = far ? 0f : VisibleRange;   // 0: no end
+    }
 
     public void Build(Battlefield field)
     {
@@ -50,6 +61,9 @@ public partial class TreeLine : Node3D
             if (keep > density) continue;
             float scale = 0.55f + 1.25f * sizeRoll * sizeRoll + 0.25f * grove;   // many mid-size, a few giants
             bool onMap = x >= 0 && z >= 0 && x <= field.Terrain.SizeX && z <= field.Terrain.SizeZ;
+            // No trees in the water or on a road leaving the map. Decided after every draw above, so a map without either
+            // (the sandbox) keeps exactly the same random sequence and trees.
+            if (onMap && OnWaterOrRoad(field, x, z)) continue;
             float ground = onMap ? TerrainMesh.VisualHeightAt(field.Terrain, x, z) : TerrainMesh.FarGroundY;
             var transform = new Transform3D(new Basis(Vector3.Up, yaw).Scaled(new Vector3(1f, 0.9f + 0.25f * data.B, 1f) * scale), new Vector3(x, ground - 0.1f, z));
             var key = ((int)MathF.Floor((x - originX) / SectorSize), (int)MathF.Floor((z - originZ) / SectorSize));
@@ -71,6 +85,12 @@ public partial class TreeLine : Node3D
             }
             SectorCount++;
         }
+    }
+
+    private static bool OnWaterOrRoad(Battlefield field, float x, float z)
+    {
+        var ground = new System.Numerics.Vector2(x, z);
+        return field.WaterDepthAt(ground) > 0f || field.SurfaceAt(ground) == SurfaceKind.Road;
     }
 
     private static MultiMeshInstance3D Instances(Mesh mesh, List<(Transform3D Transform, Color Data)> trees, Material material)

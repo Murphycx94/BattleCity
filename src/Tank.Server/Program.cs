@@ -4,19 +4,26 @@ using Tank.Net.Battle;
 using Tank.Net.Timing;
 using Tank.Net.Transport;
 using Tank.Sim;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Server;
 
 /// <summary>
 /// Headless dedicated server: a room that runs <see cref="BattleServer"/> matches at 30 Hz.
-/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa] [--bots N] [--name "Room"]
-/// With no --mode, team battle; the last --mode given wins.
+/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa] [--map sandbox|riverland] [--bots N] [--name "Room"]
+/// With no --mode, team battle; with no --map, the riverland; the last of each given wins. The map is generated in the
+/// background: the room takes players at once and starts a match once the map is ready. If that first map can't be
+/// generated (a bug), the server says so and exits with code 3.
 /// </summary>
 public static class Program
 {
-    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa] [--bots N] [--name ROOM]\n" +
-        "  no --mode: teambattle (the last --mode given wins); --bots: 0 to 9, added when a match starts";
+    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
+        "  no --mode: teambattle; no --map: riverland (the last of each given wins); --bots: 0 to 9, added when a match starts";
+
+    private const int MapFailedExitCode = 3;
+    private static readonly TimeSpan StopPollInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan ReportInterval = TimeSpan.FromSeconds(30);
 
     public static int Main(string[] args)
     {
@@ -45,8 +52,15 @@ public static class Program
 
         using var runner = new ServerRunner(server, log, SimConstants.TickRate);
         runner.Start();
-        log($"'{options.RoomName}' listening on UDP {options.Port}: {ModeRules.Id(options.Mode)}, {options.Bots} bots. Ctrl+C to stop.");
-        WaitForStop(() => log($"players {server.ConnectedCount}, {(server.MatchRunning ? "in a match" : "in the room")}, tick avg {runner.AverageTickMs:F3} ms, max {runner.MaxTickMs:F3} ms"));
+        log($"'{options.RoomName}' listening on UDP {options.Port}: {ModeRules.Id(options.Mode)}, map {options.Map.Id}, {options.Bots} bots. Ctrl+C to stop.");
+        bool stopped = WaitForStop(
+            () => log($"players {server.ConnectedCount}, {(server.MatchRunning ? "in a match" : "in the room")}, tick avg {runner.AverageTickMs:F3} ms, max {runner.MaxTickMs:F3} ms"),
+            () => server.MapStateOf(options.Map) == MapState.Failed);
+        if (!stopped)
+        {
+            Console.Error.WriteLine($"error: the map '{options.Map.Id}' failed to generate (see the log above); no match could ever start. Exiting.");
+            return MapFailedExitCode;
+        }
         log("shutting down");
         return 0;
     }
@@ -65,18 +79,29 @@ public static class Program
         }
     }
 
-    /// <summary>Blocks until Ctrl+C in a terminal or SIGTERM from a service manager, reporting every 30 s.</summary>
-    private static void WaitForStop(Action report)
+    /// <summary>
+    /// Blocks until Ctrl+C in a terminal or SIGTERM from a service manager (true), or until <paramref name="failed"/>
+    /// (false), reporting every 30 s.
+    /// </summary>
+    private static bool WaitForStop(Action report, Func<bool> failed)
     {
         using var stop = new ManualResetEventSlim();
         using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx => { ctx.Cancel = true; stop.Set(); });
         using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; stop.Set(); });
-        while (!stop.Wait(TimeSpan.FromSeconds(30))) report();
+        var sinceReport = System.Diagnostics.Stopwatch.StartNew();
+        while (!stop.Wait(StopPollInterval))
+        {
+            if (failed()) return false;
+            if (sinceReport.Elapsed < ReportInterval) continue;
+            report();
+            sinceReport.Restart();
+        }
+        return true;
     }
 
     private static BattleServerOptions ParseArgs(string[] args)
     {
-        var options = new BattleServerOptions();
+        var options = new BattleServerOptions { Map = MapCatalog.Riverland, PrepareMapsInBackground = true };
         for (int i = 0; i < args.Length; i++)
         {
             string Value() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
@@ -88,6 +113,10 @@ public static class Program
                 case "--mode":
                     string mode = Value();
                     options = options with { Mode = ModeRules.TryParse(mode, out BattleMode m) ? m : throw new ArgumentException($"unknown mode '{mode}'") };
+                    break;
+                case "--map":
+                    string map = Value();
+                    options = options with { Map = MapCatalog.TryGet(map, out MapDefinition? found) ? found : throw new ArgumentException($"unknown map '{map}'") };
                     break;
                 case "--bots":
                     options = options with { Bots = TryParseInt(Value(), out int bots) && bots < BattleProtocol.MaxPlayers ? bots : throw new ArgumentException($"bots: 0 to {BattleProtocol.MaxPlayers - 1}") };

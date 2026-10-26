@@ -34,7 +34,7 @@ public sealed class BattleServerTests
 
     private static byte[] Command(RoomCommandKind kind, string arg = "") => Encode(w => BattleMessages.Write(w, new RoomCommandMessage(kind, arg)));
 
-    private static byte[] ResyncRequest() => Encode(w => w.WriteByte((byte)BattleMessage.RequestMatchState));
+    private static byte[] ResyncRequest() => Encode(w => BattleMessages.Write(w, new MatchStateRequest(NeedMap: false)));
 
     private static byte[] Input(int tick, int ack, sbyte throttle = 1, sbyte steer = 0, float yaw = 0f, bool fire = false) => Encode(w =>
     {

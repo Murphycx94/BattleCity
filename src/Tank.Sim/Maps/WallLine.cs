@@ -53,25 +53,40 @@ public readonly record struct WallLine(PropKind Kind, Vector2 Start, Vector2 End
 
     /// <summary>
     /// The line's segments from <see cref="Start"/> on, numbered <paramref name="firstId"/>, <paramref name="firstId"/> + 1, …:
-    /// footprints long along the line (<see cref="Obb2.AxisRight"/>) and <see cref="Thickness"/> across it, standing
-    /// <see cref="Height"/> above the ground at their centre with <see cref="Sink"/> more below it. Laid out (and checked)
-    /// right away, not as they are enumerated.
+    /// the <see cref="Footprints"/>, standing <see cref="Height"/> above the ground at their centre with <see cref="Sink"/>
+    /// more below it. Laid out (and checked) right away, not as they are enumerated.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The line is not of walls or fences.</exception>
     /// <exception cref="InvalidOperationException">Its length is not a whole number of segments.</exception>
     public IEnumerable<Prop> Segments(HeightField terrain, int firstId)
     {
-        float thickness = Thickness(Kind), height = Height(Kind) + Sink;
-        var segments = new Prop[SegmentCount];
-        Vector2 along = Vector2.Normalize(End - Start);
-        float yaw = MathF.Atan2(-along.Y, along.X);   // Angles.Right(yaw) == along
-        var half = new Vector2(SegmentLength / 2, thickness / 2);
+        Obb2[] footprints = Footprints();
+        float height = Height(Kind) + Sink;
+        var segments = new Prop[footprints.Length];
         for (int k = 0; k < segments.Length; k++)
         {
-            Vector2 center = Start + along * (SegmentLength * (k + 0.5f));
+            Vector2 center = footprints[k].Center;
             float ground = terrain.HeightAt(center.X, center.Y);
-            segments[k] = new Prop(firstId + k, Kind, new Obb2(center, half, yaw), ground - Sink, height);
+            segments[k] = new Prop(firstId + k, Kind, footprints[k], ground - Sink, height);
         }
         return segments;
+    }
+
+    /// <summary>
+    /// The footprints of the line's segments from <see cref="Start"/> on: <see cref="SegmentLength"/> long along the line
+    /// (<see cref="Obb2.AxisRight"/>) and <see cref="Thickness"/> across it. The one layout both <see cref="Segments"/> and
+    /// a map generator checking where a line may go use.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The line is not of walls or fences.</exception>
+    /// <exception cref="InvalidOperationException">Its length is not a whole number of segments.</exception>
+    internal Obb2[] Footprints()
+    {
+        var half = new Vector2(SegmentLength / 2, Thickness(Kind) / 2);
+        var footprints = new Obb2[SegmentCount];
+        Vector2 along = Vector2.Normalize(End - Start);
+        float yaw = MathF.Atan2(-along.Y, along.X);   // Angles.Right(yaw) == along
+        for (int k = 0; k < footprints.Length; k++)
+            footprints[k] = new Obb2(Start + along * (SegmentLength * (k + 0.5f)), half, yaw);
+        return footprints;
     }
 }

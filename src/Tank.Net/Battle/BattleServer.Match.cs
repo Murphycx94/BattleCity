@@ -13,8 +13,9 @@ public sealed partial class BattleServer
     private const int BotSeedStride = 7919;   // a prime: each bot's seed differs from the match seed in its own way
 
     /// <summary>
-    /// Starts a match in the room's mode with everyone seated, plus the bots asked for (named, given random tanks, put on
-    /// the thinner team), if there are at least two tanks and, in a team mode, both teams have one.
+    /// Starts a match in the room's mode on the room's map with everyone seated, plus the bots asked for (named, given
+    /// random tanks, put on the thinner team), if the map is ready, there are at least two tanks and, in a team mode, both
+    /// teams have one.
     /// </summary>
     public bool TryStartMatch(out string? reason)
     {
@@ -22,6 +23,15 @@ public sealed partial class BattleServer
         {
             reason = "a match is running";
             return false;
+        }
+        switch (_maps.StateOf(_roomMap))
+        {
+            case MapState.Generating:
+                reason = "the map is still being generated";
+                return false;
+            case MapState.Failed:
+                reason = "the map failed to generate";
+                return false;
         }
         uint seed = _options.Seed ?? (uint)Random.Shared.Next(1, int.MaxValue);
         var rng = new Tank.Sim.Geometry.XorShift(seed);
@@ -42,21 +52,24 @@ public sealed partial class BattleServer
             return false;
         }
 
-        _map = MapData.Of(SandboxMap.Create());
-        _sim = new Simulation(_map.Build());
+        PreparedMap map = _maps.Get(_roomMap);
+        _matchMap = map;
+        // A Fresh() copy of the battlefield ServerMaps built while preparing the map (bit for bit map.Data.Build(), what
+        // every client builds): about 0.1 ms even for the riverland, so the tick thread never builds a map.
+        _sim = new Simulation(map.Definition.NewBattlefield());
         _vision = new VisionTracker(_sim);
-        _rules = new MatchRules(_mode, _sim, SandboxMap.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null);
+        _rules = new MatchRules(_mode, _sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null);
         _matchNumber++;
         _endedAtFrame = -1;
         foreach (BattleSeat? seat in _seats)
         {
             if (seat is null) continue;
             PutIntoMatch(seat);
-            if (seat.IsBot) seat.Bot = new SkirmishBot(_rules.Of(seat.Slot).TankId, SandboxMap.Waypoints, seed ^ (uint)(seat.Slot * BotSeedStride));
+            if (seat.IsBot) seat.Bot = new SkirmishBot(_rules.Of(seat.Slot).TankId, map.Definition.Waypoints, seed ^ (uint)(seat.Slot * BotSeedStride));
             else seat.ResetForMatch();
         }
-        _log($"match started: {ModeRules.Id(_mode)}, {humans} players, {seated - humans} bots, seed {seed}");
-        foreach (BattleSeat seat in _byPeer.Values) SendMatchStart(seat);
+        _log($"match started: {ModeRules.Id(_mode)}, map {map.Definition.Id}, {humans} players, {seated - humans} bots, seed {seed}");
+        foreach (BattleSeat seat in _byPeer.Values) SendMatchStart(seat, withMap: true);
         _roomDirty = true;
         reason = null;
         return true;
@@ -75,7 +88,7 @@ public sealed partial class BattleServer
         _sim = null;
         _vision = null;
         _rules = null;
-        _map = null;
+        _matchMap = null;
         _endedAtFrame = -1;
         RemoveBots();
         for (byte slot = 0; slot < _seats.Length; slot++)
@@ -197,8 +210,7 @@ public sealed partial class BattleServer
         var feedback = new ClientFeedback { LastProcessedInputTick = tick, InputSlack = seat.Inputs.SlackAt(tick) };
         _writer.Reset();
         _codec.Write(_writer, snapshot, baseline, feedback);
-        Channel channel = _writer.ByteLength > MaxUnreliableBytes ? Channel.Reliable : Channel.Unreliable;
-        Send(seat, _writer.Data, channel);
+        Send(seat, _writer.Data, ChannelFor(_writer.ByteLength));
     }
 
     /// <summary>What <paramref name="seat"/> may know of tick <paramref name="sim"/>.Tick (design §5.5).</summary>
@@ -270,9 +282,14 @@ public sealed partial class BattleServer
         ProtectedUntil = t.ProtectedUntil, LastFired = t.LastFired, Destroyed = t.IsDestroyed,
     };
 
-    private void SendMatchStart(BattleSeat seat)
+    /// <summary>
+    /// The match as it stands, for a seat that joins, rejoins or resyncs: with the map's prepared bytes copied in (not
+    /// encoded again), or without the map for a connection that has it (<paramref name="withMap"/> false).
+    /// </summary>
+    private void SendMatchStart(BattleSeat seat, bool withMap)
     {
         Simulation sim = _sim!;
+        PreparedMap map = _matchMap!;
         var props = new List<PropState>();
         foreach (Prop p in sim.Field.Props)
         {
@@ -280,8 +297,11 @@ public sealed partial class BattleServer
             int left = sim.Field.Durability(p.Id);
             if (left != p.MaxDurability) props.Add(new PropState(p.Id, BattleProtocol.QuantizeDurability(left, p.MaxDurability)));
         }
+        var start = new MatchStartMessage(_mode, _matchNumber, sim.Tick, _rules!.EndTick, withMap ? map.Data : null, props, TankOf(seat.Slot));
         _mapWriter.Reset();
-        BattleMessages.Write(_mapWriter, new MatchStartMessage(_mode, _matchNumber, sim.Tick, _rules!.EndTick, _map!, props, TankOf(seat.Slot)));
+        if (withMap) BattleMessages.Write(_mapWriter, start, map.EncodedMap);
+        else BattleMessages.Write(_mapWriter, start);
         Send(seat, _mapWriter.Data, Channel.Reliable);
+        if (withMap && seat.Connected) seat.MapSentForMatch = _matchNumber;
     }
 }

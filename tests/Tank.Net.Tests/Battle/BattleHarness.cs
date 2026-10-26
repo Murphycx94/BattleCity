@@ -11,10 +11,10 @@ internal sealed class BattleHarness
     private const double ServerDt = 1.0 / SimConstants.TickRate;
     private double _serverAccumulator;
 
-    public BattleHarness(BattleServerOptions? options = null, uint networkSeed = 1)
+    public BattleHarness(BattleServerOptions? options = null, uint networkSeed = 1, Action<string>? log = null)
     {
         Net = new LoopbackNetwork(networkSeed);
-        Server = new BattleServer(Net.CreateServer(), options ?? new BattleServerOptions { Seed = 1 });
+        Server = new BattleServer(Net.CreateServer(), options ?? new BattleServerOptions { Seed = 1 }, log);
     }
 
     public LoopbackNetwork Net { get; }

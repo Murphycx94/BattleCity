@@ -27,6 +27,7 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
     private readonly Func<int, BattleSnapshot?> _findSnapshot;
     private const double ResyncRequestInterval = 1.0;   // s
     private double _lastResyncRequest = double.NegativeInfinity;
+    private bool _needMap;   // a match start came without the map we lack: keep asking for it (with the map) until it comes
 
     public BattleClient(IClientTransport transport, string playerName, Func<double> clock, uint sessionToken = 0)
         : this(transport, playerName, clock, sessionToken, BattleProtocol.Version) { }
@@ -65,12 +66,13 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
     /// <summary>Why the most recent packet was dropped, if any.</summary>
     public string? LastPacketError { get; private set; }
 
-    /// <summary>How many times the match state was asked for again after an undecodable snapshot.</summary>
+    /// <summary>How many times the match state was asked for again: after an undecodable snapshot, or for a map we lack.</summary>
     public int Resyncs { get; private set; }
 
     public void Update(double dt, in LocalCommand input)
     {
         _transport.Poll(this);
+        if (_needMap) RequestMatchState();   // rate-limited: the answer to the last request may still be on its way
         if (Phase == BattlePhase.InMatch && Field is not null)
         {
             int ticks = Clock.Advance(dt);
@@ -99,6 +101,9 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
     public void StartMatch() => SendRoom(RoomCommandKind.StartMatch, string.Empty);
     public void ReturnToRoom() => SendRoom(RoomCommandKind.ReturnToRoom, string.Empty);
 
+    /// <summary>Asks for another map (host only, in the room); <paramref name="mapId"/> is a <c>MapCatalog</c> id.</summary>
+    public void SetMap(string mapId) => SendRoom(RoomCommandKind.SetMap, mapId);
+
     public void Dispose() => _transport.Dispose();
 
     // ---- transport callbacks ----
@@ -113,6 +118,7 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
     public void OnPeerDisconnected(int peerId, string reason)
     {
         Phase = BattlePhase.Disconnected;
+        _needMap = false;
         DisconnectReason ??= reason;
     }
 
@@ -140,13 +146,15 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
             // that escapes is a bug of ours, not of the packet, and must not be hidden here.
             _droppedPackets++;
             LastPacketError = ex.Message;
-            if (type == BattleMessage.Snapshot && Phase == BattlePhase.InMatch) RequestMatchState();
+            if ((type == BattleMessage.Snapshot && Phase == BattlePhase.InMatch) || (type == BattleMessage.MatchStart && _needMap)) RequestMatchState();
         }
     }
 
     /// <summary>
     /// A snapshot we can't make sense of (a baseline we never got, an entity we don't know) means we have fallen out of
-    /// step: ask the server to send the match state again, at most once a second (it also rate-limits).
+    /// step: ask the server to send the match state again, at most once a second (it also rate-limits). The server leaves
+    /// the map out for a connection it has sent it to; a client that lacks it anyway (it got a match start without the map
+    /// for a match it has no field for) says so, and keeps asking until a match start with the map arrives.
     /// </summary>
     private void RequestMatchState()
     {
@@ -154,7 +162,7 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
         if (now - _lastResyncRequest < ResyncRequestInterval) return;
         _lastResyncRequest = now;
         _writer.Reset();
-        _writer.WriteByte((byte)BattleMessage.RequestMatchState);
+        BattleMessages.Write(_writer, new MatchStateRequest(_needMap));
         _transport.Send(_writer.Data, Channel.Reliable);
         Resyncs++;
     }
@@ -169,7 +177,9 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
     private void HandleRoom(RoomStateMessage room)
     {
         Room = room;
-        if (!room.MatchRunning && Phase == BattlePhase.InMatch) LeaveMatch();
+        if (room.MatchRunning) return;
+        _needMap = false;   // no match whose map we could still want
+        if (Phase == BattlePhase.InMatch) LeaveMatch();
     }
 
     private void SendRoom(RoomCommandKind kind, string arg)

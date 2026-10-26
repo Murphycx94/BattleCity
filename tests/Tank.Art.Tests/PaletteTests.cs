@@ -52,6 +52,19 @@ public class PaletteTests
     }
 
     [Fact]
+    public void House_colours_start_from_the_riverland_values()
+    {
+        Assert.Equal(Palette.Hex("F1E4C8"), Palette.Plaster);
+        Assert.Equal(Palette.Hex("B07A4A"), Palette.Planks);
+        Assert.Equal(Palette.Hex("CF5E45"), Palette.RoofTile);
+        Assert.Equal(Palette.Hex("5D6878"), Palette.RoofSlate);
+        Assert.Equal(Palette.Hex("7A4B2E"), Palette.Door);
+        Assert.Equal(Palette.Hex("A9DDF2"), Palette.WindowGlass);
+        Assert.Equal(Palette.Hex("EADBC0"), Palette.PlasterDust);
+        Assert.True(Vector3.Distance(Palette.Door, Palette.Planks) > 0.1f, "a door shows on a plank wall");
+    }
+
+    [Fact]
     public void Team_colours_keep_enemies_apart_from_everything_else_on_the_field()
     {
         Assert.Equal(Palette.TargetBody, Palette.AllyBody);

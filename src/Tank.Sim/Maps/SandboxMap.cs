@@ -14,14 +14,16 @@ namespace Tank.Sim.Maps;
 /// </summary>
 public static class SandboxMap
 {
+    public const string Id = "sandbox";
     public const int Seed = 20261013;
     public const int Samples = 201;
     public const float CellSize = 2f;
     public const float Border = 10f;
     private const int RockTarget = 88, MaxRockAttempts = 200;   // place until the target, giving up after this many tries
-    private const float MinRockHalfX = 2f, MaxRockHalfX = 4.5f, MinRockHalfZ = 2f, MaxRockHalfZ = 5.5f;
-    private const float MinRockHeight = 2.5f, MaxRockHeight = 6f;   // above the ground; the base sinks a further RockSink
-    private const float RockSink = 1f;
+    // Rock and bush sizes are internal: the riverland's rocks and bushes are made the same (riverland design §3.8–3.9).
+    internal const float MinRockHalfX = 2f, MaxRockHalfX = 4.5f, MinRockHalfZ = 2f, MaxRockHalfZ = 5.5f;
+    internal const float MinRockHeight = 2.5f, MaxRockHeight = 6f;   // above the ground; the base sinks a further RockSink
+    internal const float RockSink = 1f;
     private const float RockMargin = 30f, RockSpan = (Samples - 1) * CellSize - 2 * RockMargin;   // rock centres lie this far inside the map edge
     private const float SpawnClearance = 30f;
     private const float RockPatchClearance = 8f;   // a rock's bounding circle stays this far from every bush patch centre
@@ -48,18 +50,18 @@ public static class SandboxMap
 
     /// <summary>Every bush of a patch has its centre within this distance of the patch centre.</summary>
     public const float BushPatchRadius = 16f;
-    private const float BushSpread = 9f;          // bush centres lie within this radius, so a patch is at most ~27 m across
+    internal const float BushSpread = 9f;          // bush centres lie within this radius, so a patch is at most ~27 m across
     private const int MinBushes = 16, MaxBushes = 22;
-    private const float MinBushRadius = 3.2f, MaxBushRadius = 4.6f;
+    internal const float MinBushRadius = 3.2f, MaxBushRadius = 4.6f;
     private const int SpawnPatch = 0;
-    private const float MinCentreBushRadius = 3.8f;   // the first bush sits exactly on the patch centre: a guaranteed hiding spot
+    internal const float MinCentreBushRadius = 3.8f;   // the first bush sits exactly on the patch centre: a guaranteed hiding spot
     private const float MinSpawnPatchCentreBushRadius = 4.0f;   // the patch beside the spawn gets an extra-roomy centre bush
-    private const float MinBushHeight = 4.2f, MaxBushHeight = 5.2f;
-    private const float BushSink = 0.3f;          // footprint starts this far below the ground, like the rocks
-    private const float BushMaxSlope = 10f * MathF.PI / 180f;
+    internal const float MinBushHeight = 4.2f, MaxBushHeight = 5.2f;
+    internal const float BushSink = 0.3f;          // footprint starts this far below the ground, like the rocks
+    internal const float BushMaxSlope = 10f * MathF.PI / 180f;
     private const float BushSpawnClearance = 20f;
-    private const float BushOverlap = 0.35f;      // neighbours may overlap: centres at least this × the sum of radii apart
-    private const int BushAttemptsPerPatch = 200;
+    internal const float BushOverlap = 0.35f;      // neighbours may overlap: centres at least this × the sum of radii apart
+    internal const int BushAttemptsPerPatch = 200;
 
     /// <summary>
     /// Seven practice targets, hand-placed on flat open ground 30–200 m from the spawn, clear of rocks, bushes, walls and

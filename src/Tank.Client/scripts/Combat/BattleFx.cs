@@ -1,5 +1,6 @@
 using Godot;
 using Tank.Client.Art;
+using Tank.Client.World;
 
 namespace Tank.Client.Combat;
 
@@ -12,9 +13,13 @@ public enum PuffColor { White, Grey }
 /// each swelling past full size, settling and shrinking away (~0.8 s).
 /// Impact: an orange fireball that balloons and collapses, 6–10 puffs rolling outward (<see cref="PuffColor"/>: white
 /// smoke, or grey dust off rock and armour) and 8 small stones thrown up under gravity.
+/// Splash: a shell bursting in water (<see cref="ShellBurst"/>; <see cref="SplashRules.IsWaterBurst"/>, the depth from the
+/// scene's <see cref="WaterSurface"/>, looked up until there is one) raises a white column of tall foam blobs from the
+/// surface and a ring of small foam spreading out on it (~1.2 s) instead of the fireball, puffs and stones. Only shell
+/// bursts splash: an AP shell striking armour and a tank blowing up keep their puff and fireball, wading or not.
 /// Debris (<see cref="Debris"/>): chunks thrown up and along a push (bricks, stones, wood chips, leaves), with an
 /// optional cloud of dust puffs; sized for a chip off a wall up to a whole wall coming down.
-/// Pool sizes (10 muzzle, 10 impact, 16 debris slots) are sized for a full match (blueprint §5 T10): ten tanks can all
+/// Pool sizes (10 muzzle, 10 impact, 10 splash, 16 debris slots) are sized for a full match (blueprint §5 T10): ten tanks can all
 /// fire inside one muzzle life (~0.8 s), so there is a muzzle and an impact slot per possible shooter; debris comes in
 /// bursts, up to a dozen at once when an HE shell lands in a bush patch, with headroom for two overlapping. If every
 /// slot is busy anyway, the one that started playing longest ago is reused (idle slots always win, being the oldest).
@@ -24,6 +29,7 @@ public partial class BattleFx : Node3D
 {
     private const int MuzzleSlots = 10;   // one per tank of a full match: all ten can fire inside one muzzle life
     private const int ImpactSlots = 10;   // likewise: their shells can all burst inside one impact life (~1.2 s)
+    private const int SplashSlots = 10;   // likewise for shells landing in water
     private const int DebrisSlots = 16;
     private const float MuzzleFlashTime = 0.08f;
     private const float MuzzleFlashSize = 1.3f;
@@ -36,12 +42,15 @@ public partial class BattleFx : Node3D
 
     private readonly List<MuzzleSlot> _muzzles = new();
     private readonly List<ImpactSlot> _impacts = new();
+    private readonly List<SplashSlot> _splashes = new();
     private readonly List<DebrisSlot> _debris = new();
+    private WaterSurface? _water;   // looked up until found
 
     public override void _Ready()
     {
         for (int i = 0; i < MuzzleSlots; i++) _muzzles.Add(new MuzzleSlot(this));
         for (int i = 0; i < ImpactSlots; i++) _impacts.Add(new ImpactSlot(this));
+        for (int i = 0; i < SplashSlots; i++) _splashes.Add(new SplashSlot(this));
         for (int i = 0; i < DebrisSlots; i++) _debris.Add(new DebrisSlot(this));
     }
 
@@ -50,6 +59,7 @@ public partial class BattleFx : Node3D
         float dt = (float)delta;
         foreach (MuzzleSlot slot in _muzzles) slot.Advance(dt);
         foreach (ImpactSlot slot in _impacts) slot.Advance(dt);
+        foreach (SplashSlot slot in _splashes) slot.Advance(dt);
         foreach (DebrisSlot slot in _debris) slot.Advance(dt);
     }
 
@@ -69,7 +79,19 @@ public partial class BattleFx : Node3D
         Oldest(_muzzles).Play(muzzle, withSmoke);
     }
 
+    /// <summary>A shell bursting (the sim's <c>ShellExploded</c>): a water column where it lands in water (<see cref="SplashRules.IsWaterBurst"/>), else <see cref="Explosion"/> at size 1.</summary>
+    public void ShellBurst(Vector3 at, PuffColor puffs)
+    {
+        if (Water() is { Level: { } level } water && SplashRules.IsWaterBurst(water.DepthAt(at.X, at.Z), at.Y, level))
+        {
+            Oldest(_splashes).Play(new Vector3(at.X, level, at.Z), 1f);
+            return;
+        }
+        Explosion(at, puffs);
+    }
+
     /// <param name="size">1 for a shell burst; larger for a tank blowing up, smaller for a shell striking armour.</param>
+    /// <remarks>Never a splash: shell bursts go through <see cref="ShellBurst"/>.</remarks>
     public void Explosion(Vector3 at, PuffColor puffs, float size = 1f)
     {
         Oldest(_impacts).Play(at, puffs == PuffColor.Grey ? Palette.RockDust.ToColor() : Palette.Smoke.ToColor(), size);
@@ -84,6 +106,9 @@ public partial class BattleFx : Node3D
     {
         Oldest(_debris).Play(at, push, chunks, dust, size);
     }
+
+    /// <summary>The scene's water surface, looked up again on every call until there is one (null in a scene without one).</summary>
+    private WaterSurface? Water() => _water ??= WaterSurface.Find(this);
 
     private interface ISlot
     {
@@ -274,6 +299,95 @@ public partial class BattleFx : Node3D
             _puffs.Restart();
             _stones.GlobalPosition = at + Vector3.Up * 0.3f;
             _stones.Restart();
+        }
+    }
+
+    private sealed class SplashSlot : ISlot
+    {
+        private const int ColumnBlobs = 12, RingBlobs = 24;
+        private const float Lifetime = 1.2f;
+        private const float AgeCap = 10f;
+        private const float ColumnSpeedMin = 5f, ColumnSpeedMax = 10f, ColumnScaleMin = 0.7f, ColumnScaleMax = 1.2f;
+        private const float RingRadius = 0.9f, RingSpeed = 2.8f, RingScaleMin = 0.3f, RingScaleMax = 0.45f;
+
+        /// <summary>A ball twice as tall as wide: column blobs stand upright (particles here never turn).</summary>
+        private static readonly Lazy<SphereMesh> TallBall = new(() => new SphereMesh
+        {
+            Radius = 0.5f, Height = 2f, RadialSegments = 12, Rings = 6, Material = ParticleKit.Puff,
+        });
+
+        private readonly GpuParticles3D _column;
+        private readonly ParticleProcessMaterial _columnProcess;
+        private readonly GpuParticles3D _ring;
+        private readonly ParticleProcessMaterial _ringProcess;
+        private float _age = float.MaxValue;
+
+        public SplashSlot(Node parent)
+        {
+            Color foam = Palette.Foam.ToColor();
+            _columnProcess = new ParticleProcessMaterial
+            {
+                EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
+                EmissionSphereRadius = 0.35f,
+                Direction = Vector3.Up,
+                Spread = 8f,
+                DampingMin = 0.5f,
+                DampingMax = 1f,
+                Gravity = new Vector3(0, -9.8f, 0),
+                ScaleCurve = ParticleKit.Pop(start: 0.4f, overshoot: 1.15f, peakAt: 0.12f, shrinkFrom: 0.55f),
+                Color = foam,
+            };
+            _column = ParticleKit.OneShot(ColumnBlobs, Lifetime, 0.85f, _columnProcess, TallBall.Value);
+            // The ring's blobs sit on the surface and drift out from the centre, slowing down (radial velocity × the curve).
+            var slowDown = new Curve();
+            slowDown.AddPoint(new Vector2(0f, 1f));
+            slowDown.AddPoint(new Vector2(1f, 0.25f));
+            _ringProcess = new ParticleProcessMaterial
+            {
+                EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Ring,
+                EmissionRingAxis = Vector3.Up,
+                EmissionRingHeight = 0f,
+                Direction = Vector3.Up,
+                Spread = 0f,
+                InitialVelocityMin = 0f,
+                InitialVelocityMax = 0f,
+                RadialVelocityCurve = new CurveTexture { Curve = slowDown },
+                Gravity = Vector3.Zero,
+                ScaleCurve = ParticleKit.Pop(start: 0.5f, overshoot: 1.1f, peakAt: 0.15f, shrinkFrom: 0.4f),
+                Color = foam,
+            };
+            _ring = ParticleKit.OneShot(RingBlobs, Lifetime, 1f, _ringProcess, ParticleKit.PuffBall);
+            parent.AddChild(_column);
+            parent.AddChild(_ring);
+        }
+
+        public float Age => _age;
+
+        public void Advance(float dt)
+        {
+            if (_age < Lifetime + AgeCap) _age += dt;
+        }
+
+        /// <param name="surface">The burst's point on the water surface.</param>
+        /// <param name="size">1 for a shell burst, smaller for a shell striking armour.</param>
+        public void Play(Vector3 surface, float size)
+        {
+            _age = 0f;
+            float grow = MathF.Sqrt(size);
+            _columnProcess.InitialVelocityMin = ColumnSpeedMin * grow;
+            _columnProcess.InitialVelocityMax = ColumnSpeedMax * grow;
+            _columnProcess.ScaleMin = ColumnScaleMin * size;
+            _columnProcess.ScaleMax = ColumnScaleMax * size;
+            _column.GlobalPosition = surface;
+            _column.Restart();
+            _ringProcess.EmissionRingRadius = RingRadius * size;
+            _ringProcess.EmissionRingInnerRadius = RingRadius * size * 0.85f;
+            _ringProcess.RadialVelocityMin = RingSpeed * grow * 0.85f;
+            _ringProcess.RadialVelocityMax = RingSpeed * grow;
+            _ringProcess.ScaleMin = RingScaleMin * size;
+            _ringProcess.ScaleMax = RingScaleMax * size;
+            _ring.GlobalPosition = surface + Vector3.Up * 0.05f;
+            _ring.Restart();
         }
     }
 

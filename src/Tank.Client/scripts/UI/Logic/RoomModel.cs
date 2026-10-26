@@ -19,7 +19,7 @@ public sealed record RoomColumnView(string Title, ColumnSide Side, IReadOnlyList
 /// <summary>
 /// Everything the room screen shows and which controls work, worked out from the room state and the viewer's slot.
 /// Engine-free so it is tested as it is. In a team mode there are two columns, 我方 (the viewer's team) and 敌方; without
-/// teams, one. The host alone sets mode and bots and starts; everyone picks a tank, readies up and (in a team mode) swaps sides.
+/// teams, one. The host alone sets mode, map and bots and starts; everyone picks a tank, readies up and (in a team mode) swaps sides.
 /// </summary>
 public sealed class RoomModel
 {
@@ -34,6 +34,7 @@ public sealed class RoomModel
     public int Bots { get; private init; }
     public bool HasTeams { get; private init; }
     public bool IsHost { get; private init; }
+    /// <summary>The mode and the map, e.g. 团队对战 · 河谷.</summary>
     public string Title { get; private init; } = "";
     public string RuleLine { get; private init; } = "";
 
@@ -42,8 +43,18 @@ public sealed class RoomModel
 
     public IReadOnlyList<RoomColumnView> Columns { get; private init; } = Array.Empty<RoomColumnView>();
 
+    /// <summary>The room's map, a <c>MapCatalog</c> id as the server sent it.</summary>
+    public string MapId { get; private init; } = "";
+
+    /// <summary>The map's display name (试驾场地图, 河谷).</summary>
+    public string MapName { get; private init; } = "";
+
+    /// <summary>Whether the server has the map ready; only then can a match start.</summary>
+    public MapState MapState { get; private init; }
+
     public bool CanSetMode { get; private init; }
     public bool CanSetBots { get; private init; }
+    public bool CanSetMap { get; private init; }
     public bool CanSwitchTeam { get; private init; }
 
     /// <summary>The team to ask for with 换到对面: the one the viewer isn't on.</summary>
@@ -72,18 +83,23 @@ public sealed class RoomModel
         byte myTeam = me?.Team ?? 0;
         StartPlan plan = room.MatchRunning ? default : RoomRules.PlanFor(room);   // bots join only when a match starts
         string? block = isHost ? RoomRules.StartBlockReason(room) : null;
+        string mapName = MapText.Name(room.Map);
         return new RoomModel
         {
             Mode = room.Mode,
             Bots = room.Bots,
             HasTeams = teams,
             IsHost = isHost,
-            Title = ModeText.Name(room.Mode),
+            Title = string.Create(CultureInfo.InvariantCulture, $"{ModeText.Name(room.Mode)} · {mapName}"),
             RuleLine = ModeText.Rule(room.Mode),
             WaitingText = room.MatchRunning ? WaitingNotice : null,
             Columns = BuildColumns(room, mySlot, myTeam, teams, plan),
+            MapId = room.Map,
+            MapName = mapName,
+            MapState = room.MapState,
             CanSetMode = isHost && !room.MatchRunning,
             CanSetBots = isHost && !room.MatchRunning,
+            CanSetMap = isHost && !room.MatchRunning,
             CanSwitchTeam = teams && me is not null,
             OtherTeam = (byte)(1 - myTeam),
             MyTankIndex = me is null ? -1 : me.TankIndex,
@@ -152,6 +168,6 @@ public sealed class RoomModel
     {
         IEnumerable<string> rows = m.Columns.SelectMany(c => c.Rows.Select(r => $"{c.Side}:{r.Slot}:{r.Name}:{r.Tags}:{r.TankName}:{r.State}"));
         return string.Create(CultureInfo.InvariantCulture,
-            $"{m.Mode}|{m.Bots}|{m.IsHost}|{m.WaitingText}|{m.CanStart}|{m.StartHint}|{m.MyTankIndex}|{m.MyReady}|{string.Join(';', rows)}");
+            $"{m.Mode}|{m.MapId}|{m.MapState}|{m.Bots}|{m.IsHost}|{m.WaitingText}|{m.CanStart}|{m.StartHint}|{m.MyTankIndex}|{m.MyReady}|{string.Join(';', rows)}");
     }
 }

@@ -4,6 +4,7 @@ using Tank.Client.Cameras;
 using Tank.Client.Combat;
 using Tank.Client.Online;
 using Tank.Client.Overlay;
+using Tank.Client.Sandbox;
 using Tank.Client.UI;
 using Tank.Client.Vehicles;
 using Tank.Client.World;
@@ -30,7 +31,6 @@ namespace Tank.Client.Match;
 public partial class MatchMain : Node3D
 {
     private const double VirtualFrame = 1.0 / 60;
-    private const string Title = "坦克 3D · 对局";
     private const float StartPitch = 0.25f;   // the orbit camera's pitch on entering, looking a little down on the tank
 
     private readonly MatchInput _input = new();
@@ -46,9 +46,12 @@ public partial class MatchMain : Node3D
     private BattleClient _client = null!;
     private LaunchOptions _options = new();
     private MatchAutomation _automation = null!;
+    private MapSite _site = MapSites.Sandbox;   // the room's map's site: the fixed cameras of scripted screenshots
+    private bool _titled;          // the room state has come: the window title names the map and _site is its site
+    private bool _mapViewOn;       // the "map" preset has turned the camera orthographic
     private RoomStateMessage? _namesFrom;   // the room state the names were read from
     private Battlefield? _field;
-    private Func<float, float, float> _groundAt = null!;
+    private Func<float, float, float> _groundAt = null!;   // the ground or the water over it, for the fixed cameras
     private BattleWorld? _world;   // null until the field is known
     private TankActor? _tank;      // null until the own tank is known
     private TankSpec? _tankSpec;   // the spec it was built for
@@ -87,7 +90,8 @@ public partial class MatchMain : Node3D
     public void Setup(BattleSession session, LaunchOptions options, bool screenshotTaken)
     {
         (_session, _client, _options) = (session, session.Client, options);
-        _automation = new MatchAutomation(options, screenshotTaken);
+        _site = MapSites.For(_client.Room?.Map);   // no room state yet (a mid-match join): the sandbox's, which only scripted shots use
+        _automation = new MatchAutomation(options, screenshotTaken, _site);
     }
 
     /// <summary>Whether the run's screenshot is spent, this match's own or an earlier one; the owner reads it as the scene goes.</summary>
@@ -95,7 +99,7 @@ public partial class MatchMain : Node3D
 
     public override void _Ready()
     {
-        GetWindow().Title = Title;
+        UpdateTitle();
         MatchInput.RegisterActions();
         _input.NetPanelOpen = _options.NetGraph;
         _loading = BuildLoadingLayer();
@@ -103,6 +107,19 @@ public partial class MatchMain : Node3D
         _automation.Start(this);   // --screenshot-at (and --quit-after) count from here, not from the process start
         _automation.ReportBadOptions();
         if (!_automation.IgnoresInput) Input.MouseMode = Input.MouseModeEnum.Captured;
+    }
+
+    /// <summary>
+    /// Names the map in the window title once the room state is known: at once when it is, else on the first frame it is
+    /// (joining a running match, the match start comes before the room state), when the map's site is picked again too.
+    /// Until then the title says 对局; it is set (and logged) only when it changes.
+    /// </summary>
+    private void UpdateTitle()
+    {
+        RoomStateMessage? room = _client.Room;
+        if (room is not null) _site = MapSites.For(room.Map);
+        WindowTitle.Set(this, MapText.MatchTitle(room?.Map));
+        _titled = room is not null;
     }
 
     public override void _Process(double delta)
@@ -124,6 +141,7 @@ public partial class MatchMain : Node3D
             Finished?.Invoke();
             return;
         }
+        if (!_titled && _client.Room is not null) UpdateTitle();
         StepMatch(dt);
         _automation.EndFrame(delta, _time);   // last, and on loading frames too: the capture schedule runs on the match clock
     }
@@ -252,10 +270,11 @@ public partial class MatchMain : Node3D
     private void BuildScene(Battlefield field)
     {
         _field = field;
-        _groundAt = field.Terrain.HeightAt;
+        _groundAt = MapSites.SurfaceHeight(field);
         TankState focus = _client.HasTank ? _client.Own : new TankState { Position = new SN.Vector2(field.Terrain.SizeX / 2f, field.Terrain.SizeZ / 2f) };
         _world = Add(new BattleWorld());
-        _world.Build(field, focus, MapStyle.Sandbox, CameraPresets.StreamsAroundCamera(_automation.Preset));
+        // The room state names the map; joining a running match it may not have come yet, so its ground's grid does.
+        _world.Build(field, focus, MapStyle.For(_client.Room?.Map ?? MapSites.IdOfGrid(field.Terrain)), CameraPresets.StreamsAroundCamera(_automation.Preset));
         _fx = Add(new BattleFx());
         _actors = Add(new TankActors());
         _actors.Build(field.Terrain, _fx);
@@ -270,7 +289,7 @@ public partial class MatchMain : Node3D
     private void TakeField(Battlefield field)
     {
         _field = field;
-        _groundAt = field.Terrain.HeightAt;
+        _groundAt = MapSites.SurfaceHeight(field);
         _world!.SetField(field);
         _combat.SetField(field);
         _actors.SetTerrain(field.Terrain);

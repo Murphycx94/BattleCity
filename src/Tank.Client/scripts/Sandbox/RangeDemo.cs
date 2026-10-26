@@ -28,11 +28,13 @@ public enum DemoAim
 /// <see cref="Spot"/>'s <see cref="TankSpec"/>, so it can't drift from the kind of tank standing there) and pulls the
 /// trigger from <see cref="FireTick"/> on, once or (<see cref="KeepFiring"/>) whenever reloaded. A demo with
 /// <see cref="DriveSeconds"/> fires nothing: from <see cref="FireTick"/> it drives at full throttle for that long, then
-/// stops. The patrolling target stays parked at its start unless <see cref="PatrolDrives"/>.
+/// stops. The patrolling target stays parked at its start unless <see cref="PatrolDrives"/>. The targets are
+/// <see cref="Spots"/> (another map's), else the sandbox's; with <see cref="AimAt"/> the gun is laid on that world point
+/// instead of the target's armour (a house, a tree).
 /// </summary>
 public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, DemoAim Aim, AmmoType Ammo, bool KeepFiring,
     float PlayerTurn = 0f, float DriveSeconds = 0f, double FireAfter = RangeDemo.DefaultFireAfter, SN.Vector2? Stand = null,
-    bool PatrolDrives = false)
+    bool PatrolDrives = false, IReadOnlyList<TargetSpot>? Spots = null, SN.Vector3? AimAt = null)
 {
     public const double DefaultFireAfter = 3.0;
 
@@ -120,27 +122,29 @@ public sealed record RangeDemo(int Target, float AngleOffFront, float Distance, 
     /// The player's command for <paramref name="player"/>'s tick, in place of its own (the tests drive the sim with it
     /// too). Never steers. A shooting demo stands still, lays the gun on its aim point and pulls the trigger from
     /// <see cref="FireTick"/> on, once (until <paramref name="hasFired"/>) or, with <see cref="KeepFiring"/>, whenever
-    /// loaded. A driving demo keeps the gun level and straight ahead (so a tank destroyer's hull doesn't turn after an
-    /// aim outside its arc) and drives at <see cref="Throttle"/>.
+    /// loaded; the aim point is <see cref="AimAt"/> when given, else the target's <see cref="AimPoint"/>. A driving demo
+    /// keeps the gun level and straight ahead (so a tank destroyer's hull doesn't turn after an aim outside its arc) and
+    /// drives at <see cref="Throttle"/>.
     /// </summary>
     public InputCmd Command(in InputCmd player, in TankState tank, Battlefield field, bool hasFired)
     {
         if (IsDriving)
             return player with { Throttle = Throttle(player.Tick), Steer = 0, AimYaw = tank.Yaw, AimPitch = 0f, Fire = false, Ammo = Ammo };
         TankPose pose = TankPose.Compute(tank, field.Terrain);
-        SN.Vector3 aim = AimPoint(field.Terrain.HeightAt(Spot.Position.X, Spot.Position.Y));
+        SN.Vector3 aim = AimAt ?? AimPoint(field.Terrain.HeightAt(Spot.Position.X, Spot.Position.Y));
         var (yaw, pitch) = Angles.AimAngles(aim - pose.Trunnion(tank.Spec), player.AimYaw);
         bool fire = player.Tick >= FireTick && (KeepFiring || !hasFired);
         return player with { Throttle = 0, Steer = 0, AimYaw = yaw, AimPitch = pitch, Fire = fire, Ammo = Ammo };
     }
 
-    public TargetSpot Spot => SandboxMap.TargetSpots[Target];
+    /// <summary>The target shot at: <see cref="Target"/> in <see cref="Spots"/>, or in the sandbox's targets.</summary>
+    public TargetSpot Spot => (Spots ?? SandboxMap.TargetSpots)[Target];
 
     /// <summary>Where the player's tank is parked: <see cref="Stand"/>, else round from the target.</summary>
     public SN.Vector2 PlayerPosition => Stand ?? Spot.Position + Angles.Forward(Spot.Yaw + Angles.Deg(AngleOffFront)) * Distance;
 
-    /// <summary>Heading from the player's tank to the target (where the demo camera looks).</summary>
-    public float Bearing => Angles.YawOf(Spot.Position - PlayerPosition);
+    /// <summary>Heading from the player's tank to <see cref="AimAt"/>, else to the target (where the demo camera looks).</summary>
+    public float Bearing => Angles.YawOf((AimAt is { } at ? new SN.Vector2(at.X, at.Z) : Spot.Position) - PlayerPosition);
 
     /// <summary>The player's hull: facing the target, turned <see cref="PlayerTurn"/> degrees to the left.</summary>
     public float PlayerYaw => Angles.Wrap(Bearing + Angles.Deg(PlayerTurn));

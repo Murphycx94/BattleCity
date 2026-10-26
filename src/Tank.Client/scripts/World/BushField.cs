@@ -18,20 +18,32 @@ namespace Tank.Client.World;
 ///   <see cref="ReboundSeconds"/> (the shader pushes away from the last overlapping tank position).
 /// Only instances whose values changed are re-uploaded. A bush shot away is scaled to nothing until it is restored
 /// (<see cref="SyncStanding"/>), and skipped meanwhile: its fade and push stay where they were.
+/// The bushes are filed by <see cref="SectorSize"/> m sectors of their centre (<see cref="SectorGrid"/>), so a frame only
+/// looks at the sectors near the camera and along the line to the tank (all a bush must be in to clear the view or part)
+/// and at the bushes still fading or springing back; every other bush is solid and still, so leaving it out changes
+/// nothing. A view too wide for the sector list looks at every bush.
 /// </summary>
 public partial class BushField : Node3D
 {
-    public const float NearCamera = 6f;
+    public const float NearCamera = SeeThroughFades.NearCamera;   // the trees and houses fade by the same rule
     public const float OwnTankMargin = 1f;
-    public const float SeeThrough = 0.5f;
-    public const float FadeSeconds = 0.3f;
+    public const float SeeThrough = SeeThroughFades.SeeThrough;
+    public const float FadeSeconds = SeeThroughFades.FadeSeconds;
     public const float ReboundSeconds = 0.5f;
     private const float PushMargin = 0.4f;     // a bush starts parting this far before the hull touches its edge
     private const float GrowSeconds = 0.12f;   // how fast the leaves get out of the way
     private const int Variants = 4;
     private const float Sink = 0.15f;          // roots a little below the ground on uneven terrain
+    private const float SectorSize = 80f;      // the sectors the bushes are filed by, for the per-frame lookup
+    private const float ReachSlack = 1f;       // extra reach on the sector lookup, so rounding never leaves a bush out
+    private const int MaxSectors = SeeThroughFades.MaxSectors;   // sector keys one frame may look in; a wider view looks at every bush
 
     private readonly List<Bush> _bushes = new();
+    private readonly SectorGrid _grid = new(SectorSize);
+    private readonly Dictionary<(int X, int Z), Bush[]> _sectors = new();
+    private readonly List<Bush> _active = new();   // bushes not at rest (fading or springing back), stepped every frame
+    private float _widest;                          // the largest bush radius: how far a bush reaches out of its sector
+    private int _frame;
 
     private sealed class Bush
     {
@@ -48,6 +60,11 @@ public partial class BushField : Node3D
         public SN.Vector2 PushFrom;
         public Color Uploaded = new(1f, 0f, 0f, 0f);
         public bool Shown = true;
+        public bool Active;      // in _active
+        public int Seen = -1;    // the last frame Update stepped it
+
+        /// <summary>Solid and not parted: a frame that doesn't clear or push it changes nothing.</summary>
+        public bool AtRest => Opacity == 1f && Push == 0f;
     }
 
     public int Count => _bushes.Count;
@@ -101,37 +118,90 @@ public partial class BushField : Node3D
                 ExtraCullMargin = 1.5f,
             });
         }
+        foreach (var sector in _bushes.GroupBy(b => _grid.KeyOf(b.Center.X, b.Center.Y)))
+            _sectors[sector.Key] = sector.ToArray();
+        _widest = _bushes.Count == 0 ? 0f : _bushes.Max(b => b.Radius);
+        _active.Capacity = _bushes.Count;   // so listing a bush never allocates mid-game
     }
 
     /// <param name="camera">Camera position this frame.</param>
     /// <param name="followed">The followed tank's hull footprint; null for a free camera, where only the camera clears bushes.</param>
     public void Update(Vector3 camera, Obb2? followed, float delta)
     {
-        Obb2 hull = followed ?? default;
-        bool hasHull = followed is not null;
-        Obb2 own = hull with { HalfExtents = hull.HalfExtents + new SN.Vector2(OwnTankMargin) };
-        Obb2 pushing = hull with { HalfExtents = hull.HalfExtents + new SN.Vector2(PushMargin) };
-        var eye = new SN.Vector2(camera.X, camera.Z);
-        foreach (Bush bush in _bushes)
+        var frame = new Frame(camera, followed, delta);
+        _frame++;
+        // A bush can only clear or part if its centre is within NearCamera + its radius of the eye, or within its radius
+        // (plus the grown hull's corner) of the line to the hull: the sectors that reach that far hold all of them.
+        float hullReach = followed is { } hull ? (hull.HalfExtents + new SN.Vector2(MathF.Max(OwnTankMargin, PushMargin))).Length() : 0f;
+        float reach = _widest + hullReach + ReachSlack;
+        SN.Vector2? tank = followed?.Center;
+        Span<(int X, int Z)> keys = stackalloc (int X, int Z)[MaxSectors];
+        int count = _grid.InView(frame.Eye, tank, NearCamera, reach, keys);
+        if (count < 0)   // more sectors than keys: look at every bush
         {
-            if (!bush.Shown) continue;   // shot away: nothing to fade or push, nothing to upload
-            bool clear = DistanceToBush(camera, bush) < NearCamera
-                || (hasHull && (own.IntersectsCircle(bush.Center, bush.Radius) || SegmentDistance(bush.Center, eye, hull.Center) <= bush.Radius));
-            float target = clear ? SeeThrough : 1f;
-            bush.Opacity = Mathf.MoveToward(bush.Opacity, target, (1f - SeeThrough) * delta / FadeSeconds);
-
-            if (hasHull && pushing.IntersectsCircle(bush.Center, bush.Radius))
-            {
-                bush.PushFrom = hull.Center;
-                bush.Push = Mathf.MoveToward(bush.Push, 1f, delta / GrowSeconds);
-            }
-            else bush.Push = Mathf.MoveToward(bush.Push, 0f, delta / ReboundSeconds);
-
-            var data = new Color(bush.Opacity, Ease(bush.Push), bush.PushFrom.X, bush.PushFrom.Y);
-            if (data == bush.Uploaded) continue;
-            bush.Multimesh.SetInstanceCustomData(bush.Index, data);
-            bush.Uploaded = data;
+            foreach (Bush bush in _bushes) Step(bush, frame);
         }
+        for (int k = 0; k < count; k++)
+            if (_sectors.TryGetValue(keys[k], out Bush[]? inSector))
+                foreach (Bush bush in inSector) Step(bush, frame);
+        for (int k = _active.Count - 1; k >= 0; k--)
+        {
+            Bush bush = _active[k];
+            Step(bush, frame);
+            if (!bush.Shown || !bush.AtRest) continue;   // one shot away keeps its fade and push for when it is restored
+            bush.Active = false;
+            _active.RemoveSwapAt(k);
+        }
+    }
+
+    /// <summary>One frame's view: the camera, the followed tank's hull and the grown hulls that clear and part bushes.</summary>
+    private readonly struct Frame
+    {
+        public Frame(Vector3 camera, Obb2? followed, float delta)
+        {
+            (Camera, Delta, HasHull) = (camera, delta, followed is not null);
+            Hull = followed ?? default;
+            Own = Hull with { HalfExtents = Hull.HalfExtents + new SN.Vector2(OwnTankMargin) };
+            Pushing = Hull with { HalfExtents = Hull.HalfExtents + new SN.Vector2(PushMargin) };
+            Eye = new SN.Vector2(camera.X, camera.Z);
+        }
+
+        public Vector3 Camera { get; }
+        public SN.Vector2 Eye { get; }
+        public float Delta { get; }
+        public bool HasHull { get; }
+        public Obb2 Hull { get; }
+        public Obb2 Own { get; }
+        public Obb2 Pushing { get; }
+    }
+
+    /// <summary>Fades and parts one bush for this frame (once a frame) and uploads it if it changed; lists it while it is not at rest.</summary>
+    private void Step(Bush bush, in Frame frame)
+    {
+        if (bush.Seen == _frame) return;
+        bush.Seen = _frame;
+        if (!bush.Shown) return;   // shot away: nothing to fade or push, nothing to upload
+        bool clear = DistanceToBush(frame.Camera, bush) < NearCamera
+            || (frame.HasHull && (frame.Own.IntersectsCircle(bush.Center, bush.Radius) || SegmentDistance(bush.Center, frame.Eye, frame.Hull.Center) <= bush.Radius));
+        float target = clear ? SeeThrough : 1f;
+        bush.Opacity = Mathf.MoveToward(bush.Opacity, target, (1f - SeeThrough) * frame.Delta / FadeSeconds);
+
+        if (frame.HasHull && frame.Pushing.IntersectsCircle(bush.Center, bush.Radius))
+        {
+            bush.PushFrom = frame.Hull.Center;
+            bush.Push = Mathf.MoveToward(bush.Push, 1f, frame.Delta / GrowSeconds);
+        }
+        else bush.Push = Mathf.MoveToward(bush.Push, 0f, frame.Delta / ReboundSeconds);
+
+        if (!bush.Active && !bush.AtRest)
+        {
+            bush.Active = true;
+            _active.Add(bush);
+        }
+        var data = new Color(bush.Opacity, Ease(bush.Push), bush.PushFrom.X, bush.PushFrom.Y);
+        if (data == bush.Uploaded) return;
+        bush.Multimesh.SetInstanceCustomData(bush.Index, data);
+        bush.Uploaded = data;
     }
 
     /// <summary>Hides the bushes that have been shot away (scaled to nothing) and shows restored ones again.</summary>

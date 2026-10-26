@@ -42,6 +42,12 @@ public sealed record TankSpec
     /// </summary>
     public required float BrickWallRamSpeed { get; init; }
 
+    /// <summary>
+    /// Above this speed (m/s, either way) the hull knocks a house down outright, losing half its speed (riverland design
+    /// §2.5: the medium and heavy tanks, above 20 km/h). <see cref="float.PositiveInfinity"/>: it can't.
+    /// </summary>
+    public required float HouseRamSpeed { get; init; }
+
     /// <summary>Gun pivot height above the hull origin.</summary>
     public required float TrunnionHeight { get; init; }
 

@@ -17,7 +17,24 @@ public sealed record RejectMessage(string Reason);
 /// <summary>One seat in the room. <see cref="TankIndex"/> is an index into <c>TankCatalog.All</c>.</summary>
 public sealed record RoomPlayer(byte Slot, string Name, byte Team, byte TankIndex, bool Ready, bool Connected, bool IsBot);
 
-public sealed record RoomStateMessage(BattleMode Mode, byte HostSlot, byte Bots, bool MatchRunning, IReadOnlyList<RoomPlayer> Players);
+/// <summary>Where the server is with a room's map. Values are on the wire: append only.</summary>
+public enum MapState : byte
+{
+    /// <summary>Being generated and encoded: a match can start once it is ready.</summary>
+    Generating = 0,
+
+    /// <summary>Generated and encoded: a match can start on it.</summary>
+    Ready = 1,
+
+    /// <summary>The generator threw (a bug, logged on the server, never retried): no match can start on it.</summary>
+    Failed = 2,
+}
+
+/// <summary>The room as everyone in it sees it (stage 5 design §2).</summary>
+/// <param name="Map">The id of the map the next match is played on (a <c>MapCatalog</c> id).</param>
+/// <param name="MapState">Whether the server has that map ready: only then can a match start.</param>
+public sealed record RoomStateMessage(BattleMode Mode, byte HostSlot, byte Bots, bool MatchRunning, IReadOnlyList<RoomPlayer> Players,
+    string Map = SandboxMap.Id, MapState MapState = MapState.Ready);
 
 public enum RoomCommandKind : byte
 {
@@ -28,6 +45,9 @@ public enum RoomCommandKind : byte
     SetReady = 4,
     StartMatch = 5,
     ReturnToRoom = 6,
+
+    /// <summary>The host picks the room's map by its id (ignoring case); only in the room, not while a match runs.</summary>
+    SetMap = 7,
 }
 
 public sealed record RoomCommandMessage(RoomCommandKind Kind, string Arg);
@@ -39,19 +59,45 @@ public readonly record struct PropState(int PropId, byte Durability);
 /// Everything a client needs to join a match in progress (design §5.4): the map itself, the props that aren't as new,
 /// the clock, and which tank is the client's (0: none, it spectates or waits).
 /// </summary>
-public sealed record MatchStartMessage(BattleMode Mode, int MatchNumber, int CurrentTick, int EndTick, MapData Map, IReadOnlyList<PropState> Props, int MyTankId);
+/// <param name="Map">
+/// The map; null when the server left it out: its answer to a <see cref="MatchStateRequest"/> from a client that already
+/// has this match's map, which keeps its own (a resync costs a few bytes, not the whole map).
+/// </param>
+public sealed record MatchStartMessage(BattleMode Mode, int MatchNumber, int CurrentTick, int EndTick, MapData? Map, IReadOnlyList<PropState> Props, int MyTankId);
+
+/// <summary>A client asks for the match state again (<see cref="BattleMessage.RequestMatchState"/>).</summary>
+/// <param name="NeedMap">
+/// The client has no map for the running match (it was sent a match start without one it can't use): the answer must
+/// carry the map even if the server thinks this connection already has it.
+/// </param>
+public sealed record MatchStateRequest(bool NeedMap);
 
 /// <summary>A tick's events for one client, with the new hit points of every prop that changed (design §5.6).</summary>
 public readonly record struct EventBatch(int Tick, IReadOnlyList<GameEvent> Events, IReadOnlyList<PropState> Props);
 
-public sealed record RoomInfoMessage(int ProtocolVersion, string RoomName, BattleMode Mode, int Players, int MaxPlayers, bool MatchRunning, int Port);
+/// <summary>A room's answer to a LAN discovery broadcast.</summary>
+/// <param name="Map">The room's map id; only on the wire from version 3 on, so a v2 room's answer reads as <c>""</c>.</param>
+public sealed record RoomInfoMessage(int ProtocolVersion, string RoomName, BattleMode Mode, int Players, int MaxPlayers, bool MatchRunning, int Port,
+    string Map = SandboxMap.Id);
 
 /// <summary>Encoders and decoders for everything but inputs and snapshots. Decoders assume the type byte was read.</summary>
 public static class BattleMessages
 {
+    /// <summary>The most props a map may have (riverland design §5.1: the riverland map has about 5600).</summary>
+    public const int MaxMapProps = 16384;
+
     private const int MaxEventsPerBatch = 1024;
-    private const int MaxPropsPerMessage = 4096;
+    private const int MaxPropsPerMessage = 4096;   // prop states in an event batch
     private const int MaxMapSamples = 1024 * 1024;
+    private const int MinPropBits = 30 * 8;        // a map prop: id (at least a byte), kind, seven floats
+    private const int MinRunBits = 2 * 8;          // a ground run: length (at least a byte), kind
+    private const int MinPropStateBits = 2 * 8;    // a prop state: id (at least a byte), hit points
+    private const byte WaterFlag = 1;
+    private const byte MapIncludedFlag = 1;           // match start: the map follows the header
+    private const byte NeedMapFlag = 1;               // match state request: send the map whatever the server thinks
+    private const int MaxVarUIntBytes = 5;
+    private const int MaxMatchStartHeaderBytes = 3 + 3 * MaxVarUIntBytes;   // type, mode, flags and three numbers
+    private const int MapInRoomInfoVersion = 3;   // a room's LAN answer names its map from this version on
 
     // ---- Hello / Welcome / Reject ----
 
@@ -102,6 +148,8 @@ public static class BattleMessages
             w.WriteBool(p.Connected);
             w.WriteBool(p.IsBot);
         }
+        w.WriteString(m.Map, BattleProtocol.MaxMapIdBytes);
+        w.WriteByte((byte)m.MapState);
     }
 
     public static RoomStateMessage ReadRoomState(ref BitReader r)
@@ -114,7 +162,10 @@ public static class BattleMessages
         var players = new List<RoomPlayer>((int)count);
         for (int i = 0; i < count; i++)
             players.Add(new RoomPlayer(r.ReadByte(), r.ReadString(BattleProtocol.MaxNameBytes), (byte)r.ReadBits(4), (byte)r.ReadBits(2), r.ReadBool(), r.ReadBool(), r.ReadBool()));
-        return new RoomStateMessage(mode, host, bots, running, players);
+        string map = r.ReadString(BattleProtocol.MaxMapIdBytes);
+        byte mapState = r.ReadByte();
+        if (mapState > (byte)MapState.Failed) throw new ProtocolException("Unknown map state.");
+        return new RoomStateMessage(mode, host, bots, running, players, map, (MapState)mapState);
     }
 
     public static void Write(BitWriter w, RoomCommandMessage m)
@@ -127,37 +178,91 @@ public static class BattleMessages
     public static RoomCommandMessage ReadRoomCommand(ref BitReader r)
     {
         byte kind = r.ReadByte();
-        if (kind > (byte)RoomCommandKind.ReturnToRoom) throw new ProtocolException("Unknown room command.");
+        if (kind > (byte)RoomCommandKind.SetMap) throw new ProtocolException("Unknown room command.");
         return new RoomCommandMessage((RoomCommandKind)kind, r.ReadString());
     }
 
     // ---- Match start ----
 
+    /// <summary>
+    /// The type byte, the mode, the match number, the tick and the end tick; a flags byte (bit 0: the map follows; the
+    /// others 0); the map (<see cref="WriteMap"/>) when there is one; the props that aren't as new; the client's tank.
+    /// </summary>
     public static void Write(BitWriter w, MatchStartMessage m)
+    {
+        WriteMatchStartHeader(w, m);
+        if (m.Map is not null) WriteMap(w, m.Map);
+        WriteMatchStartTail(w, m);
+    }
+
+    /// <summary>
+    /// The same bytes as <see cref="Write(BitWriter, MatchStartMessage)"/>, with the map copied in from
+    /// <paramref name="encodedMap"/> (what <see cref="WriteMap"/> wrote for <c>m.Map</c>) instead of encoded again: a
+    /// server encodes a map once and sends it to every seat. Only whole bytes come before the map, so it lands aligned.
+    /// The writer is grown once, to all the message can take, before anything is written.
+    /// </summary>
+    /// <exception cref="ArgumentException"><c>m.Map</c> is null: a match start without the map has nothing to copy in.</exception>
+    public static void Write(BitWriter w, MatchStartMessage m, ReadOnlySpan<byte> encodedMap)
+    {
+        if (m.Map is null) throw new ArgumentException("A match start without its map takes no encoded map.", nameof(m));
+        w.Reserve(MaxMatchStartHeaderBytes + encodedMap.Length + MaxMatchStartTailBytes(m.Props.Count));
+        WriteMatchStartHeader(w, m);
+        w.WriteAligned(encodedMap);
+        WriteMatchStartTail(w, m);
+    }
+
+    private static void WriteMatchStartHeader(BitWriter w, MatchStartMessage m)
     {
         w.WriteByte((byte)BattleMessage.MatchStart);
         w.WriteByte((byte)m.Mode);
         w.WriteVarUInt((uint)m.MatchNumber);
         w.WriteVarUInt((uint)m.CurrentTick);
         w.WriteVarUInt((uint)m.EndTick);
-        WriteMap(w, m.Map);
+        w.WriteByte(m.Map is null ? (byte)0 : MapIncludedFlag);
+    }
+
+    private static void WriteMatchStartTail(BitWriter w, MatchStartMessage m)
+    {
         WriteProps(w, m.Props);
         w.WriteVarUInt((uint)m.MyTankId);
     }
+
+    /// <summary>The most bytes the tail can take: the prop count, each prop's id and hit points, the tank id.</summary>
+    private static int MaxMatchStartTailBytes(int props) => MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes;
 
     public static MatchStartMessage ReadMatchStart(ref BitReader r)
     {
         BattleMode mode = ReadMode(ref r);
         int number = ReadNonNegative(ref r), tick = ReadTick(ref r), end = ReadTick(ref r);
-        MapData map = ReadMap(ref r);
-        PropState[] props = ReadProps(ref r);
+        byte flags = r.ReadByte();
+        if ((flags & ~MapIncludedFlag) != 0) throw new ProtocolException("Unknown match start flags.");
+        MapData? map = (flags & MapIncludedFlag) != 0 ? ReadMap(ref r) : null;
+        PropState[] props = ReadProps(ref r, map?.Props.Length ?? MaxMapProps);   // a prop that isn't on the map has no state (the client checks a map it keeps)
         int mine = ReadNonNegative(ref r);
         return new MatchStartMessage(mode, number, tick, end, map, props, mine);
     }
 
+    // ---- Match state request ----
+
+    /// <summary>The type byte, then a flags byte (bit 0: send the map; the others 0).</summary>
+    public static void Write(BitWriter w, MatchStateRequest m)
+    {
+        w.WriteByte((byte)BattleMessage.RequestMatchState);
+        w.WriteByte(m.NeedMap ? NeedMapFlag : (byte)0);
+    }
+
+    public static MatchStateRequest ReadMatchStateRequest(ref BitReader r)
+    {
+        byte flags = r.ReadByte();
+        if ((flags & ~NeedMapFlag) != 0) throw new ProtocolException("Unknown match state request flags.");
+        return new MatchStateRequest((flags & NeedMapFlag) != 0);
+    }
+
     /// <summary>
-    /// The map (design §5.4): heights as the difference from the sample before, props field by field. About 60 KB for
-    /// the sandbox map's 201 × 201 samples and 450 props.
+    /// The map (stage 4 design §5.4, riverland design §5.1): heights as the difference from the sample before, props field
+    /// by field (the v2 bytes); then a flags byte (bit 0: water; the others 0), the water level in centimetres when there is
+    /// water, and the ground's kinds run-length encoded: the number of runs, then each run's length (at least 1) and kind,
+    /// the lengths adding up to the cells. 53 KB for the sandbox map's 201 × 201 samples and 351 props.
     /// </summary>
     public static void WriteMap(BitWriter w, MapData map)
     {
@@ -184,6 +289,25 @@ public static class BattleMessages
             WriteFloat(w, p.Bottom);
             WriteFloat(w, p.Height);
         }
+        w.WriteByte(map.WaterLevelCm is null ? (byte)0 : WaterFlag);
+        if (map.WaterLevelCm is { } level) w.WriteVarInt(level);
+        WriteSurface(w, map.Surface);
+    }
+
+    private static void WriteSurface(BitWriter w, SurfaceKind[] surface)
+    {
+        uint runs = 0;
+        for (int k = 0; k < surface.Length; k++)
+            if (k == 0 || surface[k] != surface[k - 1]) runs++;
+        w.WriteVarUInt(runs);
+        for (int start = 0; start < surface.Length;)
+        {
+            int end = start + 1;
+            while (end < surface.Length && surface[end] == surface[start]) end++;
+            w.WriteVarUInt((uint)(end - start));
+            w.WriteByte((byte)surface[start]);
+            start = end;
+        }
     }
 
     public static MapData ReadMap(ref BitReader r)
@@ -196,26 +320,58 @@ public static class BattleMessages
         int previous = 0;
         for (int k = 0; k < heights.Length; k++) heights[k] = previous += r.ReadVarInt();
         uint count = r.ReadVarUInt();
-        if (count > MaxPropsPerMessage) throw new ProtocolException("Too many props.");
+        if (count > MaxMapProps) throw new ProtocolException("Too many props.");
+        if (count > r.RemainingBits / MinPropBits) throw new ProtocolException("Map shorter than its props say.");   // don't allocate for a lie
         var props = new Prop[count];
         for (int i = 0; i < count; i++)
         {
             int id = ReadNonNegative(ref r);
             byte kind = r.ReadByte();
-            if (kind > (byte)PropKind.Fence) throw new ProtocolException("Unknown prop kind.");
+            if (kind > (byte)Prop.LastKind) throw new ProtocolException("Unknown prop kind.");
             var center = new Vector2(ReadFloat(ref r), ReadFloat(ref r));
             var half = new Vector2(ReadFloat(ref r), ReadFloat(ref r));
             float yaw = ReadFloat(ref r), bottom = ReadFloat(ref r), height = ReadFloat(ref r);
             props[i] = new Prop(id, (PropKind)kind, new Obb2(center, half, yaw), bottom, height);
         }
+        byte flags = r.ReadByte();
+        if ((flags & ~WaterFlag) != 0) throw new ProtocolException("Unknown map flags.");
+        int? waterLevelCm = null;
+        if ((flags & WaterFlag) != 0)
+        {
+            int level = r.ReadVarInt();
+            if (level < -MapData.MaxWaterLevelCm || level > MapData.MaxWaterLevelCm) throw new ProtocolException("Water level out of range.");
+            waterLevelCm = level;
+        }
+        SurfaceKind[] surface = ReadSurface(ref r, (sx - 1) * (sz - 1));   // fewer than the samples: no overflow
         try
         {
-            return new MapData(sx, sz, cell, heights, props, border);
+            return new MapData(sx, sz, cell, heights, props, border, surface, waterLevelCm);
         }
         catch (ArgumentException ex)
         {
             throw new ProtocolException($"Bad map: {ex.Message}");
         }
+    }
+
+    private static SurfaceKind[] ReadSurface(ref BitReader r, int cells)
+    {
+        uint runs = r.ReadVarUInt();
+        if (runs > cells) throw new ProtocolException("More ground runs than cells.");
+        if (runs > r.RemainingBits / MinRunBits) throw new ProtocolException("Map shorter than its ground runs say.");
+        var surface = new SurfaceKind[cells];   // no bigger than the heights already read
+        int filled = 0;
+        for (uint run = 0; run < runs; run++)
+        {
+            uint length = r.ReadVarUInt();
+            byte kind = r.ReadByte();
+            if (length == 0) throw new ProtocolException("Empty ground run.");
+            if (length > cells - filled) throw new ProtocolException("Ground runs longer than the cells.");
+            if (kind > (byte)SurfaceMap.LastKind) throw new ProtocolException("Unknown ground kind.");
+            surface.AsSpan(filled, (int)length).Fill((SurfaceKind)kind);
+            filled += (int)length;
+        }
+        if (filled != cells) throw new ProtocolException("Ground runs shorter than the cells.");
+        return surface;
     }
 
     // ---- Events ----
@@ -261,7 +417,7 @@ public static class BattleMessages
             int prop = ReadNonNegative(ref r);
             events[i] = new GameEvent((GameEventType)type, tick, tank, shell, position, velocity, target, result, damage, ammo, prop);
         }
-        return new EventBatch(tick, events, ReadProps(ref r));
+        return new EventBatch(tick, events, ReadProps(ref r, MaxPropsPerMessage));
     }
 
     private static void WriteProps(BitWriter w, IReadOnlyList<PropState> props)
@@ -275,10 +431,12 @@ public static class BattleMessages
         }
     }
 
-    private static PropState[] ReadProps(ref BitReader r)
+    /// <param name="max">The most prop states the message may carry.</param>
+    private static PropState[] ReadProps(ref BitReader r, int max)
     {
         uint count = r.ReadVarUInt();
-        if (count > MaxPropsPerMessage) throw new ProtocolException("Too many prop states.");
+        if (count > max) throw new ProtocolException("Too many prop states.");
+        if (count > r.RemainingBits / MinPropStateBits) throw new ProtocolException("Packet shorter than its prop states say.");
         var props = new PropState[count];
         for (int i = 0; i < count; i++) props[i] = new PropState(ReadNonNegative(ref r), r.ReadByte());
         return props;
@@ -303,6 +461,7 @@ public static class BattleMessages
         w.WriteVarUInt((uint)m.MaxPlayers);
         w.WriteBool(m.MatchRunning);
         w.WriteVarUInt((uint)m.Port);
+        if (m.ProtocolVersion >= MapInRoomInfoVersion) w.WriteString(m.Map, BattleProtocol.MaxMapIdBytes);
     }
 
     public static RoomInfoMessage ReadRoomInfo(ref BitReader r)
@@ -315,7 +474,9 @@ public static class BattleMessages
         int port = ReadNonNegative(ref r);
         if (max > BattleProtocol.MaxPlayers || players > max) throw new ProtocolException("Bad player counts.");
         if (port is < 1 or > ushort.MaxValue) throw new ProtocolException("Bad port.");   // an endpoint can't be made of it
-        return new RoomInfoMessage(version, name, mode, players, max, running, port);
+        // A v2 room ends at the port: read it all the same, so the room list shows it as another version instead of dropping it.
+        string map = version >= MapInRoomInfoVersion ? r.ReadString(BattleProtocol.MaxMapIdBytes) : string.Empty;
+        return new RoomInfoMessage(version, name, mode, players, max, running, port, map);
     }
 
     // ---- primitives ----

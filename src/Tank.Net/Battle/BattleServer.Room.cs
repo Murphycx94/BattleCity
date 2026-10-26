@@ -1,4 +1,5 @@
 using Tank.Net.Protocol;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
@@ -26,6 +27,7 @@ public sealed partial class BattleServer
         }
         bool reconnecting = seat.DisconnectedAtFrame >= 0;
         seat.PeerId = peerId;
+        seat.MapSentForMatch = 0;   // a new connection: a new client, maybe, without the map
         seat.DisconnectedAtFrame = -1;
         seat.Name = SanitizeName(hello.Name, seat.Slot);
         _byPeer[peerId] = seat;
@@ -42,7 +44,7 @@ public sealed partial class BattleServer
         if (seat.InMatch)
         {
             seat.ResetForMatch();
-            SendMatchStart(seat);
+            SendMatchStart(seat, withMap: true);
         }
     }
 
@@ -122,6 +124,15 @@ public sealed partial class BattleServer
             case RoomCommandKind.SetBots when isHost && _sim is null:
                 if (int.TryParse(cmd.Arg, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int bots)) _bots = System.Math.Clamp(bots, 0, BattleProtocol.MaxPlayers - 1);
                 break;
+            case RoomCommandKind.SetMap when isHost && _sim is null:
+                if (FindMap(cmd.Arg) is { } map)
+                {
+                    // Prepared first: nothing if it was before; in the foreground a generator that throws leaves the map
+                    // Failed (logged, never thrown here), and the room says so. In the background it says Generating until then.
+                    _maps.Prepare(map);
+                    _roomMap = map;
+                }
+                break;
             case RoomCommandKind.StartMatch when isHost && _sim is null:
                 if (!TryStartMatch(out string? why)) _log($"can't start: {why}");
                 break;
@@ -132,6 +143,14 @@ public sealed partial class BattleServer
                 return;
         }
         _roomDirty = true;
+    }
+
+    /// <summary>The map of <see cref="BattleServerOptions.Maps"/> with the id <paramref name="id"/> (ignoring case), or null.</summary>
+    private MapDefinition? FindMap(string id)
+    {
+        foreach (MapDefinition map in _options.Maps)
+            if (string.Equals(map.Id, id, StringComparison.OrdinalIgnoreCase)) return map;
+        return null;
     }
 
     private static int IndexOfTank(string id)
@@ -160,8 +179,9 @@ public sealed partial class BattleServer
         var players = new List<RoomPlayer>();
         foreach (BattleSeat? s in _seats)
             if (s is not null) players.Add(new RoomPlayer(s.Slot, s.Name, ModeRules.HasTeams(_mode) ? s.Team : s.Slot, s.TankIndex, s.Ready, s.Connected || s.IsBot, s.IsBot));
+        _sentMapState = RoomMapState;
         _writer.Reset();
-        BattleMessages.Write(_writer, new RoomStateMessage(_mode, _hostSlot, (byte)_bots, MatchRunning, players));
+        BattleMessages.Write(_writer, new RoomStateMessage(_mode, _hostSlot, (byte)_bots, MatchRunning, players, _roomMap.Id, _sentMapState));
         SendToAll(_writer.Data, Channel.Reliable);
     }
 

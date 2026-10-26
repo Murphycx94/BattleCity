@@ -1,6 +1,7 @@
 using Tank.Net.Battle;
 using Tank.Net.Transport;
 using Tank.Sim;
+using Tank.Sim.Maps;
 
 namespace Tank.Client.Online;
 
@@ -30,6 +31,7 @@ internal sealed class LoopbackHost : IHostBackend
             OwnerToken = ownerToken,
             Seed = settings.Seed,
             MatchSeconds = settings.MatchSeconds,
+            Map = MapCatalog.Get(settings.Map),   // generated right here, before the first tick: a loopback run is a script and can wait
         }, log);
     }
 

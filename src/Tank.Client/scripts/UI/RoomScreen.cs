@@ -1,6 +1,7 @@
 using Godot;
 using Tank.Client.Art;
 using Tank.Net.Battle;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
@@ -8,8 +9,8 @@ namespace Tank.Client.UI;
 
 /// <summary>
 /// The room: who is here (two columns seen from your seat, or one in a mode without teams), and on the right the controls
-/// — mode and bots for the host, tank for everyone, swap sides, ready, start, leave. What shows and what is enabled comes
-/// from <see cref="RoomModel"/>; this class only builds controls from it, and only when the model's signature changes.
+/// — mode, map and bots for the host, tank for everyone, swap sides, ready, start, leave. What shows and what is enabled
+/// comes from <see cref="RoomModel"/>; this class only builds controls from it, and only when the model's signature changes.
 /// </summary>
 public partial class RoomScreen : Control
 {
@@ -27,6 +28,7 @@ public partial class RoomScreen : Control
     private readonly Label _waitingText = UiKit.Label("", 20, UiKit.Accent);
     private readonly HBoxContainer _columns = new() { SizeFlagsHorizontal = SizeFlags.ExpandFill };
     private readonly OptionButton _mode = new();
+    private readonly OptionButton _map = new();   // item i is MapCatalog.All[i]
     private readonly OptionButton _bots = new();
     private readonly GridContainer _tanks = new() { Columns = 2 };
     private readonly List<Button> _tankButtons = new();
@@ -126,6 +128,8 @@ public partial class RoomScreen : Control
 
         _mode.Select(_mode.GetItemIndex((int)m.Mode));
         _mode.Disabled = !m.CanSetMode;
+        _map.Select(MapIndex(m.MapId));   // -1 (nothing selected) for a map this build doesn't know
+        _map.Disabled = !m.CanSetMap;
         _bots.Select(Math.Clamp(m.Bots, 0, _bots.ItemCount - 1));
         _bots.Disabled = !m.CanSetBots;
         for (int i = 0; i < _tankButtons.Count; i++) _tankButtons[i].SetPressedNoSignal(i == m.MyTankIndex);
@@ -157,6 +161,11 @@ public partial class RoomScreen : Control
         foreach (BattleMode mode in ModeRules.All) _mode.AddItem(ModeText.Name(mode), (int)mode);
         _mode.ItemSelected += i => { if (!_updating) _client?.SetMode((BattleMode)_mode.GetItemId((int)i)); };
         side.AddChild(_mode);
+
+        side.AddChild(UiKit.Label("地图（房主）", 14, UiKit.Dim));
+        foreach (MapDefinition map in MapCatalog.All) _map.AddItem(map.Name);
+        _map.ItemSelected += i => { if (!_updating) _client?.SetMap(MapCatalog.All[(int)i].Id); };
+        side.AddChild(_map);
 
         side.AddChild(UiKit.Label("机器人（房主）", 14, UiKit.Dim));
         for (int n = 0; n <= BattleProtocol.MaxPlayers - 1; n++) _bots.AddItem(n == 0 ? "没有机器人" : $"{n} 个机器人", n);
@@ -190,6 +199,13 @@ public partial class RoomScreen : Control
         side.AddChild(UiKit.Gap(14));
         side.AddChild(UiKit.Button("离开房间", () => LeaveRequested?.Invoke()));
         return panel;
+    }
+
+    private static int MapIndex(string mapId)
+    {
+        for (int i = 0; i < MapCatalog.All.Count; i++)
+            if (string.Equals(MapCatalog.All[i].Id, mapId, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
     }
 
     private static Control BuildColumn(RoomColumnView column)

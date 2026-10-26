@@ -12,6 +12,7 @@ namespace Tank.Client.UI;
 public partial class MenuScreen : Control
 {
     private const int PanelPadding = 22;
+    private const int RoomListFontSize = 16;   // a room's line (LanRoomRow, with the map column) fits the list, its address included
 
     private readonly LineEdit _name = new() { PlaceholderText = "你的名字" };   // held to the wire's 24 bytes by OnNameChanged, not a character count
     private readonly LineEdit _address = new() { PlaceholderText = "192.168.1.20", CustomMinimumSize = new Vector2(220, 0) };
@@ -56,6 +57,7 @@ public partial class MenuScreen : Control
         margin.AddChild(columns);
         columns.AddChild(BuildLeft());
         columns.AddChild(BuildRight());
+        _rooms.AddThemeFontSizeOverride("font_size", RoomListFontSize);
         _rooms.ItemSelected += OnRoomSelected;
         _rooms.ItemActivated += index => JoinRoomAt((int)index);
         _name.TextChanged += OnNameChanged;

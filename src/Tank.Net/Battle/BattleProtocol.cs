@@ -31,17 +31,22 @@ public enum BattleMessage : byte
 /// <summary>Numbers of the battle protocol (stage 4 design §5), and the quantisation the wire uses for angles and positions.</summary>
 public static class BattleProtocol
 {
-    public const int Version = 2;
+    /// <summary>3: maps carry their ground kinds and water level, houses and trees, up to 16384 props (riverland design §5.1).</summary>
+    public const int Version = 3;
 
     /// <summary>The UDP port a room listens on unless told otherwise; discovery broadcasts only reach rooms on it.</summary>
     public const int DefaultPort = 27015;
 
+    /// <summary>Unchanged since v2, so a client of another version still connects and is told the versions differ.</summary>
     public const string ConnectKey = "tank3d-v2";
     public const int MaxPlayers = ModeRules.MaxPlayers;
     public const int MaxRedundantInputs = 4;
     public const int MaxNameBytes = 24;
     public const int MaxRejectReasonBytes = 128;
     public const int MaxRoomNameBytes = 48;
+
+    /// <summary>The longest map id on the wire ("riverland" is 9).</summary>
+    public const int MaxMapIdBytes = 16;
 
     /// <summary>The largest coordinate an entity may carry on the wire, cm (100 km: far beyond any map; a bigger one is a lie).</summary>
     public const int MaxCoordinateCm = 10_000_000;

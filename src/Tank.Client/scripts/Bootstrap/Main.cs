@@ -34,7 +34,7 @@ public partial class Main : Node
     {
         _options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
         foreach (string warning in _options.Warnings) GD.PushWarning(warning);
-        GetWindow().Title = AppTitle;
+        WindowTitle.Set(this, MapText.AppTitle);
         _menu = new MenuScreen();
         _menu.HostRequested += Host;
         _menu.JoinRequested += Join;

@@ -27,15 +27,17 @@ public sealed class SandboxAutomation
 
     private readonly LaunchOptions _options;
     private readonly bool _standStill;
+    private readonly MapSite _site;
     private readonly ShotPlan _plan;
     private readonly CaptureRun _capture;
 
     /// <param name="host">The sandbox node: its viewport is captured and measured, its tree quit.</param>
     /// <param name="standStill">A fixed camera preset is on: nobody drives.</param>
-    public SandboxAutomation(LaunchOptions options, Node host, bool standStill)
+    /// <param name="site">The map driven on: its presets and range demos are the ones that work.</param>
+    public SandboxAutomation(LaunchOptions options, Node host, bool standStill, MapSite site)
     {
-        (_options, _standStill) = (options, standStill);
-        Demo = RangeDemo.Find(options.RangeDemo);
+        (_options, _standStill, _site) = (options, standStill, site);
+        Demo = site.FindDemo(options.RangeDemo);
         _plan = ShotPlan.ForSandbox(options);
         _capture = new CaptureRun(options, host, _plan);
     }
@@ -44,7 +46,7 @@ public sealed class SandboxAutomation
     public RangeDemo? Demo { get; }
 
     /// <summary>
-    /// Warns about launch options that name no known preset or demo or wait for a moment the sandbox never reaches, and —
+    /// Warns about launch options that name no preset or demo known on this map or wait for a moment the sandbox never reaches, and —
     /// with <paramref name="unreadOptions"/>, when the sandbox parsed the arguments itself — the ones that couldn't be read
     /// (under Main, Main has already said those).
     /// </summary>
@@ -52,10 +54,11 @@ public sealed class SandboxAutomation
     {
         if (unreadOptions) foreach (string warning in _options.Warnings) GD.PushWarning(warning);
         foreach (string warning in _plan.Warnings) GD.PushWarning(warning);
-        if (_options.CameraPreset is { } preset && !CameraPresets.IsKnown(preset))
-            GD.PushWarning($"Unknown --camera-preset '{preset}'; use {string.Join(", ", CameraPresets.Names)}.");
+        string map = _site.Map.Name;
+        if (_options.CameraPreset is { } preset && !CameraPresets.IsKnownFor(preset, _site))
+            GD.PushWarning($"Unknown --camera-preset '{preset}' on {map}; use {string.Join(", ", _site.PresetNames)}.");
         if (_options.RangeDemo is { } demo && Demo is null)
-            GD.PushWarning($"Unknown --range-demo '{demo}'; use {string.Join(", ", RangeDemo.Names)}.");
+            GD.PushWarning($"Unknown --range-demo '{demo}' on {map}; use {string.Join(", ", _site.DemoNames)}.");
     }
 
     /// <summary>Notes the first time the player fired, hit or destroyed a tank, hurt a wall and destroyed a prop.</summary>

@@ -1,6 +1,7 @@
 using Godot;
 using Tank.Client.Bootstrap;
 using Tank.Client.Cameras;
+using Tank.Client.Sandbox;
 using Tank.Net.Battle;
 using Tank.Sim;
 
@@ -28,19 +29,22 @@ public sealed class MatchAutomation
     private const float LevelPitch = 0.2f;          // --autodrive: fires while the aim is within this of level, rad
 
     private readonly LaunchOptions _options;
+    private readonly MapSite _site;
     private readonly ShotPlan _plan;
     private CaptureRun? _capture;   // built in Start: the fps log needs the host's viewport, so the host must be in the tree
 
     /// <param name="screenshotTaken">The run's screenshot is already taken (by Main in the room, or by an earlier match): none here.</param>
-    public MatchAutomation(LaunchOptions options, bool screenshotTaken)
+    /// <param name="site">The match's map site, whose presets <c>--camera-preset</c> may name; null for the sandbox's.</param>
+    public MatchAutomation(LaunchOptions options, bool screenshotTaken, MapSite? site = null)
     {
         _options = options;
+        _site = site ?? MapSites.Sandbox;
         _plan = ShotPlan.ForMatch(options);
         if (screenshotTaken) _plan.MarkScreenshotTaken();
-        HasPreset = CameraPresets.IsKnown(options.CameraPreset);
+        HasPreset = CameraPresets.IsKnownFor(options.CameraPreset, _site);
     }
 
-    /// <summary>A known <c>--camera-preset</c> is on: the camera is fixed and the tank stands still.</summary>
+    /// <summary>A <c>--camera-preset</c> known on the match's map is on: the camera is fixed and the tank stands still.</summary>
     public bool HasPreset { get; }
 
     public string? Preset => _options.CameraPreset;
@@ -57,12 +61,12 @@ public sealed class MatchAutomation
     /// <summary>Call from the scene's <c>_Ready</c> (the host now in the tree): the screenshot, fps log and quit arm here.</summary>
     public void Start(Node host) => _capture = new CaptureRun(_options, host, _plan);
 
-    /// <summary>Warns about launch options that name no known preset or wait for a moment a match never reaches.</summary>
+    /// <summary>Warns about launch options that name no preset of the match's map or wait for a moment a match never reaches.</summary>
     public void ReportBadOptions()
     {
         foreach (string warning in _plan.Warnings) GD.PushWarning(warning);
         if (_options.CameraPreset is { } preset && !HasPreset)
-            GD.PushWarning($"Unknown --camera-preset '{preset}'; use {string.Join(", ", CameraPresets.Names)}.");
+            GD.PushWarning($"Unknown --camera-preset '{preset}' on {_site.Map.Name}; use {string.Join(", ", _site.PresetNames)}.");
     }
 
     /// <summary>Notes the first server event of each kind by (or destroying) the own tank.</summary>

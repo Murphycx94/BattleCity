@@ -39,7 +39,7 @@ public partial class MatchMain
                 break;
             case GameEventType.ShellExploded:
                 bool aboveGround = e.Position.Y > field.Terrain.HeightAt(e.Position.X, e.Position.Z) + GroundBurstHeight;
-                _fx.Explosion(e.Position.ToGodot(), aboveGround ? PuffColor.Grey : PuffColor.White);
+                _fx.ShellBurst(e.Position.ToGodot(), aboveGround ? PuffColor.Grey : PuffColor.White);
                 break;
             case GameEventType.TankHit when e.Ammo == AmmoType.AP:   // HE gets its own ShellExploded
                 _fx.Explosion(e.Position.ToGodot(), PuffColor.Grey, ArmorHitSize);
@@ -58,7 +58,7 @@ public partial class MatchMain
         }
         _combat.OnShotEvent(e);
         _world!.OnEvent(e);
-        PropFx.OnEvent(e, field, _fx);
+        PropFx.OnEvent(e, field, _fx, _world.Forests);
     }
 
     /// <summary>

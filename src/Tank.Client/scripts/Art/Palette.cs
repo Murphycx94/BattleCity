@@ -53,6 +53,27 @@ public static class Palette
     public static readonly Vector3 Wood = Hex("B9844F");         // fences, and the chips off them
     public static readonly Vector3 BrickDust = Hex("E0A88C");    // dust off a brick wall
 
+    // The ground of a map with ground kinds (riverland design §6.2): the terrain shader's layered mode.
+    public static readonly Vector3 Sand = Hex("E6D3A0");         // river banks, the lake beach, the dunes
+    public static readonly Vector3 Road = Hex("9A948C");         // a grey gravel road
+    public static readonly Vector3 Riverbed = Hex("B49A6E");     // the ground under the water: a darker wet sand
+    public static readonly Vector3 WetSand = Hex("CDB585");      // the band along the water's edge
+    public static readonly Vector3 Earth = Hex("A88B65");        // bare earth: the forest floor and the other dirt cells
+
+    // The cartoon water (riverland design §6.3): the water shader runs from shallow to deep with the depth.
+    public static readonly Vector3 WaterShallow = Hex("7FD6D8"); // a light turquoise over the shallows and fords
+    public static readonly Vector3 WaterDeep = Hex("3E9CC4");    // a deeper blue in the river's middle and the lake
+    public static readonly Vector3 Foam = Hex("F4FBFF");         // the white band along the shore and the ripple patches
+
+    // The cartoon houses (riverland design §6.5): plaster or plank walls under a tiled or slate roof.
+    public static readonly Vector3 Plaster = Hex("F1E4C8");      // cream plaster walls, and the chunks off them
+    public static readonly Vector3 Planks = Hex("B07A4A");       // plank walls, a little darker than the fences
+    public static readonly Vector3 RoofTile = Hex("CF5E45");     // red clay tiles
+    public static readonly Vector3 RoofSlate = Hex("5D6878");    // blue-grey slates
+    public static readonly Vector3 Door = Hex("7A4B2E");         // dark wooden doors
+    public static readonly Vector3 WindowGlass = Hex("A9DDF2");  // a pale sky blue
+    public static readonly Vector3 PlasterDust = Hex("EADBC0");  // the cloud of a house coming down
+
     // Team colours in a match, seen from the player's seat (the player's own tank is TankBody). Declared after the
     // entries they alias: static initialisers run in textual order.
     public static readonly Vector3 AllyBody = TargetBody;        // a teammate: the same blue-grey as the practice targets

@@ -1,5 +1,8 @@
 using Godot;
+using Tank.Client.Sandbox;
+using Tank.Client.World;
 using SandboxMap = Tank.Sim.Maps.SandboxMap;
+using TargetSpot = Tank.Sim.Maps.TargetSpot;
 using SN = System.Numerics;
 
 namespace Tank.Client.Cameras;
@@ -14,6 +17,10 @@ namespace Tank.Client.Cameras;
 /// gate from just outside it (pair it with --range-demo fence); patrol starts the tank at <c>SandboxMap.PatrolWatch</c> and
 /// looks at the patrolling target's first bush patch from beside it, to watch it drive in, vanish and give itself away
 /// when it fires.
+/// On another map (a <see cref="MapSite"/>) the presets it lists work there: those with an anchor (the riverland's
+/// overview, town, ford, forest, plateau, dunes and the top-down map, riverland design §6.8) look from the anchor's eye
+/// at its focus, spin turns at the site's <see cref="MapSite.SpinEye"/>, target looks at the site's targets; the ones
+/// that follow the tank work anywhere. With no site, or the sandbox's, every preset is as it always was.
 /// </summary>
 public static class CameraPresets
 {
@@ -38,30 +45,68 @@ public static class CameraPresets
     private const float PatrolEyeHeight = 7f;
     private const float PatrolFocusAlong = 0.8f;   // the focus lies this share of the way from the patrol's start to its first bush patch
 
+    /// <summary>The top-down view of the whole map: an orthographic camera looking straight down, north up.</summary>
+    private const string MapView = "map";
+    private const float MapViewMargin = 40f;   // the map view shows this many metres more than the map, top to bottom
+
     /// <summary>Presets whose eye is far from the tank: world detail (grass) should then stream around the eye, not the tank.</summary>
-    public static bool StreamsAroundCamera(string? name) => name is "hill" or "spin" or "patrol";
+    public static bool StreamsAroundCamera(string? name) =>
+        name is "hill" or "spin" or "patrol" or "overview" or "town" or "ford" or "forest" or "plateau" or "dunes" or MapView;
 
-    /// <summary>Every preset's name.</summary>
-    public static IReadOnlyList<string> Names { get; } =
-        new[] { "front", "side", "close", "closerear", "sprocket", "hill", "spin", "orbit", "bush", "target", "yard", "gate", "patrol" };
+    /// <summary>Every preset's name on some map (each <see cref="MapSite.PresetNames"/>, the sandbox's first).</summary>
+    public static IReadOnlyList<string> Names { get; } = MapSites.All.SelectMany(site => site.PresetNames).Distinct().ToArray();
 
+    /// <summary>A preset that works on some map (<see cref="IsKnownFor"/> says whether on this one).</summary>
     public static bool IsKnown(string? name) => name is not null && Names.Contains(name);
 
-    /// <summary>
-    /// Where the tank starts for this preset: "bush" parks it in the bush patch nearest the spawn, "patrol" at
-    /// <c>SandboxMap.PatrolWatch</c>, the rest use the normal spawn.
-    /// </summary>
-    public static SN.Vector2 Spawn(string? name) => name switch
-    {
-        "bush" => SandboxMap.BushPatches[0],
-        "patrol" => SandboxMap.PatrolWatch,
-        _ => SandboxMap.Spawn,
-    };
+    /// <summary>A preset that works on <paramref name="site"/>'s map.</summary>
+    public static bool IsKnownFor(string? name, MapSite site) => name is not null && site.PresetNames.Contains(name);
 
-    /// <param name="groundAt">Terrain height at (x, z), used to keep fixed eyes above the ground.</param>
-    /// <param name="targetIndex">The practice target the "target" preset looks at (index into <c>SandboxMap.TargetSpots</c>).</param>
-    public static (Vector3 Eye, Vector3 Target) Get(string name, Vector3 tank, float tankYaw, double time, Func<float, float, float> groundAt, int targetIndex)
+    /// <summary>The "map" preset looks through an orthographic camera.</summary>
+    public static bool IsOrthographic(string? name) => name == MapView;
+
+    /// <summary>The camera's up for this preset: north (−Z, the top of the screen) looking straight down on the map, else up.</summary>
+    public static Vector3 UpFor(string? name) => name == MapView ? Vector3.Forward : Vector3.Up;
+
+    /// <summary>
+    /// Points <paramref name="camera"/> from a fixed preset's <paramref name="eye"/> at its <paramref name="target"/> (from
+    /// <see cref="Get"/>), with the preset's up (<see cref="UpFor"/>). The "map" view, the first time
+    /// (<paramref name="mapViewOn"/> false), also turns the camera orthographic over the whole map (the site's size and a
+    /// margin) and the world's fog and distance fades off. The test drive and the match both look through this.
+    /// Returns whether the map view is on.
+    /// </summary>
+    public static bool Look(Camera3D camera, string preset, Vector3 eye, Vector3 target, MapSite site, BattleWorld world, bool mapViewOn)
     {
+        if (IsOrthographic(preset) && !mapViewOn)
+        {
+            camera.Projection = Camera3D.ProjectionType.Orthogonal;
+            camera.Size = site.MapSize + MapViewMargin;
+            world.UseMapView();
+            mapViewOn = true;
+        }
+        camera.LookAtFromPosition(eye, target, UpFor(preset));
+        return mapViewOn;
+    }
+
+    /// <summary>
+    /// Where the tank starts for this preset on <paramref name="site"/>'s map (the sandbox's when null): where the site's
+    /// <see cref="MapSite.PresetSpawns"/> puts it (on the sandbox "bush" parks it in the bush patch nearest the spawn,
+    /// "patrol" at <c>SandboxMap.PatrolWatch</c>; on the riverland "ford" by the town's ford), else the site's spawn.
+    /// </summary>
+    public static SN.Vector2 Spawn(string? name, MapSite? site = null)
+    {
+        site ??= MapSites.Sandbox;
+        return name is not null && site.PresetSpawns.TryGetValue(name, out SN.Vector2 at) ? at : site.Spawn;
+    }
+
+    /// <param name="groundAt">The height at (x, z) fixed eyes keep above: the ground, or the water over it.</param>
+    /// <param name="targetIndex">The practice target the "target" preset looks at (index into the site's targets).</param>
+    /// <param name="site">The map's site; null for the sandbox.</param>
+    public static (Vector3 Eye, Vector3 Target) Get(string name, Vector3 tank, float tankYaw, double time, Func<float, float, float> groundAt,
+        int targetIndex, MapSite? site = null)
+    {
+        if (site is not null && site.Anchors.TryGetValue(name, out CameraAnchor? anchor))
+            return (Over(anchor.Eye, anchor.EyeHeight, groundAt), Over(anchor.Focus, anchor.FocusHeight, groundAt));
         var yaw = new Basis(Vector3.Up, tankYaw);
         switch (name)
         {
@@ -78,7 +123,7 @@ public static class CameraPresets
             case "bush": // the tank parked inside a bush patch, seen from outside it (west, towards the lane)
                 return (tank + new Vector3(-16f, 3.4f, 6f), tank + TankFocus);
             case "target":
-                var spot = SandboxMap.TargetSpots[targetIndex];
+                TargetSpot spot = (site?.Targets ?? SandboxMap.TargetSpots)[targetIndex];
                 var at = new Vector3(spot.Position.X, groundAt(spot.Position.X, spot.Position.Y), spot.Position.Y);
                 var turn = new Basis(Vector3.Up, spot.Yaw);
                 return (at + turn * TargetEye, at + turn * TargetFocus);
@@ -99,8 +144,13 @@ public static class CameraPresets
                 return (tank + new Vector3(Mathf.Sin(around) * OrbitRadius, 3.2f, Mathf.Cos(around) * OrbitRadius), tank + TankFocus);
             default:
                 float angle = (float)(time / SpinPeriod * Mathf.Tau);
-                var eye = new Vector3(SpinEye.X, groundAt(SpinEye.X, SpinEye.Y) + 8f, SpinEye.Y);
+                Vector2 spinEye = site is null ? SpinEye : new Vector2(site.SpinEye.X, site.SpinEye.Y);
+                var eye = new Vector3(spinEye.X, groundAt(spinEye.X, spinEye.Y) + 8f, spinEye.Y);
                 return (eye, eye + new Vector3(Mathf.Sin(angle), -0.12f, Mathf.Cos(angle)) * 10f);
         }
     }
+
+    /// <summary>The point <paramref name="height"/> m over the ground (or water) at <paramref name="at"/>.</summary>
+    private static Vector3 Over(SN.Vector2 at, float height, Func<float, float, float> groundAt) =>
+        new(at.X, groundAt(at.X, at.Y) + height, at.Y);
 }

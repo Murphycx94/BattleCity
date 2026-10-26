@@ -20,11 +20,21 @@ public static class GroundCover
     public static float GrassWeight(float x, float z, float normalY, float dirtMask)
     {
         float slope = SlopeDegrees(normalY) + (ValueNoise2(x * SlopeNoiseScale, z * SlopeNoiseScale) - 0.5f) * SlopeNoiseDegrees;
-        float dirtPatch = SmoothStep(0.25f, 0.95f, dirtMask + (ValueNoise2(x * DirtNoiseScale, z * DirtNoiseScale) - 0.5f) * DirtNoiseAmount);
+        float dirtPatch = DirtPatch(dirtMask + (ValueNoise2(x * DirtNoiseScale, z * DirtNoiseScale) - 0.5f) * DirtNoiseAmount);
         float rock = SmoothStep(RockMinSlopeDegrees - 4f, RockMinSlopeDegrees + 3f, slope);
         float dirt = MathF.Max(SmoothStep(GrassMaxSlopeDegrees - 2f, GrassMaxSlopeDegrees + 6f, slope), dirtPatch) * (1f - rock);
         return MathF.Max(1f - dirt - rock, 0f);
     }
+
+    /// <summary>
+    /// The least and most grass weight flat ground can get for a dirt-mask value, over every value the patch noise takes:
+    /// what the mask alone guarantees wherever the point is.
+    /// </summary>
+    internal static (float Least, float Most) FlatGrassWeightRange(float dirtMask) =>
+        (1f - DirtPatch(dirtMask + DirtNoiseAmount / 2f), 1f - DirtPatch(dirtMask - DirtNoiseAmount / 2f));
+
+    /// <summary>The dirt patch weight of a noisy mask value (the shader's <c>smoothstep(0.25, 0.95, dirt_patch + …)</c>).</summary>
+    private static float DirtPatch(float noisyMask) => SmoothStep(0.25f, 0.95f, noisyMask);
 
     public static float SlopeDegrees(float normalY) => MathF.Acos(Math.Clamp(normalY, 0f, 1f)) * (180f / MathF.PI);
 

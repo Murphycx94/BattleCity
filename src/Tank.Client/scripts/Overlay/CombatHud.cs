@@ -20,10 +20,12 @@ public delegate bool HeadLookup(int tankId, out Vector3 head);
 /// The combat HUD both the sandbox and a match use, back to front: the sniper vignette, hit popups, tank health bars (the
 /// caller feeds them through <see cref="TankBars"/>, with a name label if it likes), the damaged walls' bars (over the
 /// popups, so a bar stays in sight while it drops), then whatever a subclass adds in <see cref="AddBehindSight"/>, the
-/// reticle and the status panel, whose lamp lights while an enemy sees the player.
+/// reticle and the status panel, whose lamp lights while an enemy sees the player and whose ground hint names a road,
+/// sand or water under the player with the simulation's speed factor.
 /// <see cref="OnShotEvent"/> spawns hit verdicts and damage numbers (over tanks and walls) for the player's own shots;
 /// <see cref="Refresh"/> updates the rest once per frame. A wall's bar, smaller than a tank's and drawn on its face,
-/// shows only while it is standing and short of full hit points.
+/// shows only while it is standing and short of full hit points; which walls that is gets worked out again only when the
+/// props' state changes (<see cref="Battlefield.StateVersion"/>).
 /// </summary>
 public partial class CombatHud : CanvasLayer
 {
@@ -37,10 +39,17 @@ public partial class CombatHud : CanvasLayer
     private CombatPopups _popups = null!;
     private HealthBars _wallBars = null!;
     private Prop[] _walls = Array.Empty<Prop>();
+    private readonly List<int> _damaged = new();   // indices into _walls of those whose bar shows: standing, short of full hit points
+    private Battlefield? _listedField;             // the battlefield and state version _damaged was listed from
+    private int _listedVersion;
     private Reticle _reticle = null!;
     private StatusPanel _status = null!;
     private int _ownTankId;
     private bool _aiming = true;
+    // The ground under the player at the hint's precision (GroundText: depth in tenths, factor in hundredths); the hint
+    // is rebuilt only when this changes, so driving on one ground allocates nothing.
+    private (SurfaceKind Kind, bool Wet, int DepthTenths, int FactorHundredths) _ground = (SurfaceKind.Grass, false, 0, 100);
+    private string? _groundText;
 
     protected OrbitCamera Cam { get; private set; } = null!;
 
@@ -76,6 +85,9 @@ public partial class CombatHud : CanvasLayer
         _field = field;
         _walls = field.Props.Where(p => p.IsWall).ToArray();
         _wallBars.Setup(Cam.Camera, _walls.Length, WallBarWidth, WallBarHeight);
+        _damaged.Clear();                        // the new bars start hidden: none of them is shown yet
+        _damaged.EnsureCapacity(_walls.Length);  // room for every wall at once: the list never grows mid-match
+        _listedField = null;                     // list the damaged ones again on the next Refresh
     }
 
     /// <summary>Shows the reticle and status panel while the player is at the controls; <paramref name="aiming"/> false (spectating) hides them.</summary>
@@ -113,8 +125,8 @@ public partial class CombatHud : CanvasLayer
     private static Vector3 WallHead(in Prop wall) => wall.Footprint.Center.Ground(wall.Top - WallBarBelowTop);
 
     /// <summary>
-    /// Once per frame: reticle, status panel, lamp (<paramref name="spotted"/>: an enemy sees the player), vignette and
-    /// the walls' bars. The tank bars are the caller's.
+    /// Once per frame: reticle, status panel, lamp (<paramref name="spotted"/>: an enemy sees the player), ground hint,
+    /// vignette and the walls' bars. The tank bars are the caller's.
     /// </summary>
     public void Refresh(in TankState player, bool spotted)
     {
@@ -124,13 +136,44 @@ public partial class CombatHud : CanvasLayer
             _status.SetVehicle(player.Spec.Name);
             _status.UpdateState(player.Speed * KmhPerMs, player.Reload, player.Health, player.Spec.MaxHealth, player.Ammo, player.ApLeft, player.HeLeft);
             _status.SetSpotted(spotted);
+            _status.SetGround(GroundHint(player.Position));
         }
         _vignette.Visible = Cam.Sniper;
+        if (!ReferenceEquals(_field, _listedField) || _field.StateVersion != _listedVersion) ListDamaged();
+        foreach (int i in _damaged) _wallBars.Set(i, WallHead(_walls[i]), _field.Durability(_walls[i].Id) / (float)_walls[i].MaxDurability, shown: true);
+    }
+
+    /// <summary>
+    /// After the props' state changed (or the field was swapped): hides the bars of the listed walls that no longer show
+    /// one (the others are hidden already), then lists the walls whose bar shows. Between changes <see cref="Refresh"/>
+    /// feeds only the listed bars.
+    /// </summary>
+    private void ListDamaged()
+    {
+        (_listedField, _listedVersion) = (_field, _field.StateVersion);
+        foreach (int i in _damaged)
+            if (!IsDamaged(i)) _wallBars.Set(i, WallHead(_walls[i]), 0f, shown: false);
+        _damaged.Clear();
         for (int i = 0; i < _walls.Length; i++)
-        {
-            int left = _field.Durability(_walls[i].Id), full = _walls[i].MaxDurability;
-            _wallBars.Set(i, WallHead(_walls[i]), left / (float)full, shown: left > 0 && left < full);
-        }
+            if (IsDamaged(i)) _damaged.Add(i);
+    }
+
+    /// <summary>Whether wall <paramref name="i"/> shows a bar: standing, short of full hit points.</summary>
+    private bool IsDamaged(int i)
+    {
+        int left = _field.Durability(_walls[i].Id);
+        return left > 0 && left < _walls[i].MaxDurability;
+    }
+
+    /// <summary>The ground hint for the player standing at <paramref name="ground"/>, from the field's own surface, water and speed factor.</summary>
+    private string? GroundHint(SN.Vector2 ground)
+    {
+        SurfaceKind kind = _field.SurfaceAt(ground);
+        float depth = _field.WaterDepthAt(ground), factor = _field.SpeedFactorAt(ground);
+        var key = (kind, depth > 0f, (int)MathF.Round(depth * 10f), (int)MathF.Round(factor * 100f));
+        if (key == _ground) return _groundText;
+        _ground = key;
+        return _groundText = GroundText.Of(kind, depth, factor);
     }
 
     protected T Add<T>(T control) where T : Node

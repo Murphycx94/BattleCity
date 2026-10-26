@@ -3,12 +3,14 @@ using Tank.Client.Bootstrap;
 using Tank.Client.Cameras;
 using Tank.Client.Combat;
 using Tank.Client.Driving;
+using Tank.Client.UI;
 using Tank.Client.Vehicles;
 using Tank.Client.World;
 using Tank.Sim;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
 
@@ -21,8 +23,10 @@ namespace Tank.Client.Sandbox;
 /// Keys: 1 AP, 2 HE, R restock, T restore the walls, fences and bushes, F1–F4 another tank (<c>TankCatalog.All</c> in
 /// order), V the spotting numbers over every target. Scenery, HUD and scripted runs live in <see cref="BattleWorld"/>,
 /// <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
-/// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --tank light|medium|heavy|td --autodrive
-/// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|patrol|... --fps-log --sniper --spot-debug
+/// The map is the <see cref="MapSite"/> of <c>--map</c> (the sandbox map by default): its spawn, targets, patrol (if any)
+/// and camera presets.
+/// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --map sandbox|riverland --tank light|medium|heavy|td --autodrive
+/// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|patrol|overview|town|ford|map|... --fps-log --sniper --spot-debug
 /// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp
 /// --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill|prop|down:S --quit-after S]
 /// </summary>
@@ -43,6 +47,7 @@ public partial class SandboxMain : Node3D
     private InputCmd[] _commands = Array.Empty<InputCmd>();
     private LaunchOptions? _given;   // Main's options (already reported); null when the sandbox is the scene run on its own
     private LaunchOptions _options = new();
+    private MapSite _site = MapSites.Sandbox;
     private SandboxAutomation _automation = null!;
     private Simulation _sim = null!;
     private Func<float, float, float> _groundAt = null!;   // cached: a method group would make a new delegate every frame
@@ -61,6 +66,7 @@ public partial class SandboxMain : Node3D
     private double _time;
     private float _aimYaw;
     private float _aimPitch;
+    private bool _mapViewOn;
 
     /// <summary>Hands over Main's launch options, whose unreadable values Main has already reported; call before adding the node to the tree.</summary>
     public void Setup(LaunchOptions options) => _given = options;
@@ -68,25 +74,26 @@ public partial class SandboxMain : Node3D
     public override void _Ready()
     {
         _options = _given ?? LaunchOptions.Parse(OS.GetCmdlineUserArgs());
-        GetWindow().Title = "坦克 3D · 试驾场";
+        _site = MapSites.For(_options.Map);
+        WindowTitle.Set(this, _site.Title);
         SandboxInput.RegisterActions();
-        _automation = new SandboxAutomation(_options, this, standStill: HasPreset);
+        _automation = new SandboxAutomation(_options, this, standStill: HasPreset, _site);
 
         RangeDemo? demo = _automation.Demo;
-        _sim = new Simulation(SandboxMap.Create());
+        _sim = new Simulation(_site.Map.NewBattlefield());
         TankSpec start = _options.Tank is { } id ? TankCatalog.ById(id) : TankCatalog.Medium;
-        _sim.AddTank(start, demo?.PlayerPosition ?? CameraPresets.Spawn(_options.CameraPreset), demo?.PlayerYaw ?? SandboxMap.SpawnYaw, TargetRange.PlayerTeam);
+        _sim.AddTank(start, demo?.PlayerPosition ?? CameraPresets.Spawn(_options.CameraPreset, _site), demo?.PlayerYaw ?? _site.SpawnYaw, TargetRange.PlayerTeam);
         _previous = _current = _sim.Tanks[0];
         _vision = new VisionTracker(_sim);
         _targets = Add(new TargetRange());
-        _targets.Build(_sim, _vision, parkPatrol: demo is { PatrolDrives: false });
+        _targets.Build(_sim, _vision, parkPatrol: demo is { PatrolDrives: false }, _site);
         _vision.Update();   // who is seen at the start, before the first frame is drawn
         _commands = new InputCmd[_sim.TankCount];
-        _groundAt = _sim.Field.Terrain.HeightAt;
+        _groundAt = MapSites.SurfaceHeight(_sim.Field);
         _aimYaw = _current.Yaw;
 
         _world = Add(new BattleWorld());
-        _world.Build(_sim.Field, _current, MapStyle.Sandbox, CameraPresets.StreamsAroundCamera(_options.CameraPreset));
+        _world.Build(_sim.Field, _current, MapStyle.For(_site.Map.Id), CameraPresets.StreamsAroundCamera(_options.CameraPreset));
         BuildTank(start);
         _shells = Add(new ShellViews());
         _fx = Add(new BattleFx());
@@ -100,7 +107,7 @@ public partial class SandboxMain : Node3D
         if (!_options.AutoDrive && !IgnoresInput) Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
-    private bool HasPreset => CameraPresets.IsKnown(_options.CameraPreset);
+    private bool HasPreset => CameraPresets.IsKnownFor(_options.CameraPreset, _site);
 
     /// <summary>Fixed-camera and scripted runs ignore stray input so screenshots stay repeatable.</summary>
     private bool IgnoresInput => HasPreset || _automation.Demo is not null;
@@ -219,7 +226,7 @@ public partial class SandboxMain : Node3D
             case GameEventType.ShellExploded:
                 // Shells that stop above the ground hit a rock or a tank: grey dust instead of white smoke.
                 bool aboveGround = e.Position.Y > _sim.Field.Terrain.HeightAt(e.Position.X, e.Position.Z) + GroundBurstHeight;
-                _fx.Explosion(e.Position.ToGodot(), aboveGround ? PuffColor.Grey : PuffColor.White);
+                _fx.ShellBurst(e.Position.ToGodot(), aboveGround ? PuffColor.Grey : PuffColor.White);
                 break;
             case GameEventType.TankHit when e.Ammo == AmmoType.AP:   // HE gets its own ShellExploded
                 _fx.Explosion(e.Position.ToGodot(), PuffColor.Grey, ArmorHitSize);
@@ -228,7 +235,7 @@ public partial class SandboxMain : Node3D
         _hud.OnShotEvent(e);
         _targets.OnEvent(e, _sim, _fx);
         _world.OnEvent(e);
-        PropFx.OnEvent(e, _sim.Field, _fx);
+        PropFx.OnEvent(e, _sim.Field, _fx, _world.Forests);
     }
 
     /// <summary>Poses and animates the player's tank, with the muzzle blast of a shot fired this frame; hidden in the sniper sight.</summary>
@@ -247,11 +254,12 @@ public partial class SandboxMain : Node3D
     private void UpdateCamera(in TankState tank, TankPose pose)
     {
         if (_automation.CameraAngles(tank.Yaw) is { } angles) _camera.SetAngles(angles.Yaw, angles.Pitch);
-        _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(tank.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), _sim.Field.Terrain);
+        _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(tank.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), _sim.Field.Terrain, _sim.Field.WaterLevel);
         if (HasPreset)
         {
-            var (eye, target) = CameraPresets.Get(_options.CameraPreset!, pose.Position.ToGodot(), tank.Yaw, _time, _groundAt, targetIndex: _automation.Demo?.Target ?? 0);
-            _camera.Camera.LookAtFromPosition(eye, target, Vector3.Up);
+            string preset = _options.CameraPreset!;
+            var (eye, target) = CameraPresets.Get(preset, pose.Position.ToGodot(), tank.Yaw, _time, _groundAt, targetIndex: _automation.Demo?.Target ?? 0, _site);
+            _mapViewOn = CameraPresets.Look(_camera.Camera, preset, eye, target, _site, _world, _mapViewOn);
         }
         else if (_automation.Demo is null && !_input.FreeLook) UpdateAim(pose, tank.Spec);
     }

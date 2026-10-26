@@ -101,7 +101,7 @@ public sealed class BattleProtocolTests
         w.Reset();
         BattleMessages.Write(w, new RoomInfoMessage(2, "周末房", BattleMode.FreeForAll, 3, 10, true, 27015));
         r = ReaderFor(w, BattleMessage.RoomInfo);
-        Assert.Equal(new RoomInfoMessage(2, "周末房", BattleMode.FreeForAll, 3, 10, true, 27015), BattleMessages.ReadRoomInfo(ref r));
+        Assert.Equal(new RoomInfoMessage(2, "周末房", BattleMode.FreeForAll, 3, 10, true, 27015, Map: ""), BattleMessages.ReadRoomInfo(ref r));   // v2 carries no map
     }
 
     [Fact]
@@ -116,6 +116,7 @@ public sealed class BattleProtocolTests
         MatchStartMessage m = BattleMessages.ReadMatchStart(ref r);
         Assert.Equal(BattleMode.TeamBattle, m.Mode);
         Assert.Equal((3, 150, 12750, 7), (m.MatchNumber, m.CurrentTick, m.EndTick, m.MyTankId));
+        Assert.NotNull(m.Map);
         Assert.Equal(map.HeightsCm, m.Map.HeightsCm);
         Assert.Equal(map.Props, m.Map.Props);
         Assert.Equal((map.SamplesX, map.SamplesZ, map.CellSize, map.Border), (m.Map.SamplesX, m.Map.SamplesZ, m.Map.CellSize, m.Map.Border));
@@ -325,7 +326,7 @@ public sealed class BattleProtocolTests
     [Fact]
     public void The_protocol_constants_are_the_designs_numbers()
     {
-        Assert.Equal(2, BattleProtocol.Version);
+        Assert.Equal(3, BattleProtocol.Version);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
         Assert.Equal(10, BattleProtocol.MaxPlayers);
         Assert.Equal(64, BattleSeat.HistorySize);
@@ -349,6 +350,7 @@ public sealed class BattleProtocolTests
             case BattleMessage.RoomInfo: BattleMessages.ReadRoomInfo(ref r); break;
             case BattleMessage.MatchStart: BattleMessages.ReadMatchStart(ref r); break;
             case BattleMessage.Events: BattleMessages.ReadEvents(ref r); break;
+            case BattleMessage.RequestMatchState: BattleMessages.ReadMatchStateRequest(ref r); break;
             case BattleMessage.Snapshot: new BattleSnapshotCodec().Read(ref r, baseline ?? (_ => null), new BattleSnapshot(), out _, out _); break;
             default: throw new InvalidOperationException("No decoder for this packet in the test.");
         }
@@ -509,6 +511,7 @@ public sealed class BattleProtocolTests
         w.WriteVarUInt(number);
         w.WriteVarUInt(tick);
         w.WriteVarUInt(end);
+        w.WriteByte(1);      // the map follows
         BattleMessages.WriteMap(w, MapData.Of(TestWorld.FlatField()));
         w.WriteVarUInt(0);   // no props
         w.WriteVarUInt(tank);
@@ -529,7 +532,7 @@ public sealed class BattleProtocolTests
 
     public static IEnumerable<object[]> TruncatedPackets()
     {
-        foreach (string name in new[] { "delta snapshot", "input", "room state", "room command", "hello", "room info" })
+        foreach (string name in new[] { "delta snapshot", "input", "room state", "room command", "hello", "room info", "match start without the map", "match state request" })
             yield return new object[] { name };
     }
 
@@ -560,6 +563,12 @@ public sealed class BattleProtocolTests
                 break;
             case "hello":
                 BattleMessages.Write(w, new HelloMessage(BattleProtocol.Version, "Bob", 0xDEADBEEF));
+                break;
+            case "match start without the map":
+                BattleMessages.Write(w, new MatchStartMessage(BattleMode.TeamBattle, 2, 150, 12750, null, new[] { new PropState(300, 0), new PropState(301, 128) }, 7));
+                break;
+            case "match state request":
+                BattleMessages.Write(w, new MatchStateRequest(NeedMap: true));
                 break;
             default:
                 BattleMessages.Write(w, new RoomInfoMessage(BattleProtocol.Version, "周末房", BattleMode.FreeForAll, 3, 10, true, 27015));

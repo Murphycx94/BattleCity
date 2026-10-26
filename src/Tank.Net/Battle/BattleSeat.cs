@@ -30,6 +30,12 @@ internal sealed class BattleSeat
     public int AckedSnapshotTick { get; set; }
     public long DisconnectedAtFrame { get; set; } = -1;
     public long LastResyncFrame { get; set; } = long.MinValue / 2;
+
+    /// <summary>
+    /// The match whose map this seat's connection was sent (0: none yet). A new connection starts at 0, so a reconnect
+    /// gets the map again; a resync on the same connection doesn't need it.
+    /// </summary>
+    public int MapSentForMatch { get; set; }
     public BattleInputBuffer Inputs { get; } = new();
 
     /// <summary>The snapshots sent to this player, by tick, for delta baselines (players only).</summary>

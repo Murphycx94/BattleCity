@@ -8,11 +8,14 @@ using SN = System.Numerics;
 namespace Tank.Client.World;
 
 /// <summary>
-/// Draws the walls and fences (stage 2C design §4.1) and keeps them in step with the battlefield every frame
-/// (<see cref="Sync"/>): a wall that is down shows a heap of rubble instead of its block; a fence knocked down topples
-/// away from what hit it over <see cref="FenceFall.Seconds"/> (the side comes from its <see cref="GameEventType.PropDestroyed"/>
-/// event, <see cref="OnEvent"/>) and lies flat on its posts' face; a restored prop stands up again at once. Meshes are
-/// shared per kind (four rubble heaps per wall kind, picked by prop id); all of them get the rocks' soft sky rim light.
+/// Draws the walls and fences (stage 2C design §4.1) and keeps them in step with the battlefield: <see cref="SyncStanding"/>
+/// looks at every wall and fence (the caller does it only when the battlefield's state changed), <see cref="Fall"/> moves
+/// the toppling fences on every frame. A wall that is down shows a heap of rubble instead of its block; a fence knocked
+/// down topples away from what hit it over <see cref="FenceFall.Seconds"/> (the side comes from its
+/// <see cref="GameEventType.PropDestroyed"/> event, <see cref="OnEvent"/>; one whose push comes after it started toppling,
+/// in a match, turns to fall that way, <see cref="PropDown"/>) and lies flat on its posts' face; a restored prop stands up
+/// again at once. The first look after <see cref="Build"/> shows a fence already down lying flat at once. Meshes are shared
+/// per kind (four rubble heaps per wall kind, picked by prop id); all of them get the rocks' soft sky rim light.
 /// </summary>
 public partial class WallViews : Node3D
 {
@@ -28,6 +31,8 @@ public partial class WallViews : Node3D
 
     private readonly List<View> _views = new();
     private readonly Dictionary<int, View> _fences = new();   // prop id → its view, for the pushes in OnEvent
+    private readonly List<View> _falling = new();             // fences on their way down, moved on by Fall
+    private bool _seen;   // SyncStanding has looked at the battlefield once
 
     private sealed class View
     {
@@ -35,10 +40,8 @@ public partial class WallViews : Node3D
         public required Node3D Standing { get; init; }
         public required Transform3D Upright { get; init; }
         public MeshInstance3D? Rubble { get; init; }
-        public bool ShownStanding = true;
-        public float Fallen = -1f;   // seconds since a fence started toppling; -1 standing
+        public PropDown Down = new(FenceFall.Seconds);   // a wall shows its rubble at once, whatever the duration
         public int Side = 1;
-        public SN.Vector2? Push;     // the level direction a fence was last pushed down, if any
     }
 
     public void Build(Battlefield field)
@@ -52,7 +55,8 @@ public partial class WallViews : Node3D
         var heaps = new Dictionary<(PropKind, int), ArrayMesh>();
         foreach (Prop prop in field.Props)
         {
-            if (!prop.IsWall && prop.Kind != PropKind.Fence) continue;
+            // Wall segments and fence panels only: a house is masonry too (IsWall), but not a segment.
+            if (prop.Kind is not (PropKind.BrickWall or PropKind.StoneWall or PropKind.Fence)) continue;
             float thickness = WallLine.Thickness(prop.Kind);
             if (!blocks.TryGetValue(prop.Kind, out ArrayMesh? mesh))
                 blocks[prop.Kind] = mesh = (prop.Kind == PropKind.Fence
@@ -86,32 +90,58 @@ public partial class WallViews : Node3D
             _views.Add(view);
             if (prop.Kind == PropKind.Fence) _fences[prop.Id] = view;
         }
+        _falling.EnsureCapacity(_fences.Count);   // room for every fence at once: the list never grows mid-match
     }
 
-    /// <summary>Notes which way a fence was pushed, so it falls that way when <see cref="Sync"/> sees it down.</summary>
+    /// <summary>
+    /// Notes which way a fence was pushed, so it falls that way when <see cref="SyncStanding"/> sees it down; if it is down already
+    /// (a match), turns it to fall that way now, or lays it there at once if it lies.
+    /// </summary>
     public void OnEvent(in GameEvent e)
     {
-        if (e.Type == GameEventType.PropDestroyed && _fences.TryGetValue(e.PropId, out View? fence))
-            fence.Push = new SN.Vector2(e.Velocity.X, e.Velocity.Z);
+        if (e.Type != GameEventType.PropDestroyed || !_fences.TryGetValue(e.PropId, out View? fence)) return;
+        if (!fence.Down.Pushed(new SN.Vector2(e.Velocity.X, e.Velocity.Z))) return;
+        fence.Side = SideOf(fence);
+        if (fence.Down.AtRest) Pose(fence);
     }
 
-    /// <summary>Shows each wall and fence as the battlefield has it now, and moves toppling fences on.</summary>
-    public void Sync(Battlefield field, float delta)
+    /// <summary>
+    /// Shows each wall and fence as the battlefield has it now: rubble for a wall that is down, a fence knocked down starts
+    /// toppling (<see cref="Fall"/> moves it on), a restored prop stands up again.
+    /// </summary>
+    public void SyncStanding(Battlefield field)
     {
+        bool first = !_seen;
+        _seen = true;
         foreach (View view in _views)
         {
-            bool standing = field.IsStanding(view.Id);
-            if (standing != view.ShownStanding) Change(view, standing);
-            if (view.Fallen < 0f || view.Fallen > FenceFall.Seconds) continue;
-            view.Fallen += delta;
-            float progress = FenceFall.Progress(view.Fallen);
-            view.Standing.Transform = view.Upright * FenceFall.Pose(progress, view.Side, FencePost).ToGodot();
+            PropChange change = view.Down.See(field.IsStanding(view.Id), snap: first);
+            if (change == PropChange.None) continue;
+            Change(view, change);
+            if (view.Rubble is null && view.Down.Moving) _falling.Add(view);
         }
     }
 
-    private static void Change(View view, bool standing)
+    /// <summary>Moves the toppling fences on, every frame; one that has come to rest (or was stood up again) drops off the list.</summary>
+    public void Fall(float delta)
     {
-        view.ShownStanding = standing;
+        for (int k = _falling.Count - 1; k >= 0; k--)
+        {
+            View fence = _falling[k];
+            if (fence.Down.Standing)
+            {
+                _falling.RemoveSwapAt(k);
+                continue;
+            }
+            bool rested = fence.Down.Step(delta);
+            Pose(fence);
+            if (rested) _falling.RemoveSwapAt(k);
+        }
+    }
+
+    private static void Change(View view, PropChange change)
+    {
+        bool standing = change == PropChange.Rose;
         if (view.Rubble is { } rubble)
         {
             rubble.Visible = !standing;
@@ -120,16 +150,26 @@ public partial class WallViews : Node3D
         }
         if (standing)
         {
-            view.Fallen = -1f;
             view.Standing.Transform = view.Upright;
             return;
         }
-        // Falls away from the push: towards the panel's +Z face if the push points that way. With no push on record it
-        // falls towards its −Z face, the footprint's forward.
-        Vector3 across = view.Upright.Basis.Z;
-        view.Side = view.Push is { } push && push.X * across.X + push.Y * across.Z >= 0 ? 1 : -1;
-        view.Fallen = 0f;
+        view.Side = SideOf(view);
+        if (view.Down.AtRest) Pose(view);
     }
+
+    /// <summary>
+    /// The side a fence falls to, away from its push: towards the panel's +Z face if the push points that way. With no
+    /// push on record it falls towards its −Z face, the footprint's forward.
+    /// </summary>
+    private static int SideOf(View fence)
+    {
+        Vector3 across = fence.Upright.Basis.Z;
+        return fence.Down.Push is { } push && push.X * across.X + push.Y * across.Z >= 0 ? 1 : -1;
+    }
+
+    /// <summary>Draws a fence that is down as far over as it is now.</summary>
+    private static void Pose(View fence) =>
+        fence.Standing.Transform = fence.Upright * FenceFall.Pose(FenceFall.Progress(fence.Down.Elapsed), fence.Side, FencePost).ToGodot();
 
     /// <summary>Plain colour times the mesh's vertex shade (wall.gdshader mode 2): rubble chunks and fence wood.</summary>
     private static ShaderMaterial Plain(SN.Vector3 color) => Wall(color, mode: 2);
