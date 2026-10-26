@@ -17,7 +17,7 @@ public static class HudDemoFrames
     private const string LongName = "Sergeant_Wolfgang_Becker";   // as long as a name gets on the wire: 24 ASCII bytes
     private static readonly string[] Roster = { "阿成", "小林", "老周", "小雨", "机器人 1", "机器人 2", "机器人 3", "机器人 4", "机器人 5", "机器人 6" };
 
-    private static readonly string[] AllNames = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa" };
+    private static readonly string[] AllNames = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture" };
 
     /// <summary>The gallery's screen names, in a fixed order.</summary>
     public static IReadOnlyList<string> Names => AllNames;
@@ -40,6 +40,8 @@ public static class HudDemoFrames
             "results-lose" => ResultsLose(),
             "results-draw" => ResultsDraw(),
             "results-ffa" => ResultsSolo(),
+            "standard" => Standard(),
+            "capture" => CaptureWin(),
             _ => null!,
         };
         return demo is not null;
@@ -144,11 +146,44 @@ public static class HudDemoFrames
         return Make("results-ffa", Ended(BattleMode.FreeForAll, players, 6, 0, 0, new ResultsInfo(MatchRules.NoTeam, 4, 4 * SimConstants.TickRate, false)));
     }
 
+    /// <summary>
+    /// Standard battle, eight players, 6:40 left: the own team has 3 of 4 standing, the enemy 2 of 4; the enemy has taken
+    /// 37 points of the own base (the red bar; the gallery's clock is frozen at 0, the moment the points rose, so the bar
+    /// is drawn in its bright phase) and the own team 62 of theirs. The enemy rows' capture is 0, as the server sends it
+    /// during play; the own team's add up to the 62. Two kills on the feed.
+    /// </summary>
+    private static HudDemo Standard()
+    {
+        int[] capture = { 24, 21, 0, 17, 0, 0, 0, 0 };
+        PlayerStats[] players = Players(8, i => (byte)(i < 4 ? 0 : 1), i => i is 0 or 1 or 3 or 4 or 6, kills: i => new[] { 2, 1, 0, 1, 1, 0, 2, 1 }[i], deaths: i => i is 2 or 5 or 7 ? 1 : 0);
+        for (int i = 0; i < capture.Length; i++) players[i].Capture = (byte)capture[i];
+        MatchHudFrame frame = Frame(BattleMode.Standard, Ticks(6, 40), players, 8, progress0: 37, progress1: 62);
+        FeedLine[] kills =
+        {
+            Line("阿成", Side.Own, "机器人 4", Side.Enemy),
+            Line("机器人 3", Side.Enemy, "老周", Side.Ally),
+        };
+        return new HudDemo("standard", frame, kills, NetPanelOpen: false);
+    }
+
+    /// <summary>
+    /// Standard battle won by capture: six players, the own team took the enemy base (its three hold 41, 33 and 26 points
+    /// at best), the enemy got 12 into ours. The results show 胜利 · 占领了敌方基地 over a table with the 占领 column.
+    /// </summary>
+    private static HudDemo CaptureWin()
+    {
+        int[] capture = { 41, 33, 26, 0, 0, 12 };
+        PlayerStats[] players = Players(6, i => (byte)(i < 3 ? 0 : 1), i => i is not (2 or 4), kills: i => new[] { 3, 2, 1, 1, 1, 0 }[i], deaths: i => i is 2 or 4 ? 1 : 0);
+        for (int i = 0; i < capture.Length; i++) players[i].Capture = (byte)capture[i];
+        var info = new ResultsInfo(0, MatchRules.NoSlot, 6 * SimConstants.TickRate, true, MatchEndReason.Captured);
+        return Make("capture", Ended(BattleMode.Standard, players, 6, 0, 0, info, progress0: 12, progress1: BaseCapture.PointsToWin));
+    }
+
     /// <summary>The match over: the plate and the results banner for <paramref name="info"/>, the clock at 0.</summary>
-    private static MatchHudFrame Ended(BattleMode mode, PlayerStats[] players, int count, int score0, int score1, ResultsInfo info)
+    private static MatchHudFrame Ended(BattleMode mode, PlayerStats[] players, int count, int score0, int score1, ResultsInfo info, byte progress0 = 0, byte progress1 = 0)
     {
         var match = new MatchBlock { Phase = MatchPhase.Ended, TeamScore0 = score0, TeamScore1 = score1 };
-        MatchHudFrame frame = Frame(mode, ticksLeft: 0, players, count);
+        MatchHudFrame frame = Frame(mode, ticksLeft: 0, players, count, progress0, progress1);
         return frame with { Phase = MatchPhase.Ended, Plate = HudText.Plate(mode, 0, 0, match, players), Banner = BannerKind.Results, Results = info };
     }
 
@@ -162,14 +197,16 @@ public static class HudDemoFrames
         return frame with { Plate = HudText.Plate(BattleMode.TeamBattle, 0, 0, match, players) };
     }
 
-    private static MatchHudFrame Frame(BattleMode mode, int ticksLeft, PlayerStats[] players, int count)
+    /// <summary>A playing frame for the player in slot 0, team 0; <paramref name="progress0"/> and <paramref name="progress1"/> are the bases' points (standard only), which give the capture bars as the scene's frame would.</summary>
+    private static MatchHudFrame Frame(BattleMode mode, int ticksLeft, PlayerStats[] players, int count, byte progress0 = 0, byte progress1 = 0)
     {
-        var match = new MatchBlock { TicksLeft = ticksLeft };
+        var match = new MatchBlock { TicksLeft = ticksLeft, BaseProgress0 = progress0, BaseProgress1 = progress1 };
         PlateValues plate = HudText.Plate(mode, 0, 0, match, players);
         var names = new string?[BattleProtocol.MaxPlayers];
         Array.Copy(Roster, names, count);
         var net = new NetSample(default, 0, false, 0, 0, 60);
-        return new MatchHudFrame(mode, MatchPhase.Playing, ticksLeft, 0, 0, plate, BannerKind.None, 0, null, false, net, players, names, ResultsInfo.None);
+        return new MatchHudFrame(mode, MatchPhase.Playing, ticksLeft, 0, 0, plate, BannerKind.None, 0, null, false, net, players, names, ResultsInfo.None,
+            CaptureText.Bars(mode, 0, match));
     }
 
     private static PlayerStats[] Players(int count, Func<int, byte> team, Func<int, bool> alive, Func<int, int> kills, Func<int, int> deaths)

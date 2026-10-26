@@ -31,18 +31,21 @@ public sealed class RiverlandFingerprintTests
     [Fact]
     public void Stepping_ten_tanks_on_riverland_allocates_nothing()
     {
-        var (sim, vision, bots) = TenBots();
-        var inputs = new InputCmd[sim.TankCount];
-        void Tick()
+        Allocation.AssertNone(() =>
         {
-            for (int k = 0; k < bots.Length; k++) inputs[k] = bots[k].Command(sim, vision, sim.Tick + 1);
-            sim.Step(inputs);
-            vision.Update();
-        }
-        for (int i = 0; i < 300; i++) Tick();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 300; i++) Tick();
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            var (sim, vision, bots) = TenBots();
+            var inputs = new InputCmd[sim.TankCount];
+            void Tick()
+            {
+                for (int k = 0; k < bots.Length; k++) inputs[k] = bots[k].Command(sim, vision, sim.Tick + 1);
+                sim.Step(inputs);
+                vision.Update();
+            }
+            for (int i = 0; i < 300; i++) Tick();
+            Allocation.Window window = Allocation.Start();
+            for (int i = 0; i < 300; i++) Tick();
+            return window.Stop();
+        });
     }
 
     /// <summary>Ten tanks of every kind on the first ten free-for-all spawns, each its own team, driven by skirmish bots.</summary>

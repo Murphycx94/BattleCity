@@ -196,37 +196,41 @@ public sealed class RamTests
     [Fact]
     public void Ramming_allocates_nothing_once_warmed_up()
     {
-        // Every 3 s a medium tank is put back 4.65 m short of a row of fences and a heavy tank 5.95 m short of a brick
-        // wall, everything stands again, and both drive flat out: the medium knocks fences down, the heavy breaks through.
-        HeightField flat = TestWorld.Flat();
-        var props = new List<Prop>();
-        props.AddRange(new WallLine(PropKind.Fence, new Vector2(94, 90), new Vector2(106, 90)).Segments(flat, 1));
-        props.AddRange(new WallLine(PropKind.BrickWall, new Vector2(124, 90), new Vector2(136, 90)).Segments(flat, props.Count + 1));
-        var sim = new Simulation(TestWorld.Field(flat, props.ToArray()));
-        int medium = sim.AddTank(TankCatalog.Medium, new Vector2(100, 98), 0f), heavy = sim.AddTank(TankCatalog.Heavy, new Vector2(130, 100), 0f);
-        var inputs = new[] { Full, Full };
-        int fences = 0, walls = 0;
-        void Run(int cycles)
+        Allocation.AssertNone(() =>
         {
-            for (int cycle = 0; cycle < cycles; cycle++)
+            // Every 3 s a medium tank is put back 4.65 m short of a row of fences and a heavy tank 5.95 m short of a brick
+            // wall, everything stands again, and both drive flat out: the medium knocks fences down, the heavy breaks through.
+            HeightField flat = TestWorld.Flat();
+            var props = new List<Prop>();
+            props.AddRange(new WallLine(PropKind.Fence, new Vector2(94, 90), new Vector2(106, 90)).Segments(flat, 1));
+            props.AddRange(new WallLine(PropKind.BrickWall, new Vector2(124, 90), new Vector2(136, 90)).Segments(flat, props.Count + 1));
+            var sim = new Simulation(TestWorld.Field(flat, props.ToArray()));
+            int medium = sim.AddTank(TankCatalog.Medium, new Vector2(100, 98), 0f), heavy = sim.AddTank(TankCatalog.Heavy, new Vector2(130, 100), 0f);
+            var inputs = new[] { Full, Full };
+            int fences = 0, walls = 0;
+            void Run(int cycles)
             {
-                sim.TankRef(medium) = sim.TankRef(medium) with { Position = new Vector2(100, 98), Yaw = 0f, Speed = 0f };
-                sim.TankRef(heavy) = sim.TankRef(heavy) with { Position = new Vector2(130, 100), Yaw = 0f, Speed = 0f };
-                for (int i = 0; i < sim.Field.Props.Count; i++) sim.Field.Restore(i);
-                for (int tick = 0; tick < 3 * SimConstants.TickRate; tick++)
+                for (int cycle = 0; cycle < cycles; cycle++)
                 {
-                    sim.Step(inputs);
-                    foreach (GameEvent e in sim.Events)
-                        if (e.Type == GameEventType.PropDestroyed) _ = e.PropId <= 6 ? fences++ : walls++;
+                    sim.TankRef(medium) = sim.TankRef(medium) with { Position = new Vector2(100, 98), Yaw = 0f, Speed = 0f };
+                    sim.TankRef(heavy) = sim.TankRef(heavy) with { Position = new Vector2(130, 100), Yaw = 0f, Speed = 0f };
+                    for (int i = 0; i < sim.Field.Props.Count; i++) sim.Field.Restore(i);
+                    for (int tick = 0; tick < 3 * SimConstants.TickRate; tick++)
+                    {
+                        sim.Step(inputs);
+                        foreach (GameEvent e in sim.Events)
+                            if (e.Type == GameEventType.PropDestroyed) _ = e.PropId <= 6 ? fences++ : walls++;
+                    }
                 }
             }
-        }
-        Run(2);
-        (fences, walls) = (0, 0);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Run(4);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.True(fences >= 8 && walls >= 8, $"{fences} fences and {walls} walls knocked down while measured");
+            Run(2);
+            (fences, walls) = (0, 0);
+            Allocation.Window window = Allocation.Start();
+            Run(4);
+            Allocation.Measured measured = window.Stop();
+            Assert.True(fences >= 8 && walls >= 8, $"{fences} fences and {walls} walls knocked down while measured");
+            return measured;
+        });
     }
 
     [Fact]

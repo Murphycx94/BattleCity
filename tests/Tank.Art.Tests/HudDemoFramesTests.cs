@@ -19,7 +19,7 @@ public class HudDemoFramesTests
     [Fact]
     public void The_gallery_has_the_screens_the_blueprint_names()
     {
-        foreach (string name in new[] { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa" })
+        foreach (string name in new[] { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture" })
             Assert.Contains(name, HudDemoFrames.Names);
     }
 
@@ -57,6 +57,7 @@ public class HudDemoFramesTests
         Assert.True(frame.Phase == MatchPhase.Ended || frame.TicksLeft > 0);
         Assert.True(frame.TicksLeft <= ModeRules.DurationTicks(frame.Mode));
         Assert.Equal(frame.Phase == MatchPhase.Ended, frame.Banner == BannerKind.Results);
+        if (frame.Mode != BattleMode.Standard) Assert.Equal(CaptureBars.None, frame.Capture);   // the bars are a standard match's alone
         Assert.Equal(1, ScoreboardRows(frame).Count(r => r.Side == Side.Own));
         Assert.True(demo.Kills.Length <= KillFeed.Capacity);
         foreach (FeedLine line in demo.Kills)
@@ -140,6 +141,50 @@ public class HudDemoFramesTests
         Assert.Equal(2, rows.Count(r => !r.Alive));
         Assert.Equal(0, rows[0].Team);   // the own team on top
         Assert.False(demo.Frame.Players.Where(p => p.Active).Select(p => p.Team).SequenceEqual(demo.Frame.Players.Where(p => p.Active).Select(p => p.Team).OrderBy(t => t)));   // slots are not grouped by team
+    }
+
+    [Fact]
+    public void The_standard_screen_shows_both_bars_own_base_first()
+    {
+        HudDemoFrames.TryGet("standard", out HudDemo demo);
+        MatchHudFrame f = demo.Frame;
+
+        Assert.Equal(BattleMode.Standard, f.Mode);
+        Assert.Equal(MatchPhase.Playing, f.Phase);
+        Assert.Equal("6:40", HudText.Timer(f.TicksLeft));
+        Assert.Equal(2, f.Capture.Count);
+        Assert.Equal(new CaptureBar(OwnBase: true, 37), f.Capture[0]);
+        Assert.Equal(new CaptureBar(OwnBase: false, 62), f.Capture[1]);
+        Assert.Equal("我方基地 37", CaptureText.Label(f.Capture[0]));
+        Assert.Equal("敌方基地 62", CaptureText.Label(f.Capture[1]));
+        // The gallery's frozen clock: the alarm's first reading is only its baseline, so the own bar stays steady bright red.
+        Assert.False(new CaptureAlarm().Update(f.Capture, now: 0));
+        Assert.Equal(CaptureFill.Danger, MatchColors.FillOf(f.Capture[0], blinkDark: false));
+        Assert.Equal(CaptureFill.Ally, MatchColors.FillOf(f.Capture[1], blinkDark: false));
+        Assert.Equal(("3/4", "2/4"), (HudText.Parts(f.Plate).LeftValue, HudText.Parts(f.Plate).RightValue));
+        Assert.Equal(2, demo.Kills.Length);
+        Assert.False(demo.ScoreboardOpen);
+    }
+
+    [Fact]
+    public void The_capture_screen_is_a_win_by_capture_with_the_capture_column()
+    {
+        HudDemoFrames.TryGet("capture", out HudDemo demo);
+        MatchHudFrame f = demo.Frame;
+        ResultsParts words = HudText.Results(f.Mode, f.OwnSlot, f.OwnTeam, f.Results, f.Plate, f.Players, f.Names);
+        var rows = ScoreboardRows(f);
+
+        Assert.Equal(BattleMode.Standard, f.Mode);
+        Assert.Equal(MatchPhase.Ended, f.Phase);
+        Assert.Equal(MatchEndReason.Captured, f.Results.Reason);
+        Assert.Equal(0, f.Results.WinnerTeam);
+        Assert.Equal("胜利", words.Title);
+        Assert.Equal("占领了敌方基地", words.Subtitle);
+        Assert.Equal(6, rows.Count);
+        Assert.Equal(new[] { 41, 33, 26 }, rows.Where(r => r.Team == 0).Select(r => r.Capture));
+        Assert.Equal(new[] { 0, 0, 12 }, rows.Where(r => r.Team == 1).Select(r => r.Capture).Order());
+        Assert.All(rows, r => Assert.Equal(r.Capture.ToString(System.Globalization.CultureInfo.InvariantCulture), ScoreboardModel.CaptureCell(r, ended: true)));   // every cell a number once it is over
+        Assert.InRange(f.Results.TicksLeft, 1, ModeRules.ResultsTicks);
     }
 
     [Theory]

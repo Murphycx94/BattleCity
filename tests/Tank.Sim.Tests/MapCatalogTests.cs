@@ -43,6 +43,14 @@ public sealed class MapCatalogTests
     }
 
     [Fact]
+    public void The_catalog_maps_carry_their_bases()
+    {
+        Assert.Same(SandboxMap.Bases, MapCatalog.Sandbox.Bases);
+        Assert.Same(RiverlandMap.Bases, MapCatalog.Riverland.Bases);
+        Assert.Empty(Counted(() => { }).Bases);
+    }
+
+    [Fact]
     public void Map_data_is_built_once()
     {
         int calls = 0;

@@ -69,6 +69,7 @@ public partial class MatchMain : Node3D
     private float _aimPitch;
     private bool _finished;
     private bool _prewarmed;       // the roster's actors were built from the first snapshot
+    private bool _ringsBuilt;      // the bases' rings are drawn (a standard match's), or there are none to draw
     private bool _resultsShown;    // the match has ended and the results screen is up
     private bool _dead;            // the own tank is a wreck: commands are empty and the spectate chain has the camera
     private SN.Vector2 _focus;     // where the spectating camera looks (the free camera moves it)
@@ -173,6 +174,7 @@ public partial class MatchMain : Node3D
             _prewarmed = true;
             _actors.Prewarm(roster.Players, _client.OwnTankId, Mode, OwnTeam(_client.Own));
         }
+        if (!_ringsBuilt) BuildRings(field);
         _loading.Visible = false;
         _hud.Visible = true;
         RefreshNames();
@@ -284,6 +286,19 @@ public partial class MatchMain : Node3D
         _combat = Add(new CombatHud());
         _combat.Build(_camera, field, _client.OwnTankId, BattleProtocol.MaxPlayers, _headOf);
         _hud = Add(new MatchHud());
+    }
+
+    /// <summary>
+    /// The bases' rings (stage 5 design §3.4), once the player's team is known (the first snapshot, or the own tank),
+    /// coloured by it: a standard match's only, as the match start names no bases in the others. Built once: a resync's
+    /// new field (<see cref="TakeField"/>) has the same ground and the bases never move.
+    /// </summary>
+    private void BuildRings(Battlefield field)
+    {
+        if (_client.MatchInfo is not { } info) return;
+        _ringsBuilt = true;
+        if (info.Bases is not { Count: > 0 } bases) return;
+        Add(new BaseRings()).Build(bases, OwnTeam(_client.Own), field.Terrain);
     }
 
     private void TakeField(Battlefield field)

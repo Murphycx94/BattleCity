@@ -169,14 +169,18 @@ public sealed class PropIndexTests
     [Fact]
     public void Queries_allocate_nothing()
     {
-        Battlefield field = Scattered();
-        Span<int> buffer = stackalloc int[512];
-        var rng = new XorShift(23);
-        int sum = Query(field, ref rng, buffer, 20);   // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        sum += Query(field, ref rng, buffer, 1000);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.True(sum > 0);
+        Allocation.AssertNone(() =>
+        {
+            Battlefield field = Scattered();
+            Span<int> buffer = stackalloc int[512];
+            var rng = new XorShift(23);
+            int sum = Query(field, ref rng, buffer, 20);   // warm up
+            Allocation.Window window = Allocation.Start();
+            sum += Query(field, ref rng, buffer, 1000);
+            Allocation.Measured measured = window.Stop();
+            Assert.True(sum > 0);
+            return measured;
+        });
     }
 
     private static int Query(Battlefield field, ref XorShift rng, Span<int> buffer, int count)

@@ -15,6 +15,8 @@ public sealed class BattleSnapshotCodec
     private const ushort MaskMeta = 1, MaskX = 2, MaskZ = 4, MaskYaw = 8, MaskTurret = 16, MaskPitch = 32, MaskSpeed = 64, MaskHealth = 128, MaskFlags = 256;
     private const ushort MaskAll = 511;
     private const int MaskBits = 9;
+    private const int EndReasonBits = 2;   // MatchEndReason: at most 3
+    private const int CaptureBits = 7;     // a player's capture: 0–100
 
     private readonly BattleEntity[] _changed = new BattleEntity[BattleSnapshot.MaxEntities];
     private readonly int[] _removed = new int[BattleSnapshot.MaxEntities];
@@ -224,7 +226,13 @@ public sealed class BattleSnapshotCodec
         w.WriteVarUInt((uint)m.RespawnIn);
         w.WriteVarUInt((uint)m.TeamScore0);
         w.WriteVarUInt((uint)m.TeamScore1);
+        w.WriteByte(Points(m.BaseProgress0));
+        w.WriteByte(Points(m.BaseProgress1));
+        w.WriteBits((uint)m.EndReason, EndReasonBits);
     }
+
+    /// <summary>A base's progress or a player's capture as the wire takes it: at most <see cref="BaseCapture.PointsToWin"/>, what the reader accepts.</summary>
+    private static byte Points(byte points) => System.Math.Min(points, (byte)BaseCapture.PointsToWin);
 
     private static MatchBlock ReadMatch(ref BitReader r) => new()
     {
@@ -236,7 +244,17 @@ public sealed class BattleSnapshotCodec
         RespawnIn = BattleMessages.ReadNonNegative(ref r),
         TeamScore0 = BattleMessages.ReadNonNegative(ref r),
         TeamScore1 = BattleMessages.ReadNonNegative(ref r),
+        BaseProgress0 = ReadBaseProgress(ref r),
+        BaseProgress1 = ReadBaseProgress(ref r),
+        EndReason = (MatchEndReason)r.ReadBits(EndReasonBits),   // every 2-bit value is a reason
     };
+
+    /// <summary>A base's progress: a byte of points, 0–<see cref="BaseCapture.PointsToWin"/>; more is garbage.</summary>
+    private static byte ReadBaseProgress(ref BitReader r)
+    {
+        byte points = r.ReadByte();
+        return points <= BaseCapture.PointsToWin ? points : throw new ProtocolException("Base progress out of range.");
+    }
 
     /// <summary>A coordinate plus its delta, which must stay within the map's world (no overflow, no 100 km tanks).</summary>
     private static int AddCoordinate(int coordinate, int delta)
@@ -309,6 +327,7 @@ public sealed class BattleSnapshotCodec
             w.WriteVarUInt((uint)p.Deaths);
             w.WriteBool(p.Alive);
             w.WriteBits(p.Rank, 4);
+            w.WriteBits(Points(p.Capture), CaptureBits);   // never cut to 7 bits
         }
     }
 
@@ -327,6 +346,8 @@ public sealed class BattleSnapshotCodec
             p.Deaths = BattleMessages.ReadNonNegative(ref r);
             p.Alive = r.ReadBool();
             p.Rank = (byte)r.ReadBits(4);
+            uint capture = r.ReadBits(CaptureBits);
+            p.Capture = capture <= BaseCapture.PointsToWin ? (byte)capture : throw new ProtocolException("Capture out of range.");
         }
     }
 }

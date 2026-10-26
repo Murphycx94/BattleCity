@@ -20,9 +20,10 @@ public struct Standing
 }
 
 /// <summary>
-/// Runs a match's rules on top of a <see cref="Simulation"/> (stage 4 design §2): puts players' tanks on spawn points
-/// with protection, scores kills, respawns or eliminates the fallen, keeps the clock and calls the result. Players are
-/// known by room slot. Call <see cref="Update"/> after every <see cref="Simulation.Step"/>.
+/// Runs a match's rules on top of a <see cref="Simulation"/> (stage 4 design §2, stage 5 design §3.1): puts players'
+/// tanks on spawn points with protection, scores kills, counts base capture (standard battle), respawns or eliminates
+/// the fallen, keeps the clock and calls the result and why. Players are known by room slot. Call <see cref="Update"/>
+/// after every <see cref="Simulation.Step"/>.
 /// </summary>
 public sealed class MatchRules
 {
@@ -44,9 +45,11 @@ public sealed class MatchRules
     private readonly int _startTick;
 
     /// <param name="durationTicks">A match length other than the mode's (tests), positive; null for the mode's own.</param>
-    public MatchRules(BattleMode mode, Simulation sim, SpawnLayout spawns, int? durationTicks = null)
+    /// <param name="bases">The map's bases: required (<see cref="TeamBase.Check"/>, not empty) in a standard match, ignored in the others.</param>
+    public MatchRules(BattleMode mode, Simulation sim, SpawnLayout spawns, int? durationTicks = null, IReadOnlyList<TeamBase>? bases = null)
     {
         if (durationTicks is <= 0) throw new ArgumentOutOfRangeException(nameof(durationTicks), durationTicks, "A match lasts at least one tick.");
+        if (ModeRules.HasBases(mode)) Capture = new BaseCapture(bases ?? Array.Empty<TeamBase>());   // checks them: ArgumentException, param "bases"
         (Mode, _sim, _spawns) = (mode, sim, spawns);
         _startTick = sim.Tick;
         EndTick = sim.Tick + (durationTicks ?? ModeRules.DurationTicks(mode));
@@ -69,6 +72,19 @@ public sealed class MatchRules
 
     /// <summary>The winning player's slot (free-for-all), or <see cref="NoSlot"/>.</summary>
     public byte WinnerSlot { get; private set; } = NoSlot;
+
+    /// <summary>Why the match ended, in every mode; <see cref="MatchEndReason.None"/> while it is on.</summary>
+    public MatchEndReason EndReason { get; private set; }
+
+    /// <summary>The base capture count: non-null exactly in a standard match.</summary>
+    public BaseCapture? Capture { get; }
+
+    /// <summary>
+    /// The most whole points <paramref name="slot"/>'s tank held on the enemy base this match (0–100); 0 outside a
+    /// standard match or for an empty seat. A player who left reads 0: the capture count forgets a tank taken out of
+    /// the battle (the server sends no row for them anyway).
+    /// </summary>
+    public byte CaptureBest(byte slot) => Capture?.BestOf(_players[slot].TankId) ?? 0;
 
     public ref readonly Standing Of(byte slot) => ref _players[slot];
 
@@ -116,15 +132,16 @@ public sealed class MatchRules
     }
 
     /// <summary>
-    /// After each step: scores this tick's kills, respawns the due, and calls the result when it is decided. The room
-    /// sees to it that a match starts with at least two players, one per team: with fewer, a no-respawn match is decided
-    /// on its first update (nobody, or only one side, left standing).
+    /// After each step: scores this tick's kills, counts base capture, respawns the due, and calls the result when it is
+    /// decided. The room sees to it that a match starts with at least two players, one per team: with fewer, a
+    /// no-respawn match is decided on its first update (nobody, or only one side, left standing).
     /// </summary>
     public void Update()
     {
         if (Phase == MatchPhase.Ended) return;
         foreach (ref readonly GameEvent e in _sim.Events)
             if (e.Type == GameEventType.TankDestroyed) OnDestroyed(e);
+        Capture?.Update(_sim.Tanks, _sim.Events);
         if (ModeRules.Respawns(Mode)) RespawnDue();
         Judge();
     }
@@ -165,17 +182,41 @@ public sealed class MatchRules
         switch (Mode)
         {
             case BattleMode.TeamBattle when timeUp:
-                End(team: Leader());
+                End(Leader(), MatchEndReason.TimeUp);
                 break;
             case BattleMode.Annihilation:
                 int a = AliveCount(0), b = AliveCount(1);
-                if (a == 0 || b == 0) End(team: a > 0 ? (byte)0 : b > 0 ? (byte)1 : NoTeam);
-                else if (timeUp) End(team: NoTeam);
+                if (a == 0 || b == 0) End(a > 0 ? (byte)0 : b > 0 ? (byte)1 : NoTeam, MatchEndReason.Eliminated);
+                else if (timeUp) End(NoTeam, MatchEndReason.TimeUp);
                 break;
             case BattleMode.FreeForAll:
-                if (AliveCount() <= 1 || timeUp) EndSolo();
+                if (AliveCount() <= 1) EndSolo(MatchEndReason.Eliminated);
+                else if (timeUp) EndSolo(MatchEndReason.TimeUp);
+                break;
+            case BattleMode.Standard:
+                JudgeStandard(timeUp);
                 break;
         }
+    }
+
+    /// <summary>
+    /// A team wins by wiping the other out or taking its base; both teams winning on one tick is a draw. A team can only
+    /// take a base with its own tanks alive (a destroyed tank's points are gone), so one team's capture and its own
+    /// wipe-out never come on the same tick: a draw is either both wiped out or both bases fallen, never one of each.
+    /// A win both ways at once counts as a capture.
+    /// </summary>
+    private void JudgeStandard(bool timeUp)
+    {
+        BaseCapture capture = Capture!;
+        bool took1 = capture.IsCaptured(1), took0 = capture.IsCaptured(0);   // team 0 took team 1's base; team 1 took team 0's
+        bool won0 = AliveCount(1) == 0 || took1, won1 = AliveCount(0) == 0 || took0;
+        if (won0 || won1)
+        {
+            byte team = won0 && won1 ? NoTeam : won0 ? (byte)0 : (byte)1;
+            bool captured = (won0 && took1) || (won1 && took0);
+            End(team, captured ? MatchEndReason.Captured : MatchEndReason.Eliminated);
+        }
+        else if (timeUp) End(NoTeam, MatchEndReason.TimeUp);
     }
 
     private byte Leader()
@@ -184,9 +225,15 @@ public sealed class MatchRules
         return a == b ? NoTeam : a > b ? (byte)0 : (byte)1;
     }
 
-    private void End(byte team)
+    private void End(byte team, MatchEndReason reason)
     {
         WinnerTeam = team;
+        Finish(reason);
+    }
+
+    private void Finish(MatchEndReason reason)
+    {
+        EndReason = reason;
         Phase = MatchPhase.Ended;
         EndedAt = _sim.Tick;
     }
@@ -195,7 +242,7 @@ public sealed class MatchRules
     /// Ranks a free-for-all: the living by health, best first (the last one left, or whoever has the most when time is
     /// up, wins), then the fallen by how long they lasted; ties by kills, then by slot.
     /// </summary>
-    private void EndSolo()
+    private void EndSolo(MatchEndReason reason)
     {
         int n = 0;
         for (byte slot = 0; slot < _players.Length; slot++)
@@ -211,8 +258,7 @@ public sealed class MatchRules
         }
         for (int i = 0; i < n; i++) _players[order[i]].Rank = (byte)(i + 1);
         WinnerSlot = n > 0 ? order[0] : NoSlot;
-        Phase = MatchPhase.Ended;
-        EndedAt = _sim.Tick;
+        Finish(reason);
     }
 
     /// <summary>Whether <paramref name="x"/> places ahead of <paramref name="y"/>.</summary>

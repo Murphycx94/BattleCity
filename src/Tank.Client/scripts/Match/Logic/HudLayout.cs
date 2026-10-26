@@ -20,10 +20,13 @@ public readonly record struct HudRect(float X, float Y, float Width, float Heigh
 /// <summary>Where every HUD block goes on one screen size.</summary>
 public readonly record struct HudBoxes(
     HudRect ScorePlate, HudRect ModeLabel, HudRect KillFeed, HudRect NetPanel, HudRect Banner, HudRect SpectateBar,
-    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable)
+    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable, HudRect CaptureBars)
 {
     /// <summary>Row <paramref name="index"/> (0 = top) of the kill feed.</summary>
     public HudRect KillRow(int index) => new(KillFeed.X, KillFeed.Y + index * (HudLayout.KillRowHeight + HudLayout.KillRowGap), KillFeed.Width, HudLayout.KillRowHeight);
+
+    /// <summary>Row <paramref name="index"/> (0 = top, 1 under it) of the capture bars.</summary>
+    public HudRect CaptureRow(int index) => new(CaptureBars.X, CaptureBars.Y + index * (HudLayout.CaptureBarHeight + HudLayout.CaptureBarGap), CaptureBars.Width, HudLayout.CaptureBarHeight);
 }
 
 /// <summary>
@@ -42,6 +45,10 @@ public static class HudLayout
 
     public const int KillRows = 5;
     public const float KillWidth = 440f, KillRowHeight = 36f, KillRowGap = 6f;
+
+    // The capture bars (stage 5 design §3.4) hang under the mode label (which ends at 116), as wide as the plate: two rows at most.
+    public const float CaptureTop = 124f, CaptureBarHeight = 26f, CaptureBarGap = 6f;
+    public const int CaptureRows = 2;
 
     public const float NetWidth = 500f, NetHeight = 280f;
 
@@ -77,6 +84,7 @@ public static class HudLayout
             new HudRect(cx - ScoreboardWidth / 2, ScoreboardTop, ScoreboardWidth, ScoreboardHeight),
             new HudRect(Margin, size.Y - Margin - StatusHeight - StatusNameRoom, StatusWidth, StatusHeight + StatusNameRoom),
             results,
-            new HudRect(cx - ScoreboardWidth / 2, results.Y + ResultsTableTop, ScoreboardWidth, ScoreboardHeight));
+            new HudRect(cx - ScoreboardWidth / 2, results.Y + ResultsTableTop, ScoreboardWidth, ScoreboardHeight),
+            new HudRect(plate.X, CaptureTop, PlateWidth, CaptureRows * CaptureBarHeight + (CaptureRows - 1) * CaptureBarGap));
     }
 }

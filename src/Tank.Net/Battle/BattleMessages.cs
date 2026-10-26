@@ -57,13 +57,18 @@ public readonly record struct PropState(int PropId, byte Durability);
 
 /// <summary>
 /// Everything a client needs to join a match in progress (design §5.4): the map itself, the props that aren't as new,
-/// the clock, and which tank is the client's (0: none, it spectates or waits).
+/// the clock, which tank is the client's (0: none, it spectates or waits), and the teams' bases.
 /// </summary>
 /// <param name="Map">
 /// The map; null when the server left it out: its answer to a <see cref="MatchStateRequest"/> from a client that already
 /// has this match's map, which keeps its own (a resync costs a few bytes, not the whole map).
 /// </param>
-public sealed record MatchStartMessage(BattleMode Mode, int MatchNumber, int CurrentTick, int EndTick, MapData? Map, IReadOnlyList<PropState> Props, int MyTankId);
+/// <param name="Bases">
+/// The teams' bases in a standard match (stage 5 design §3.3), for the rings on the ground and the minimap: null or empty
+/// for none, else one per team (<see cref="TeamBase.Check"/>). Never null once read: an empty array.
+/// </param>
+public sealed record MatchStartMessage(BattleMode Mode, int MatchNumber, int CurrentTick, int EndTick, MapData? Map, IReadOnlyList<PropState> Props, int MyTankId,
+    IReadOnlyList<TeamBase>? Bases = null);
 
 /// <summary>A client asks for the match state again (<see cref="BattleMessage.RequestMatchState"/>).</summary>
 /// <param name="NeedMap">
@@ -86,6 +91,9 @@ public static class BattleMessages
     /// <summary>The most props a map may have (riverland design §5.1: the riverland map has about 5600).</summary>
     public const int MaxMapProps = 16384;
 
+    /// <summary>The most bases a match start may carry: one per team of a standard match.</summary>
+    public const int MaxBases = 2;
+
     private const int MaxEventsPerBatch = 1024;
     private const int MaxPropsPerMessage = 4096;   // prop states in an event batch
     private const int MaxMapSamples = 1024 * 1024;
@@ -98,6 +106,8 @@ public static class BattleMessages
     private const int MaxVarUIntBytes = 5;
     private const int MaxMatchStartHeaderBytes = 3 + 3 * MaxVarUIntBytes;   // type, mode, flags and three numbers
     private const int MapInRoomInfoVersion = 3;   // a room's LAN answer names its map from this version on
+    private const int BaseBytes = 1 + 3 * 4;      // a base in a match start: team, x, z, radius
+    private const float MaxBaseCoordinateMetres = BattleProtocol.MaxCoordinateCm * BattleProtocol.PositionUnit;   // a base centre, either axis: ±100 km
 
     // ---- Hello / Welcome / Reject ----
 
@@ -186,13 +196,16 @@ public static class BattleMessages
 
     /// <summary>
     /// The type byte, the mode, the match number, the tick and the end tick; a flags byte (bit 0: the map follows; the
-    /// others 0); the map (<see cref="WriteMap"/>) when there is one; the props that aren't as new; the client's tank.
+    /// others 0); the map (<see cref="WriteMap"/>) when there is one; the props that aren't as new; the client's tank; the
+    /// number of bases (a byte, 0 or 2) and each base's team (a byte), centre x and z and radius (floats).
     /// </summary>
+    /// <exception cref="ArgumentException"><c>m.Bases</c> are ones the reader would refuse (<see cref="CheckedBases"/>).</exception>
     public static void Write(BitWriter w, MatchStartMessage m)
     {
+        IReadOnlyList<TeamBase> bases = CheckedBases(m);   // before a byte is written: a bad message writes nothing
         WriteMatchStartHeader(w, m);
         if (m.Map is not null) WriteMap(w, m.Map);
-        WriteMatchStartTail(w, m);
+        WriteMatchStartTail(w, m, bases);
     }
 
     /// <summary>
@@ -201,14 +214,31 @@ public static class BattleMessages
     /// server encodes a map once and sends it to every seat. Only whole bytes come before the map, so it lands aligned.
     /// The writer is grown once, to all the message can take, before anything is written.
     /// </summary>
-    /// <exception cref="ArgumentException"><c>m.Map</c> is null: a match start without the map has nothing to copy in.</exception>
+    /// <exception cref="ArgumentException">
+    /// <c>m.Map</c> is null (a match start without the map has nothing to copy in), or <c>m.Bases</c> are ones the reader
+    /// would refuse (<see cref="CheckedBases"/>).
+    /// </exception>
     public static void Write(BitWriter w, MatchStartMessage m, ReadOnlySpan<byte> encodedMap)
     {
         if (m.Map is null) throw new ArgumentException("A match start without its map takes no encoded map.", nameof(m));
+        IReadOnlyList<TeamBase> bases = CheckedBases(m);   // before a byte is written: a bad message writes nothing
         w.Reserve(MaxMatchStartHeaderBytes + encodedMap.Length + MaxMatchStartTailBytes(m.Props.Count));
         WriteMatchStartHeader(w, m);
         w.WriteAligned(encodedMap);
-        WriteMatchStartTail(w, m);
+        WriteMatchStartTail(w, m, bases);
+    }
+
+    /// <summary>
+    /// <c>m.Bases</c> as the reader takes them (<see cref="ReadBases"/>): <see cref="TeamBase.Check"/>'s rules, and each
+    /// centre within the wire's coordinate range (±100 km). ArgumentException otherwise.
+    /// </summary>
+    private static IReadOnlyList<TeamBase> CheckedBases(MatchStartMessage m)
+    {
+        IReadOnlyList<TeamBase> bases = TeamBase.Check(m.Bases, nameof(m));
+        foreach (TeamBase b in bases)
+            if (MathF.Abs(b.Centre.X) > MaxBaseCoordinateMetres || MathF.Abs(b.Centre.Y) > MaxBaseCoordinateMetres)
+                throw new ArgumentException($"Team {b.Team}'s base centre {b.Centre} is beyond the wire's ±{MaxBaseCoordinateMetres} m.", nameof(m));
+        return bases;
     }
 
     private static void WriteMatchStartHeader(BitWriter w, MatchStartMessage m)
@@ -221,14 +251,25 @@ public static class BattleMessages
         w.WriteByte(m.Map is null ? (byte)0 : MapIncludedFlag);
     }
 
-    private static void WriteMatchStartTail(BitWriter w, MatchStartMessage m)
+    /// <param name="bases"><c>m.Bases</c> as <see cref="CheckedBases"/> passed them.</param>
+    private static void WriteMatchStartTail(BitWriter w, MatchStartMessage m, IReadOnlyList<TeamBase> bases)
     {
         WriteProps(w, m.Props);
         w.WriteVarUInt((uint)m.MyTankId);
+        w.WriteByte((byte)bases.Count);
+        for (int i = 0; i < bases.Count; i++)
+        {
+            TeamBase b = bases[i];
+            w.WriteByte(b.Team);
+            WriteFloat(w, b.Centre.X);
+            WriteFloat(w, b.Centre.Y);
+            WriteFloat(w, b.Radius);
+        }
     }
 
-    /// <summary>The most bytes the tail can take: the prop count, each prop's id and hit points, the tank id.</summary>
-    private static int MaxMatchStartTailBytes(int props) => MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes;
+    /// <summary>The most bytes the tail can take: the prop count, each prop's id and hit points, the tank id, the bases.</summary>
+    private static int MaxMatchStartTailBytes(int props) =>
+        MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes + 1 + MaxBases * BaseBytes;
 
     public static MatchStartMessage ReadMatchStart(ref BitReader r)
     {
@@ -239,7 +280,32 @@ public static class BattleMessages
         MapData? map = (flags & MapIncludedFlag) != 0 ? ReadMap(ref r) : null;
         PropState[] props = ReadProps(ref r, map?.Props.Length ?? MaxMapProps);   // a prop that isn't on the map has no state (the client checks a map it keeps)
         int mine = ReadNonNegative(ref r);
-        return new MatchStartMessage(mode, number, tick, end, map, props, mine);
+        return new MatchStartMessage(mode, number, tick, end, map, props, mine, ReadBases(ref r));
+    }
+
+    /// <summary>The bases of a match start: at most <see cref="MaxBases"/>, by <see cref="TeamBase.Check"/>'s rules, within the coordinate limit.</summary>
+    private static TeamBase[] ReadBases(ref BitReader r)
+    {
+        byte count = r.ReadByte();
+        if (count == 0) return Array.Empty<TeamBase>();
+        if (count > MaxBases) throw new ProtocolException("Too many bases.");
+        var bases = new TeamBase[count];
+        for (int i = 0; i < count; i++)
+        {
+            byte team = r.ReadByte();
+            float x = ReadFloat(ref r), z = ReadFloat(ref r), radius = ReadFloat(ref r);
+            if (MathF.Abs(x) > MaxBaseCoordinateMetres || MathF.Abs(z) > MaxBaseCoordinateMetres) throw new ProtocolException("Base centre out of range.");
+            bases[i] = new TeamBase(team, new Vector2(x, z), radius);
+        }
+        try
+        {
+            TeamBase.Check(bases, nameof(bases));
+        }
+        catch (ArgumentException ex)
+        {
+            throw new ProtocolException($"Bad bases: {ex.Message}");
+        }
+        return bases;
     }
 
     // ---- Match state request ----
@@ -464,11 +530,16 @@ public static class BattleMessages
         if (m.ProtocolVersion >= MapInRoomInfoVersion) w.WriteString(m.Map, BattleProtocol.MaxMapIdBytes);
     }
 
+    /// <summary>
+    /// A room's LAN answer. The mode is checked only in a room of our version: another version's room keeps its mode byte
+    /// as it came (perhaps a mode this build doesn't know), so the room list still shows it, as another version, instead of
+    /// dropping it.
+    /// </summary>
     public static RoomInfoMessage ReadRoomInfo(ref BitReader r)
     {
         int version = ReadNonNegative(ref r);
         string name = r.ReadString(BattleProtocol.MaxRoomNameBytes);
-        BattleMode mode = ReadMode(ref r);
+        BattleMode mode = version == BattleProtocol.Version ? ReadMode(ref r) : (BattleMode)r.ReadByte();
         int players = ReadNonNegative(ref r), max = ReadNonNegative(ref r);
         bool running = r.ReadBool();
         int port = ReadNonNegative(ref r);
@@ -515,6 +586,6 @@ public static class BattleMessages
     private static BattleMode ReadMode(ref BitReader r)
     {
         byte mode = r.ReadByte();
-        return mode <= (byte)BattleMode.FreeForAll ? (BattleMode)mode : throw new ProtocolException("Unknown battle mode.");
+        return mode <= (byte)ModeRules.LastMode ? (BattleMode)mode : throw new ProtocolException("Unknown battle mode.");
     }
 }

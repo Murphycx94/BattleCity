@@ -12,7 +12,9 @@ namespace Tank.Net.Tests.Transport;
 /// <summary>
 /// The riverland's match start (about 542 KiB, reliable, fragmented) over real UDP on 127.0.0.1: what loopback tests
 /// can't show — LiteNetLib's own packet limits and fragmentation. Where the sandbox forbids binding, the test does nothing.
+/// Real time and a 10-second deadline: in the <see cref="TimingCollection"/>.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public sealed class RiverlandUdpMatchTests
 {
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);

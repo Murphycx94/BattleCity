@@ -104,43 +104,87 @@ public sealed class BattleServerTests
     [InlineData(2, 3)]
     public void A_running_match_allocates_nothing_per_tick(int humans, int bots)
     {
-        const int WarmUpTicks = 60, MeasuredTicks = 300;
-        var rig = new Rig(new BattleServerOptions { Bots = bots, Seed = 1 });
-        for (int h = 1; h <= humans; h++) rig.Join(h, "p" + h);
-        rig.StartMatch(1);
-        Assert.True(rig.Server.MatchRunning);
-        Assert.Equal(humans + bots, rig.Server.Simulation!.Tanks.Length);
-        rig.Net.Capture = false;   // copying packets for inspection allocates; counting them doesn't
-
-        // Every input packet, for every tick the loop will run, is built before anything is measured.
-        int firstTick = rig.Server.Simulation!.Tick + 1;
-        int total = WarmUpTicks + MeasuredTicks;
-        var packets = new byte[humans][][];
-        for (int h = 0; h < humans; h++)
+        Allocation.AssertNone(() =>
         {
-            packets[h] = new byte[total][];
-            for (int i = 0; i < total; i++)
-                packets[h][i] = Input(firstTick + i, ack: System.Math.Max(0, firstTick + i - 2), steer: (sbyte)((i / 40 % 3) - 1), yaw: (i % 100) / 20f, fire: i % 15 == 0);
-        }
+            const int WarmUpTicks = 60, MeasuredTicks = 300;
+            var rig = new Rig(new BattleServerOptions { Bots = bots, Seed = 1 });
+            for (int h = 1; h <= humans; h++) rig.Join(h, "p" + h);
+            rig.StartMatch(1);
+            Assert.True(rig.Server.MatchRunning);
+            Assert.Equal(humans + bots, rig.Server.Simulation!.Tanks.Length);
+            rig.Net.Capture = false;   // copying packets for inspection allocates; counting them doesn't
 
-        for (int i = 0; i < WarmUpTicks; i++)
+            // Every input packet, for every tick the loop will run, is built before anything is measured.
+            int firstTick = rig.Server.Simulation!.Tick + 1;
+            int total = WarmUpTicks + MeasuredTicks;
+            var packets = new byte[humans][][];
+            for (int h = 0; h < humans; h++)
+            {
+                packets[h] = new byte[total][];
+                for (int i = 0; i < total; i++)
+                    packets[h][i] = Input(firstTick + i, ack: System.Math.Max(0, firstTick + i - 2), steer: (sbyte)((i / 40 % 3) - 1), yaw: (i % 100) / 20f, fire: i % 15 == 0);
+            }
+
+            for (int i = 0; i < WarmUpTicks; i++)
+            {
+                for (int h = 0; h < humans; h++) rig.Net.Receive(h + 1, packets[h][i]);
+                rig.Server.Tick();
+            }
+
+            Allocation.Window window = Allocation.Start();
+            for (int i = WarmUpTicks; i < total; i++)
+            {
+                for (int h = 0; h < humans; h++) rig.Net.Receive(h + 1, packets[h][i]);
+                rig.Server.Tick();
+            }
+            Allocation.Measured measured = window.Stop();
+
+            _output.WriteLine($"{humans} humans + {bots} bots: {measured.Bytes} bytes allocated over {MeasuredTicks} ticks");
+            Assert.True(rig.Server.MatchRunning);
+            for (int h = 1; h <= humans; h++) Assert.True(rig.Net.CountTo(h, BattleMessage.Snapshot) >= total, $"peer {h} got {rig.Net.CountTo(h, BattleMessage.Snapshot)} snapshots");
+            return measured;
+        });
+    }
+
+    [Fact]
+    public void A_running_standard_match_with_bots_allocates_nothing_per_tick()
+    {
+        Allocation.AssertNone(() =>
         {
-            for (int h = 0; h < humans; h++) rig.Net.Receive(h + 1, packets[h][i]);
-            rig.Server.Tick();
-        }
+            const int WarmUpTicks = 60, MeasuredTicks = 300, Bots = 3;
+            var rig = new Rig(TestMaps.Options(TestMaps.Standard("s")) with { Mode = BattleMode.Standard, Bots = Bots });
+            rig.Join(1, "p1");
+            rig.StartMatch(1);
+            Assert.True(rig.Server.MatchRunning);
+            Assert.Equal(1 + Bots, rig.Server.Simulation!.Tanks.Length);
+            rig.Net.Capture = false;   // copying packets for inspection allocates; counting them doesn't
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = WarmUpTicks; i < total; i++)
-        {
-            for (int h = 0; h < humans; h++) rig.Net.Receive(h + 1, packets[h][i]);
-            rig.Server.Tick();
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            // Straight east from team 0's spawns (x 40) through team 1's base (x 50–100): the capture is counted and sent.
+            int firstTick = rig.Server.Simulation!.Tick + 1;
+            var packets = new byte[WarmUpTicks + MeasuredTicks][];
+            for (int i = 0; i < packets.Length; i++)
+                packets[i] = Input(firstTick + i, ack: System.Math.Max(0, firstTick + i - 2), fire: i % 15 == 0);
 
-        _output.WriteLine($"{humans} humans + {bots} bots: {allocated} bytes allocated over {MeasuredTicks} ticks");
-        Assert.Equal(0, allocated);
-        Assert.True(rig.Server.MatchRunning);
-        for (int h = 1; h <= humans; h++) Assert.True(rig.Net.CountTo(h, BattleMessage.Snapshot) >= total, $"peer {h} got {rig.Net.CountTo(h, BattleMessage.Snapshot)} snapshots");
+            for (int i = 0; i < WarmUpTicks; i++)
+            {
+                rig.Net.Receive(1, packets[i]);
+                rig.Server.Tick();
+            }
+
+            Allocation.Window window = Allocation.Start();
+            for (int i = WarmUpTicks; i < packets.Length; i++)
+            {
+                rig.Net.Receive(1, packets[i]);
+                rig.Server.Tick();
+            }
+            Allocation.Measured measured = window.Stop();
+
+            _output.WriteLine($"standard, 1 human + {Bots} bots: {measured.Bytes} bytes allocated over {MeasuredTicks} ticks");
+            Assert.True(rig.Server.MatchRunning);
+            Assert.True(rig.Server.Rules!.CaptureBest(0) > 0, "the human never counted in the enemy base");
+            Assert.True(rig.Net.CountTo(1, BattleMessage.Snapshot) >= packets.Length);
+            return measured;
+        });
     }
 
     // ---- b. resync ----
@@ -176,6 +220,26 @@ public sealed class BattleServerTests
         // Once the client acks a snapshot of the new chain, deltas resume.
         rig.Send(1, Input(++tick, ack: tick - 1), ticks: 2);
         Assert.NotEqual(0, BaseTickOf(rig.Net.LastTo(1, BattleMessage.Snapshot)));
+    }
+
+    [Fact]
+    public void A_resync_in_a_standard_match_without_the_map_still_carries_the_bases()
+    {
+        var rig = new Rig(TestMaps.Options(TestMaps.Standard("s")) with { Mode = BattleMode.Standard, Bots = 1 });
+        rig.Join(1, "a");
+        rig.StartMatch(1);
+        Assert.True(rig.Server.MatchRunning);
+        Assert.Equal(TestMaps.StandardBases, rig.MatchStartOf(1).Bases);
+        rig.Tick(SimConstants.TickRate);   // past the resync cooldown
+        int starts = rig.Net.CountTo(1, BattleMessage.MatchStart);
+
+        rig.Send(1, ResyncRequest());
+
+        Assert.Equal(starts + 1, rig.Net.CountTo(1, BattleMessage.MatchStart));
+        MatchStartMessage again = rig.MatchStartOf(1);
+        Assert.Null(again.Map);   // this connection has the map
+        Assert.Equal(TestMaps.StandardBases, again.Bases);
+        Assert.Equal(BattleMode.Standard, again.Mode);
     }
 
     private static int TickOf(SentPacket snapshot)

@@ -65,6 +65,12 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
     private MatchRules? _rules;
     private long _endedAtFrame = -1;
 
+    /// <summary>
+    /// The players (by reconnect token) who have had a tank in this match, in a mode without respawns: none of them gets
+    /// another before the next match (<see cref="MayJoinMatch"/>). Cleared when a match starts and ends.
+    /// </summary>
+    private readonly HashSet<uint> _hadTank = new();
+
     public BattleServer(IServerTransport transport, BattleServerOptions? options = null, Action<string>? log = null)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));

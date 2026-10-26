@@ -3,6 +3,7 @@ using Tank.Sim;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 using SN = System.Numerics;
@@ -15,7 +16,7 @@ public class MapSitesTests
     private static Battlefield Riverland => MapCatalog.Riverland.NewBattlefield();
 
     private static readonly string[] SandboxPresets =
-        { "front", "side", "close", "closerear", "sprocket", "hill", "spin", "orbit", "bush", "target", "yard", "gate", "patrol" };
+        { "front", "side", "close", "closerear", "sprocket", "hill", "spin", "orbit", "bush", "target", "yard", "gate", "patrol", "base0", "base1", "base0near", "base1near", "base0far", "base1far" };
 
     [Fact]
     public void Unknown_or_missing_ids_get_the_sandbox()
@@ -50,7 +51,7 @@ public class MapSitesTests
         Assert.Equal(RangeDemo.Names, site.DemoNames);
         Assert.Equal(RangeDemo.Find("lamp"), site.FindDemo("lamp"));
         Assert.Null(site.FindDemo("moon"));
-        Assert.Empty(site.Anchors);   // the sandbox's cameras stay the constants in CameraPresets
+        Assert.Equal(new[] { "base0", "base0far", "base0near", "base1", "base1far", "base1near" }, site.Anchors.Keys.Order());   // its other cameras stay the constants in CameraPresets
         Assert.Equal(SandboxMap.BushPatches[0], site.PresetSpawns["bush"]);
         Assert.Equal(SandboxMap.PatrolWatch, site.PresetSpawns["patrol"]);
         Assert.Equal(2, site.PresetSpawns.Count);
@@ -86,7 +87,7 @@ public class MapSitesTests
     {
         Battlefield field = Riverland;
         MapSite site = MapSites.Riverland;
-        Assert.Equal(new[] { "overview", "town", "ford", "forest", "plateau", "dunes", "map" }.Order(), site.Anchors.Keys.Order());
+        Assert.Equal(new[] { "overview", "town", "ford", "forest", "plateau", "dunes", "map", "base0", "base1", "base0near", "base1near", "base0far", "base1far" }.Order(), site.Anchors.Keys.Order());
         foreach (var (name, anchor) in site.Anchors)
         {
             foreach (SN.Vector2 p in new[] { anchor.Eye, anchor.Focus })
@@ -105,6 +106,52 @@ public class MapSitesTests
         Assert.True(site.Anchors["map"].EyeHeight >= 500f);
         Assert.Equal(site.MapCentre, site.Anchors["map"].Eye);
         Assert.Equal(site.MapCentre, site.Anchors["map"].Focus);
+    }
+
+    public static TheoryData<string> SiteIds => new() { SandboxMap.Id, RiverlandMap.Id };
+
+    [Theory]
+    [MemberData(nameof(SiteIds))]
+    public void Base_cameras_look_at_each_base_from_its_own_team_s_side(string mapId)
+    {
+        MapSite site = MapSites.For(mapId);
+        Assert.Equal(mapId, site.Map.Id);
+        IReadOnlyList<TeamBase> bases = mapId == SandboxMap.Id ? SandboxMap.Bases : RiverlandMap.Bases;
+        Assert.Same(bases, site.Map.Bases);
+        foreach (TeamBase b in bases)
+        {
+            string name = $"base{b.Team}";
+            foreach (string preset in new[] { name, name + "near", name + "far" })
+                Assert.Contains(preset, site.PresetNames);   // what CameraPresets.IsKnownFor reads (it lives with Godot, outside these tests)
+            CameraAnchor anchor = site.Anchors[name];
+            Assert.Equal(b.Centre, anchor.Focus);
+            Assert.Equal(0f, anchor.FocusHeight);
+            Assert.Equal(30f, anchor.EyeHeight);
+            Assert.Equal(45f, SN.Vector2.Distance(anchor.Eye, anchor.Focus), 3);
+            // The eye stands on the line from the centre to the team's spawns: the side its own team comes from.
+            SN.Vector2[] spawns = site.Map.Spawns.Team.Where(p => p.Team == b.Team).Select(p => p.Position).ToArray();
+            SN.Vector2 home = spawns.Aggregate(SN.Vector2.Zero, (sum, p) => sum + p) / spawns.Length;
+            SN.Vector2 toHome = SN.Vector2.Normalize(home - b.Centre);
+            Assert.True(SN.Vector2.Dot(toHome, SN.Vector2.Normalize(anchor.Eye - b.Centre)) > 0.9999f, $"{name}: the eye is off the line to the team's spawns");
+
+            // Near: a tank's-height eye 30 m out on the same line, looking at the centre.
+            CameraAnchor near = site.Anchors[name + "near"];
+            Assert.Equal(b.Centre, near.Focus);
+            Assert.Equal(0f, near.FocusHeight);
+            Assert.Equal(4f, near.EyeHeight);
+            Assert.Equal(30f, SN.Vector2.Distance(near.Eye, b.Centre), 3);
+            Assert.True(SN.Vector2.Dot(toHome, SN.Vector2.Normalize(near.Eye - b.Centre)) > 0.9999f, $"{name}near: the eye is off the line to the team's spawns");
+
+            // Far: the follow camera of a tank 46 m out (the spawn distance) facing the base: 14 m behind and above it at
+            // the start pitch, looking at the point 4.5 m over the tank.
+            CameraAnchor far = site.Anchors[name + "far"];
+            Assert.Equal(46f, SN.Vector2.Distance(far.Focus, b.Centre), 3);
+            Assert.Equal(4.5f, far.FocusHeight);
+            Assert.Equal(46f + 14f * MathF.Cos(0.25f), SN.Vector2.Distance(far.Eye, b.Centre), 2);
+            Assert.Equal(4.5f + 14f * MathF.Sin(0.25f), far.EyeHeight, 2);
+            Assert.True(SN.Vector2.Dot(toHome, SN.Vector2.Normalize(far.Eye - b.Centre)) > 0.9999f, $"{name}far: the eye is off the line to the team's spawns");
+            Assert.True(SN.Vector2.Dot(toHome, SN.Vector2.Normalize(far.Focus - b.Centre)) > 0.9999f, $"{name}far: the focus is off the line to the team's spawns");
+        }
     }
 
     /// <summary>The point <paramref name="height"/> m over the ground or the water at <paramref name="at"/>, whichever is higher.</summary>

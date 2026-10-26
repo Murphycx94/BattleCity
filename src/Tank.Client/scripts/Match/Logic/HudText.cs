@@ -86,8 +86,9 @@ public static class HudText
 
     /// <summary>
     /// What the plate shows for <paramref name="mode"/>. Team battle: the team kills from <paramref name="match"/>, own
-    /// team first. Annihilation: tanks alive of those each side started with. Free-for-all: the player's own kills and
-    /// the tanks still alive of the field. <paramref name="players"/> is indexed by room slot.
+    /// team first. Annihilation and standard: tanks alive of all each side has had in the match (those who joined
+    /// midway included). Free-for-all: the player's own kills and the tanks still alive of the field.
+    /// <paramref name="players"/> is indexed by room slot.
     /// </summary>
     public static PlateValues Plate(BattleMode mode, byte ownSlot, byte ownTeam, in MatchBlock match, ReadOnlySpan<PlayerStats> players)
     {
@@ -97,6 +98,7 @@ public static class HudText
                 bool first = ownTeam == 0;
                 return new PlateValues(PlateKind.TeamKills, first ? match.TeamScore0 : match.TeamScore1, 0, first ? match.TeamScore1 : match.TeamScore0, 0);
             case BattleMode.Annihilation:
+            case BattleMode.Standard:
                 Count(players, ownTeam, out int mine, out int mineOf);
                 Count(players, (byte)(1 - ownTeam), out int theirs, out int theirsOf);
                 return new PlateValues(PlateKind.TeamAlive, mine, mineOf, theirs, theirsOf);
@@ -117,7 +119,8 @@ public static class HudText
 
     /// <summary>
     /// The results screen's words (allocates: call it when its inputs change). Team modes: 胜利 / 失败 / 平局 from the
-    /// winning team against <paramref name="ownTeam"/>, with the kills or the wipe-out under it. Free-for-all: the player's
+    /// winning team against <paramref name="ownTeam"/>, with the kills, the wipe-out or (standard) why the match ended
+    /// (<see cref="ResultsInfo.Reason"/>) under it. Free-for-all: the player's
     /// place ("第 N 名", from the server's rank) and who was left. <paramref name="plate"/> and <paramref name="players"/>
     /// are the frame's; <paramref name="names"/> is by slot.
     /// </summary>
@@ -126,9 +129,12 @@ public static class HudText
         if (!ModeRules.HasTeams(mode)) return SoloResults(ownSlot, info, players, names);
         ResultTone tone = info.WinnerTeam == MatchRules.NoTeam ? ResultTone.Neutral : info.WinnerTeam == ownTeam ? ResultTone.Win : ResultTone.Lose;
         string title = tone switch { ResultTone.Win => "胜利", ResultTone.Lose => "失败", _ => "平局" };
-        string subtitle = mode == BattleMode.TeamBattle
-            ? string.Create(CultureInfo.InvariantCulture, $"击毁 {plate.Left} : {plate.Right}")
-            : AnnihilationLine(tone, plate);
+        string subtitle = mode switch
+        {
+            BattleMode.TeamBattle => string.Create(CultureInfo.InvariantCulture, $"击毁 {plate.Left} : {plate.Right}"),
+            BattleMode.Standard => StandardLine(tone, info.Reason),
+            _ => AnnihilationLine(tone, plate),
+        };
         return new ResultsParts(title, subtitle, tone);
     }
 
@@ -137,6 +143,17 @@ public static class HudText
         ResultTone.Win => "敌方全军覆没",
         ResultTone.Lose => "我方全军覆没",
         _ => plate.Left == 0 && plate.Right == 0 ? "双方同归于尽" : "时间到，胜负未分",
+    };
+
+    private static string StandardLine(ResultTone tone, MatchEndReason reason) => (tone, reason) switch
+    {
+        (ResultTone.Win, MatchEndReason.Captured) => "占领了敌方基地",
+        (ResultTone.Win, _) => "全歼敌人",
+        (ResultTone.Lose, MatchEndReason.Captured) => "我方基地被占领",
+        (ResultTone.Lose, _) => "我方全灭",
+        (_, MatchEndReason.Eliminated) => "双方同归于尽",
+        (_, MatchEndReason.Captured) => "双方同时占领了对方基地",
+        _ => "时间到，平局",
     };
 
     private static ResultsParts SoloResults(byte ownSlot, in ResultsInfo info, ReadOnlySpan<PlayerStats> players, string?[] names)

@@ -8,14 +8,14 @@ namespace Tank.Client.Bootstrap;
 
 /// <summary>
 /// Command-line switches (pass after "--"), used for quick testing and automated screenshots:
-/// --name N  --host  --join IP[:PORT]  --port N  --mode teambattle|annihilation|ffa  --bots N  --autostart  --players N（房主等够 N 个真人才自动开局，N 大于 1 时人齐后再等约半秒；默认 1，最多一个房间的人数 10）
+/// --name N  --host  --join IP[:PORT]  --port N  --mode teambattle|annihilation|ffa|standard  --bots N  --autostart  --players N（房主等够 N 个真人才自动开局，N 大于 1 时人齐后再等约半秒；默认 1，最多一个房间的人数 10）
 /// --seed N（对局种子，可复现）  --match-seconds S（对局时长，覆盖模式默认值）  --loopback（房主用虚拟网络和固定步长，没有套接字和线程，用于确定性冒烟）
 /// --sandbox（启动后直接进试驾场）  --hud-demo NAME（对局 HUD 画廊：用预制帧在纯色底上画 HUD 的每种状态，用于验收排版）
 /// --netgraph（F3 网络面板一开始就打开）  --screenshot FILE（一次运行只截一张）  --screenshot-at SECONDS（还没进过对局时从启动起算，在菜单、房间或 HUD 画廊里截；
 /// 一进对局就交给对局，从对局场景创建起算；--shot-after、--fx-shot 只由对局或试驾场截）  --quit-after SECONDS
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场和对局：自动驾驶并开火，用于截图）
 /// --map sandbox|riverland（开房时房间的地图，默认 riverland；试驾场用哪张地图，默认 sandbox；写错时警告并用默认的）
-/// --camera-preset front|side|close|closerear|sprocket|spin|orbit|target，试驾场地图另有 hill|bush|yard|gate|patrol，河谷另有 overview|town|ford|forest|plateau|dunes|map（试驾场和对局：固定镜头，用于截图和测帧）  --fps-log（试驾场和对局：每秒打印平均和最差帧时间）
+/// --camera-preset front|side|close|closerear|sprocket|spin|orbit|target，试驾场地图另有 hill|bush|yard|gate|patrol，河谷另有 overview|town|ford|forest|plateau|dunes|map，两张图都有 base0|base1|base0near|base1near|base0far|base1far（试驾场和对局：固定镜头，用于截图和测帧）  --fps-log（试驾场和对局：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场和对局：以狙击镜视角启动，用于截图）
 /// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp，河谷上是 house|ram-house|trees|ford
 /// （试驾场：自动对靶车开炮、开车撞墙，河谷上打塌、撞塌房子、开进树林、涉过浅滩，用于截图）

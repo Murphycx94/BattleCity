@@ -2,6 +2,7 @@ using Tank.Client.UI;
 using Tank.Net.Battle;
 using Tank.Net.Transport;
 using Tank.Sim;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Art.Tests;
@@ -23,9 +24,10 @@ public class RoomRulesTests
         private readonly List<BattleClient> _clients = new();
         private double _accumulator;
 
-        public Room(int humans)
+        /// <param name="map">The room's only map; null for the server's default maps.</param>
+        public Room(int humans, MapDefinition? map = null)
         {
-            Server = new BattleServer(_net.CreateServer(), new BattleServerOptions { Seed = 5 });
+            Server = new BattleServer(_net.CreateServer(), map is null ? new BattleServerOptions { Seed = 5 } : new BattleServerOptions { Seed = 5, Map = map, Maps = new[] { map } });
             for (int i = 0; i < humans; i++) _clients.Add(new BattleClient(_net.Connect(), $"P{i}", () => _net.Now));
             Run(0.5);
         }
@@ -50,10 +52,14 @@ public class RoomRulesTests
         }
     }
 
+    /// <summary>The sandbox without its bases: a map a standard battle can't be played on.</summary>
+    private static readonly MapDefinition NoBases = new("nobases", "无基地", SandboxMap.Create, SandboxMap.Spawns, SandboxMap.Waypoints);
+
     /// <summary>Builds the room, lets the rules predict, then starts it for real; returns (predicted, actual, the reason).</summary>
-    private static (bool Predicted, bool Actual, string? Reason) Try(BattleMode mode, int humans, int bots, byte[]? teams)
+    /// <param name="map">The room's only map; null for the server's default maps.</param>
+    private static (bool Predicted, bool Actual, string? Reason) Try(BattleMode mode, int humans, int bots, byte[]? teams, MapDefinition? map = null)
     {
-        var room = new Room(humans);
+        var room = new Room(humans, map);
         room.Host.SetMode(mode);
         room.Host.SetBots(bots);
         if (teams is not null)
@@ -64,7 +70,7 @@ public class RoomRulesTests
         Assert.Equal(mode, state.Mode);
         Assert.Equal(bots, state.Bots);
         Assert.Equal(humans, state.Players.Count);
-        string? reason = RoomRules.StartBlockReason(state);
+        string? reason = map is null ? RoomRules.StartBlockReason(state) : RoomRules.StartBlockReason(state, new[] { map });
 
         room.Host.StartMatch();
         room.Run(0.5);
@@ -97,6 +103,38 @@ public class RoomRulesTests
         (bool predicted, bool actual, string? reason) = Try(mode, humans, bots, teams);
 
         Assert.True(predicted == actual, $"rules said {(predicted ? "can start" : $"blocked ({reason})")}, the server {(actual ? "started" : "refused")}");
+    }
+
+    [Theory]
+    [InlineData(BattleMode.TeamBattle)]
+    [InlineData(BattleMode.Annihilation)]
+    [InlineData(BattleMode.FreeForAll)]
+    [InlineData(BattleMode.Standard)]
+    public void On_a_map_without_bases_only_a_standard_battle_is_held_on_both_sides(BattleMode mode)
+    {
+        var (predicted, actual, reason) = Try(mode, 2, 0, new byte[] { 0, 1 }, NoBases);
+
+        Assert.Equal(predicted, actual);
+        Assert.Equal(!ModeRules.HasBases(mode), actual);
+        if (ModeRules.HasBases(mode)) Assert.Contains("没有基地", reason);
+    }
+
+    [Fact]
+    public void On_both_real_maps_a_standard_battle_can_start()
+    {
+        foreach (MapDefinition map in MapCatalog.All)
+        {
+            var room = new RoomStateMessage(BattleMode.Standard, 0, 1, false, new[] { new RoomPlayer(0, "P0", 0, 1, false, true, false) }, map.Id, MapState.Ready);
+            Assert.Null(RoomRules.StartBlockReason(room));
+        }
+    }
+
+    [Fact]
+    public void A_map_the_client_does_not_know_is_left_to_the_server()
+    {
+        var room = new RoomStateMessage(BattleMode.Standard, 0, 1, false, new[] { new RoomPlayer(0, "P0", 0, 1, false, true, false) }, "elsewhere", MapState.Ready);
+
+        Assert.Null(RoomRules.StartBlockReason(room));
     }
 
     [Fact]

@@ -24,7 +24,8 @@ public partial class CenterBanner : HudPanel
     private const float DimAlpha = 0.55f;
 
     /// <summary>What the results words are made from; they are rebuilt when this changes.</summary>
-    private readonly record struct ResultsKey(BattleMode Mode, byte OwnSlot, byte OwnTeam, byte WinnerTeam, byte WinnerSlot, PlateValues Plate, byte OwnRank, bool WinnerAlive, string? WinnerName);
+    private readonly record struct ResultsKey(BattleMode Mode, byte OwnSlot, byte OwnTeam, byte WinnerTeam, byte WinnerSlot, PlateValues Plate, byte OwnRank, bool WinnerAlive, string? WinnerName,
+        MatchEndReason Reason);
 
     private readonly StyleBoxFlat _plate = HudStyle.RoundedBox(new Color(HudStyle.Panel, PlateAlpha), PlateRadius, 8);
     private readonly StyleBoxFlat _bar = HudStyle.RoundedBox(new Color(HudStyle.Panel, PlateAlpha), BarRadius, 8);
@@ -65,7 +66,8 @@ public partial class CenterBanner : HudPanel
         var key = new ResultsKey(frame.Mode, frame.OwnSlot, frame.OwnTeam, frame.Results.WinnerTeam, frame.Results.WinnerSlot, frame.Plate,
             frame.OwnSlot < frame.Players.Length ? frame.Players[frame.OwnSlot].Rank : (byte)0,
             frame.Results.WinnerSlot < frame.Players.Length && frame.Players[frame.Results.WinnerSlot].Alive,
-            frame.Results.WinnerSlot < frame.Names.Length ? frame.Names[frame.Results.WinnerSlot] : null);
+            frame.Results.WinnerSlot < frame.Names.Length ? frame.Names[frame.Results.WinnerSlot] : null,
+            frame.Results.Reason);
         if (changed || key != _resultsKey)
         {
             _resultsKey = key;

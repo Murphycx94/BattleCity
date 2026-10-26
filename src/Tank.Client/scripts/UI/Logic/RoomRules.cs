@@ -1,4 +1,5 @@
 using Tank.Net.Battle;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Client.UI;
@@ -20,7 +21,11 @@ public readonly record struct StartPlan(int Humans, int Bots, int Team0, int Tea
 public static class RoomRules
 {
     /// <summary>Why the match can't start now, in words for the host; null when it can.</summary>
-    public static string? StartBlockReason(RoomStateMessage room)
+    /// <param name="maps">
+    /// The maps the room's map is looked up in (by id, ignoring case, as the server does): <see cref="MapCatalog.All"/>
+    /// when null. A map not among them is left to the server: the client can't tell whether it has bases.
+    /// </param>
+    public static string? StartBlockReason(RoomStateMessage room, IReadOnlyList<MapDefinition>? maps = null)
     {
         if (room.MatchRunning) return "对局进行中，等这一局结束。";
         switch (room.MapState)   // the server's "the map is still being generated" and "the map failed to generate"
@@ -28,10 +33,19 @@ public static class RoomRules
             case MapState.Generating: return "地图生成中…";
             case MapState.Failed: return "地图生成失败，换一张图。";
         }
+        if (ModeRules.HasBases(room.Mode) && Find(maps ?? MapCatalog.All, room.Map) is { Bases.Count: 0 })   // "the map has no bases"
+            return "这张图没有基地，打不了标准战：换一张图，或换个模式。";
         StartPlan plan = PlanFor(room);
         if (plan.Seated < ModeRules.MinPlayers) return "至少要有两辆坦克：等朋友加入，或加几个机器人。";
         if (ModeRules.HasTeams(room.Mode) && (plan.Team0 == 0 || plan.Team1 == 0))
             return "有一队没有坦克：让人换到对面，或加几个机器人。";
+        return null;
+    }
+
+    private static MapDefinition? Find(IReadOnlyList<MapDefinition> maps, string id)
+    {
+        foreach (MapDefinition map in maps)
+            if (string.Equals(map.Id, id, StringComparison.OrdinalIgnoreCase)) return map;
         return null;
     }
 

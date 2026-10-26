@@ -50,6 +50,25 @@ public class MatchHudFrameTests
     }
 
     [Fact]
+    public void The_first_frame_of_a_standard_match_has_no_bars_no_reason_and_the_living_on_the_plate()
+    {
+        var settings = new HostSettings("Tester", "Tester's room", Port: 47104, BattleMode.Standard, Bots: 3, Seed: 7, MatchSeconds: null);
+        using BattleSession session = BattleSession.HostLoopback(settings, _ => { });
+        var auto = new AutoRoom(null, BattleMode.Standard, 3, autoStart: true);
+        BattleClient client = session.Client;
+        for (int i = 0; i < 12 * 60 && !(client.Phase == BattlePhase.InMatch && client.Latest is not null); i++) Step(session, auto);
+        Assert.True(client.Phase == BattlePhase.InMatch && client.Latest is not null, "the match never started");
+
+        MatchHudFrame frame = MatchHudFrame.From(client, session, ownTeam: 0, new string?[BattleProtocol.MaxPlayers], fps: 60);
+
+        Assert.Equal(BattleMode.Standard, frame.Mode);
+        Assert.Equal(0, frame.Capture.Count);
+        Assert.Equal(MatchEndReason.None, frame.Results.Reason);
+        Assert.Equal(PlateKind.TeamAlive, frame.Plate.Kind);
+        Assert.Equal(4, frame.Plate.LeftOf + frame.Plate.RightOf);   // the player and three bots, none of them down yet
+    }
+
+    [Fact]
     public void Before_any_snapshot_the_frame_is_empty_but_safe()
     {
         var settings = new HostSettings("Tester", "Tester's room", Port: 47102, BattleMode.FreeForAll, Bots: 0, Seed: 7, MatchSeconds: null);

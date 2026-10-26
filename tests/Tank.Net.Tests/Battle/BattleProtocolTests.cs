@@ -326,7 +326,7 @@ public sealed class BattleProtocolTests
     [Fact]
     public void The_protocol_constants_are_the_designs_numbers()
     {
-        Assert.Equal(3, BattleProtocol.Version);
+        Assert.Equal(4, BattleProtocol.Version);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
         Assert.Equal(10, BattleProtocol.MaxPlayers);
         Assert.Equal(64, BattleSeat.HistorySize);
@@ -380,6 +380,9 @@ public sealed class BattleProtocolTests
         w.WriteVarUInt(0);
         w.WriteVarUInt(0);
         w.WriteVarUInt(0);
+        w.WriteByte(0);   // the bases' progress
+        w.WriteByte(0);
+        w.WriteBits(0, 2);   // no end reason
         w.WriteBool(own is not null);
         if (own is not null)
         {
@@ -515,6 +518,7 @@ public sealed class BattleProtocolTests
         BattleMessages.WriteMap(w, MapData.Of(TestWorld.FlatField()));
         w.WriteVarUInt(0);   // no props
         w.WriteVarUInt(tank);
+        w.WriteByte(0);      // no bases
         return Bytes(w);
     }
 

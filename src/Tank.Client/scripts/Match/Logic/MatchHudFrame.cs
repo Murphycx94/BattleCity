@@ -8,10 +8,12 @@ namespace Tank.Client.Match;
 public enum BannerKind : byte { None, Respawn, Spectate, Results }
 
 /// <summary>
-/// What the results screen needs besides the scoreboard: the server's verdict, the ticks left before the server sends
-/// everyone back to the room (counted by the scene from the moment it saw the match end) and whether the player may send them early.
+/// What the results screen needs besides the scoreboard: the server's verdict and why the match ended, the ticks left
+/// before the server sends everyone back to the room (counted by the scene from the moment it saw the match end) and
+/// whether the player may send them early.
 /// </summary>
-public readonly record struct ResultsInfo(byte WinnerTeam, byte WinnerSlot, int TicksLeft, bool IsHost)
+public readonly record struct ResultsInfo(byte WinnerTeam, byte WinnerSlot, int TicksLeft, bool IsHost,
+    MatchEndReason Reason = MatchEndReason.None)
 {
     /// <summary>No verdict: the match is on.</summary>
     public static readonly ResultsInfo None = new(MatchRules.NoTeam, MatchRules.NoSlot, 0, false);
@@ -20,7 +22,8 @@ public readonly record struct ResultsInfo(byte WinnerTeam, byte WinnerSlot, int 
 /// <summary>
 /// Everything the match HUD needs for one frame (blueprint §2.1): a plain value the scene fills from the client and the
 /// gallery from canned data. <c>Players</c> (indexed by room slot) and <c>Names</c> are the caller's arrays, handed on by
-/// reference for the scoreboard; nothing here is copied per frame.
+/// reference for the scoreboard; nothing here is copied per frame. <c>Capture</c> is the bars under the plate (none
+/// outside a standard match).
 /// </summary>
 public readonly record struct MatchHudFrame(
     BattleMode Mode,
@@ -36,7 +39,8 @@ public readonly record struct MatchHudFrame(
     NetSample Net,
     PlayerStats[] Players,
     string?[] Names,
-    ResultsInfo Results)
+    ResultsInfo Results,
+    CaptureBars Capture = default)
 {
     /// <summary>The slot that has <paramref name="tankId"/> on the scoreboard, or -1 for a tank nobody plays (or has left).</summary>
     public static int SlotOf(PlayerStats[] players, int tankId)
@@ -67,7 +71,8 @@ public readonly record struct MatchHudFrame(
         (double avg, double max) = session?.ServerTick ?? default;
         var net = new NetSample(client.Stats, client.Resyncs, session?.ServerTick is not null, avg, max, fps);
         return new MatchHudFrame(mode, match.Phase, match.TicksLeft, slot, ownTeam, plate, banner, match.RespawnIn, spectateTarget, spectateFree, net, players, names,
-            new ResultsInfo(match.WinnerTeam, match.WinnerSlot, resultsLeft, client.IsHost));
+            new ResultsInfo(match.WinnerTeam, match.WinnerSlot, resultsLeft, client.IsHost, match.EndReason),
+            CaptureText.Bars(mode, ownTeam, match));
     }
 
     private static readonly PlayerStats[] NoPlayers = new PlayerStats[BattleProtocol.MaxPlayers];

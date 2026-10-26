@@ -4,11 +4,12 @@ using Tank.Sim.Modes;
 namespace Tank.Client.Match;
 
 /// <summary>
-/// The match HUD's root (blueprint §1.1): a canvas layer above the combat HUD that owns the score plate, the kill feed,
-/// the centre banner and the F3 panel, and hands each the part of a <see cref="MatchHudFrame"/> it draws. The scene calls
+/// The match HUD's root (blueprint §1.1): a canvas layer above the combat HUD that owns the score plate, the capture
+/// bars under it (standard battle), the kill feed, the centre banner and the F3 panel, and hands each the part of a <see cref="MatchHudFrame"/> it draws. The scene calls
 /// <see cref="Refresh"/> once a frame and <see cref="OnKill"/> for every kill event; the gallery does the same with canned
 /// data. While the scoreboard is up (Tab held, <see cref="SetScoreboardOpen"/>, or the results screen once the match has
-/// ended) the kill feed and the F3 panel step aside: the scoreboard is wider than the room between them.
+/// ended) the kill feed and the F3 panel step aside: the scoreboard is wider than the room between them; so do the capture
+/// bars, which sit where the board's top does.
 /// </summary>
 public partial class MatchHud : CanvasLayer
 {
@@ -16,6 +17,7 @@ public partial class MatchHud : CanvasLayer
 
     private readonly KillFeed _feed = new();
     private ScorePlate _plate = null!;
+    private CaptureBarsView _capture = null!;
     private KillFeedView _feedView = null!;
     private CenterBanner _banner = null!;
     private ScoreboardView _board = null!;
@@ -30,6 +32,7 @@ public partial class MatchHud : CanvasLayer
     public override void _Ready()
     {
         _plate = Add(new ScorePlate());
+        _capture = Add(new CaptureBarsView());
         _feedView = Add(new KillFeedView(_feed));
         _banner = Add(new CenterBanner());
         _board = Add(new ScoreboardView());   // after the banner: the results' dimming lies under the table
@@ -47,6 +50,7 @@ public partial class MatchHud : CanvasLayer
     public void Refresh(in MatchHudFrame frame, bool netPanelOpen, double now)
     {
         _plate.Update(frame);
+        _capture.Update(frame, now);
         _feedView.Update(now);
         _banner.Update(frame);
         _board.Update(frame, _scoreboardOpen);
@@ -69,6 +73,7 @@ public partial class MatchHud : CanvasLayer
     private void ApplyVisibility()
     {
         _plate.Visible = !_resultsUp;   // its clock would run into the title
+        _capture.Visible = !_boardShown;   // the board (Tab, or the results) covers the bars' place
         _feedView.Visible = !_boardShown;
         _net.Visible = _netOpen && !_boardShown;
     }

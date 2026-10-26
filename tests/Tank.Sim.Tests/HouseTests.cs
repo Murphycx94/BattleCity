@@ -241,39 +241,43 @@ public sealed class HouseTests
     [Fact]
     public void Shooting_houses_allocates_nothing_once_warmed_up()
     {
-        // Four tanks, two firing AP and two HE, into a row of three houses; every second they are put back, worn down to
-        // 100 hit points, so the measured ticks keep bringing them down.
-        Prop[] houses = { House(1, new Vector2(80, 100)), House(2, new Vector2(100, 100)), House(3, new Vector2(120, 100)) };
-        var sim = new Simulation(TestWorld.FlatField(houses));
-        for (int k = 0; k < 4; k++) sim.AddTank(Duel.Spec, new Vector2(85 + 10 * k, 150), 0f);
-        var inputs = new InputCmd[4];
-        for (int k = 0; k < 4; k++) inputs[k] = new InputCmd(0, 0, 0, 0f, -0.02f, true, k % 2 == 0 ? AmmoType.AP : AmmoType.HE);
-
-        int hurt = 0, down = 0;
-        void Run(int ticks)
+        Allocation.AssertNone(() =>
         {
-            for (int tick = 0; tick < ticks; tick++)
+            // Four tanks, two firing AP and two HE, into a row of three houses; every second they are put back, worn down to
+            // 100 hit points, so the measured ticks keep bringing them down.
+            Prop[] houses = { House(1, new Vector2(80, 100)), House(2, new Vector2(100, 100)), House(3, new Vector2(120, 100)) };
+            var sim = new Simulation(TestWorld.FlatField(houses));
+            for (int k = 0; k < 4; k++) sim.AddTank(Duel.Spec, new Vector2(85 + 10 * k, 150), 0f);
+            var inputs = new InputCmd[4];
+            for (int k = 0; k < 4; k++) inputs[k] = new InputCmd(0, 0, 0, 0f, -0.02f, true, k % 2 == 0 ? AmmoType.AP : AmmoType.HE);
+
+            int hurt = 0, down = 0;
+            void Run(int ticks)
             {
-                sim.Step(inputs);
-                foreach (GameEvent e in sim.Events)
+                for (int tick = 0; tick < ticks; tick++)
                 {
-                    if (e.Type == GameEventType.PropDamaged) hurt++;
-                    if (e.Type == GameEventType.PropDestroyed) down++;
-                }
-                if (sim.Tick % SimConstants.TickRate != 0) continue;
-                for (int i = 0; i < sim.Field.Props.Count; i++)
-                {
-                    sim.Field.Restore(i);
-                    sim.Field.Damage(i, 400);
+                    sim.Step(inputs);
+                    foreach (GameEvent e in sim.Events)
+                    {
+                        if (e.Type == GameEventType.PropDamaged) hurt++;
+                        if (e.Type == GameEventType.PropDestroyed) down++;
+                    }
+                    if (sim.Tick % SimConstants.TickRate != 0) continue;
+                    for (int i = 0; i < sim.Field.Props.Count; i++)
+                    {
+                        sim.Field.Restore(i);
+                        sim.Field.Damage(i, 400);
+                    }
                 }
             }
-        }
-        Run(12 * SimConstants.TickRate);   // past the first HE reload and a couple of shots each
-        (hurt, down) = (0, 0);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Run(10 * SimConstants.TickRate);   // 300 ticks
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.True(hurt >= 6 && down >= 3, $"{hurt} houses hurt and {down} down while measured");
+            Run(12 * SimConstants.TickRate);   // past the first HE reload and a couple of shots each
+            (hurt, down) = (0, 0);
+            Allocation.Window window = Allocation.Start();
+            Run(10 * SimConstants.TickRate);   // 300 ticks
+            Allocation.Measured measured = window.Stop();
+            Assert.True(hurt >= 6 && down >= 3, $"{hurt} houses hurt and {down} down while measured");
+            return measured;
+        });
     }
 
     /// <summary>

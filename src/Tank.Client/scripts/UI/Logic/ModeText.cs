@@ -15,6 +15,7 @@ public static class ModeText
         BattleMode.TeamBattle => "团队对战",
         BattleMode.Annihilation => "团队歼灭",
         BattleMode.FreeForAll => "各自为战",
+        BattleMode.Standard => "标准战",
         _ => mode.ToString(),
     };
 
@@ -27,6 +28,7 @@ public static class ModeText
             BattleMode.TeamBattle => $"两队对抗，被击毁的坦克 {ModeRules.RespawnTicks / SimConstants.TickRate} 秒后复活；{minutes} 分钟内击毁多的一队获胜。",
             BattleMode.Annihilation => $"两队对抗，被击毁就出局；全歼对方获胜，{minutes} 分钟内没分出胜负算平局。",
             BattleMode.FreeForAll => $"人人为敌，被击毁就出局；最后留下的一辆获胜，{minutes} 分钟后按剩余血量定胜负。",
+            BattleMode.Standard => $"两队对抗，被击毁就出局；全歼对方或占满对方基地（{BaseCapture.PointsToWin} 分）获胜，{minutes} 分钟内没分出胜负算平局。",
             _ => string.Empty,
         };
     }

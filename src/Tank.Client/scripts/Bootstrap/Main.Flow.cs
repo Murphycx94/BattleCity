@@ -14,9 +14,13 @@ namespace Tank.Client.Bootstrap;
 /// <summary>Main's transitions: hosting and joining, leaving, entering and leaving the match, and the sandbox.</summary>
 public partial class Main
 {
+    private readonly SeatTokens _seatTokens = new();
+    private (string Host, int Port)? _joined;   // the room the session joined, for its token; null when hosting
+
     private void Host(string name)
     {
         LeaveOld();
+        _joined = null;
         // A room opens on --map when given, else on the riverland (stage 5 design §2).
         var settings = new HostSettings(name, $"{name}的房间", _options.Port, _options.Mode ?? BattleMode.TeamBattle, _options.Bots, _options.Seed,
             _options.MatchSeconds, _options.Map ?? MapCatalog.Riverland.Id);
@@ -45,12 +49,18 @@ public partial class Main
         Join(_menu.PlayerName, address, port);
     }
 
+    /// <summary>
+    /// Joins the room at <paramref name="host"/>:<paramref name="port"/> with the token it gave this game last time, if
+    /// any (<see cref="SeatTokens"/>): in any mode a player back within the grace period gets the seat still held, and
+    /// one who left a match without respawns can't come back into it with a fresh tank.
+    /// </summary>
     private void Join(string name, string host, int port)
     {
         LeaveOld();
+        _joined = (host, port);
         try
         {
-            StartSession(BattleSession.Join(host, port, name), $"正在连接 {host}:{port}…");
+            StartSession(BattleSession.Join(host, port, name, _seatTokens.For(host, port)), $"正在连接 {host}:{port}…");
         }
         catch (Exception ex) when (ex is InvalidOperationException or SocketException or ArgumentException)
         {
@@ -82,6 +92,7 @@ public partial class Main
     private void LeaveSession(string? message, bool error = false)
     {
         if (_matchView is not null) LeaveMatch();
+        if (_session is { IsHosting: false } joined && _joined is { } room) _seatTokens.Remember(room.Host, room.Port, joined.Client.SessionToken);
         _session?.Dispose();
         _session = null;
         _reconnect = null;

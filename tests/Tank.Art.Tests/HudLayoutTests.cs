@@ -24,6 +24,7 @@ public class HudLayoutTests
         yield return ("results", b.Results);
         yield return ("results table", b.ResultsTable);
         yield return ("status panel", b.StatusPanel);
+        yield return ("capture bars", b.CaptureBars);
     }
 
     [Theory]
@@ -106,6 +107,38 @@ public class HudLayoutTests
         Assert.True(footer < b.Results.Bottom);                    // the footer's line sits inside the column
         Assert.True(footer > b.ResultsTable.Bottom);               // and below the longest table
         Assert.True(subtitle < b.ResultsTable.Y);
+    }
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void The_capture_bars_hang_under_the_mode_label_as_wide_as_the_plate(float w, float h)
+    {
+        HudBoxes b = HudLayout.For(new Vector2(w, h));
+        Assert.Equal(124, b.CaptureBars.Y);
+        Assert.Equal(360, b.CaptureBars.Width);
+        Assert.Equal(58, b.CaptureBars.Height);                      // two rows of 26 and the gap of 6
+        Assert.Equal(w / 2, b.CaptureBars.CenterX, precision: 3);
+        Assert.Equal(b.ScorePlate.X, b.CaptureBars.X, precision: 3);
+        Assert.True(b.CaptureBars.Y >= b.ModeLabel.Bottom);          // under the mode label, clear of it
+        Assert.False(b.CaptureBars.Intersects(b.ModeLabel));
+        Assert.False(b.CaptureBars.Intersects(b.ScorePlate));
+        Assert.Equal(new HudRect(b.CaptureBars.X, 124, 360, 26), b.CaptureRow(0));
+        Assert.Equal(124 + 32, b.CaptureRow(1).Y);
+        Assert.Equal(b.CaptureBars.Bottom, b.CaptureRow(1).Bottom, precision: 3);
+        Assert.False(b.CaptureRow(0).Intersects(b.CaptureRow(1)));
+    }
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void The_capture_bars_clear_the_kill_feed_the_net_panel_and_the_banner(float w, float h)
+    {
+        HudBoxes b = HudLayout.For(new Vector2(w, h));
+        Assert.True(b.CaptureBars.FitsIn(new Vector2(w, h)));
+        Assert.False(b.CaptureBars.Intersects(b.KillFeed), "the bars cover the kill feed");
+        Assert.False(b.CaptureBars.Intersects(b.NetPanel), "the bars cover the F3 panel");
+        Assert.False(b.CaptureBars.Intersects(b.Banner), "the bars cover the respawn banner");
+        Assert.False(b.CaptureBars.Intersects(b.SpectateBar), "the bars cover the spectate bar");
+        Assert.False(b.CaptureBars.Intersects(b.StatusPanel), "the bars cover the status panel");
     }
 
     [Fact]

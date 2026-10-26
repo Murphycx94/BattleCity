@@ -18,7 +18,9 @@ namespace Tank.Client.Cameras;
 /// looks at the patrolling target's first bush patch from beside it, to watch it drive in, vanish and give itself away
 /// when it fires.
 /// On another map (a <see cref="MapSite"/>) the presets it lists work there: those with an anchor (the riverland's
-/// overview, town, ford, forest, plateau, dunes and the top-down map, riverland design §6.8) look from the anchor's eye
+/// overview, town, ford, forest, plateau, dunes and the top-down map, riverland design §6.8; base0 and base1 on both
+/// maps, looking at a base from its own team's side for match screenshots of the rings, and base0near, base1near,
+/// base0far and base1far looking the same way from a tank's height and from the follow camera at the spawn distance) look from the anchor's eye
 /// at its focus, spin turns at the site's <see cref="MapSite.SpinEye"/>, target looks at the site's targets; the ones
 /// that follow the tank work anywhere. With no site, or the sandbox's, every preset is as it always was.
 /// </summary>
@@ -51,7 +53,7 @@ public static class CameraPresets
 
     /// <summary>Presets whose eye is far from the tank: world detail (grass) should then stream around the eye, not the tank.</summary>
     public static bool StreamsAroundCamera(string? name) =>
-        name is "hill" or "spin" or "patrol" or "overview" or "town" or "ford" or "forest" or "plateau" or "dunes" or MapView;
+        name is "hill" or "spin" or "patrol" or "overview" or "town" or "ford" or "forest" or "plateau" or "dunes" or "base0" or "base1" or "base0near" or "base1near" or "base0far" or "base1far" or MapView;
 
     /// <summary>Every preset's name on some map (each <see cref="MapSite.PresetNames"/>, the sandbox's first).</summary>
     public static IReadOnlyList<string> Names { get; } = MapSites.All.SelectMany(site => site.PresetNames).Distinct().ToArray();

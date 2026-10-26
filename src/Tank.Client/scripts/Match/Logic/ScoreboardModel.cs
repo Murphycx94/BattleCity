@@ -8,9 +8,12 @@ namespace Tank.Client.Match;
 /// <summary>
 /// One line of the scoreboard. <c>Rank</c> is 1-based: the place in the player's own team in the team modes, the place
 /// in the field in a free-for-all (the server's own after the match, the standing while it runs). <c>Side</c> is the
-/// line's colour relative to the player; <c>Status</c> is the words of the last column.
+/// line's colour relative to the player; <c>Status</c> is the words of the last column. <c>Capture</c> is the most
+/// base points the player's tank held this match (<see cref="PlayerStats.Capture"/>; standard only, and the server
+/// sends 0 for enemies until the match has ended — see <see cref="ScoreboardModel.CaptureCell"/>).
 /// </summary>
-public readonly record struct ScoreRow(byte Slot, string Name, byte Team, string TankName, int Kills, int Deaths, bool Alive, int Rank, Side Side, string Status);
+public readonly record struct ScoreRow(byte Slot, string Name, byte Team, string TankName, int Kills, int Deaths, bool Alive, int Rank, Side Side, string Status,
+    int Capture = 0);
 
 /// <summary>
 /// The scoreboard's lines and their order (blueprint §5 T7), none of it touching the engine. Team modes: the player's
@@ -23,6 +26,7 @@ public static class ScoreboardModel
     public const string AliveText = "存活", DestroyedText = "已毁";
 
     private static readonly string[] SlotNames = BuildSlotNames();
+    private static readonly string[] CaptureNumbers = BuildCaptureNumbers();
 
     /// <summary>The name shown for <paramref name="slot"/>: <paramref name="name"/>, or "玩家 N" (1-based) when the room has none.</summary>
     public static string PlayerName(string? name, int slot)
@@ -33,6 +37,17 @@ public static class ScoreboardModel
 
     /// <summary>"复活中 N 秒": the own row's status while the tank is a wreck that is coming back, rounded up so it never reads 0.</summary>
     public static string RespawnStatus(int respawnIn) => string.Create(CultureInfo.InvariantCulture, $"复活中 {HudText.CeilSeconds(respawnIn)} 秒");
+
+    /// <summary>
+    /// The 占领 cell of <paramref name="row"/>: the points as a number, except an enemy's while the match is on, which is
+    /// left blank. The server hides an enemy's capture until the end (it sends 0), and a 0 there would read as "never
+    /// captured". Allocates nothing for 0–100.
+    /// </summary>
+    public static string CaptureCell(in ScoreRow row, bool ended)
+    {
+        if (row.Side == Side.Enemy && !ended) return string.Empty;
+        return (uint)row.Capture < (uint)CaptureNumbers.Length ? CaptureNumbers[row.Capture] : row.Capture.ToString(CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// Fills <paramref name="output"/> with the lines in display order and returns how many. Allocates nothing unless the
@@ -53,7 +68,7 @@ public static class ScoreboardModel
             bool own = slot == ownSlot;
             string status = p.Alive ? AliveText : own && ownRespawnIn > 0 ? RespawnStatus(ownRespawnIn) : DestroyedText;
             output[count++] = new ScoreRow((byte)slot, PlayerName(nameOf((byte)slot), slot), p.Team, ModeText.TankName(p.Spec),
-                p.Kills, p.Deaths, p.Alive, p.Rank, MatchColors.SideOf(mode, ownTeam, p.Team, own), status);
+                p.Kills, p.Deaths, p.Alive, p.Rank, MatchColors.SideOf(mode, ownTeam, p.Team, own), status, p.Capture);
         }
         Span<ScoreRow> rows = output[..count];
         for (int i = 1; i < count; i++)
@@ -98,6 +113,13 @@ public static class ScoreboardModel
             if (byRank && rows[i].Rank > 0) continue;
             rows[i] = rows[i] with { Rank = place };
         }
+    }
+
+    private static string[] BuildCaptureNumbers()
+    {
+        var numbers = new string[BaseCapture.PointsToWin + 1];
+        for (int i = 0; i < numbers.Length; i++) numbers[i] = i.ToString(CultureInfo.InvariantCulture);
+        return numbers;
     }
 
     private static string[] BuildSlotNames()

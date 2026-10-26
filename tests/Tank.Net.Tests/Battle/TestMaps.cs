@@ -64,6 +64,38 @@ internal static class TestMaps
 
     private static Battlefield SmallField() => TestWorld.FlatField();
 
+    // ---- the small map with bases, for standard battles (stage 5 design §3) ----
+
+    /// <summary>
+    /// The small map's bases, both between the spawns (team 0's spawns at x 40, team 1's at x 160): each 35 m from the
+    /// other team's spawns, so an attacker is in the circle 20 m after setting off. (A test map need not keep a base
+    /// behind its own team.)
+    /// </summary>
+    public static readonly IReadOnlyList<TeamBase> StandardBases = new TeamBase[]
+    {
+        new(0, new Vector2(125, 105), TeamBase.StandardRadius),
+        new(1, new Vector2(75, 105), TeamBase.StandardRadius),
+    };
+
+    /// <summary>The wall of <see cref="StandardWalled"/>: stone, north–south along this x from z 20 to z 190.</summary>
+    public const float StandardWallX = 115f;
+
+    /// <summary>The small map with <see cref="StandardBases"/>.</summary>
+    public static MapDefinition Standard(string id) => new(id, id, SmallField, Spawns, Waypoints, StandardBases);
+
+    /// <summary>
+    /// <see cref="Standard"/> with a stone wall along x <see cref="StandardWallX"/> (z 20–190): it hides team 1's base
+    /// (x 75) and whoever is in it from team 1's spawns (x 160).
+    /// </summary>
+    public static MapDefinition StandardWalled(string id) => new(id, id, WalledField, Spawns, Waypoints, StandardBases);
+
+    private static Battlefield WalledField()
+    {
+        HeightField terrain = TestWorld.Flat();
+        Prop[] wall = new WallLine(PropKind.StoneWall, new Vector2(StandardWallX, 20), new Vector2(StandardWallX, 190)).Segments(terrain, 1).ToArray();
+        return TestWorld.Field(terrain, wall);
+    }
+
     // ---- the mixed map: road, sand, water, trees and a house (riverland design §7) ----
 
     public const int MixedSamples = 151;

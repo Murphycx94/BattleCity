@@ -22,6 +22,33 @@ public class ScoreboardModelTests
         ScoreboardModel.Build(BattleMode.TeamBattle, ownSlot, ownTeam, players, NameOf, ended: false, respawnIn);
 
     [Fact]
+    public void Standard_rows_carry_each_players_capture()
+    {
+        PlayerStats[] players = Field((0, 1, 0, true), (1, 0, 0, true));
+        players[0].Capture = 41;
+
+        var rows = ScoreboardModel.Build(BattleMode.Standard, 0, 0, players, NameOf, ended: false, 0);
+
+        Assert.Equal(new[] { 41, 0 }, rows.Select(r => r.Capture));
+        Assert.Equal(new byte[] { 0, 1 }, rows.Select(r => r.Slot));   // ordered like the team modes
+    }
+
+    [Fact]
+    public void The_capture_cell_leaves_enemies_blank_until_the_match_has_ended()
+    {
+        var own = new ScoreRow(0, "阿成", 0, "中坦", 0, 0, true, 1, Side.Own, "存活", Capture: 41);
+        var ally = own with { Slot = 1, Side = Side.Ally, Capture = 0 };
+        var enemy = own with { Slot = 2, Team = 1, Side = Side.Enemy, Capture = 0 };
+
+        Assert.Equal(("41", "0", ""), (ScoreboardModel.CaptureCell(own, ended: false), ScoreboardModel.CaptureCell(ally, false),
+            ScoreboardModel.CaptureCell(enemy, false)));
+        Assert.Equal(("41", "0", "12"), (ScoreboardModel.CaptureCell(own, ended: true), ScoreboardModel.CaptureCell(ally, true),
+            ScoreboardModel.CaptureCell(enemy with { Capture = 12 }, true)));
+        Assert.Equal("100", ScoreboardModel.CaptureCell(own with { Capture = 100 }, false));
+        Assert.Same(ScoreboardModel.CaptureCell(own, false), ScoreboardModel.CaptureCell(own, false));   // no string per frame
+    }
+
+    [Fact]
     public void Team_modes_list_the_own_team_first_then_the_other()
     {
         PlayerStats[] players = Field((1, 9, 0, true), (0, 1, 0, true), (1, 2, 0, true), (0, 0, 0, true));
@@ -184,18 +211,21 @@ public class ScoreboardModelTests
     [Fact]
     public void Building_into_a_buffer_allocates_nothing_once_warm()
     {
-        PlayerStats[] players = Field((0, 3, 1, true), (1, 2, 0, true), (0, 1, 2, false), (1, 0, 3, true), (0, 4, 0, true), (1, 5, 1, false));
-        var buffer = new ScoreRow[BattleProtocol.MaxPlayers];
-        Func<byte, string?> nameOf = NameOf;
-        for (int i = 0; i < 10; i++) ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
+        Allocation.AssertNone(() =>
+        {
+            PlayerStats[] players = Field((0, 3, 1, true), (1, 2, 0, true), (0, 1, 2, false), (1, 0, 3, true), (0, 4, 0, true), (1, 5, 1, false));
+            var buffer = new ScoreRow[BattleProtocol.MaxPlayers];
+            Func<byte, string?> nameOf = NameOf;
+            for (int i = 0; i < 10; i++) ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        int count = 0;
-        for (int i = 0; i < 100; i++) count = ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+            Allocation.Window window = Allocation.Start();
+            int count = 0;
+            for (int i = 0; i < 100; i++) count = ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
+            Allocation.Measured measured = window.Stop();
 
-        Assert.Equal(6, count);
-        Assert.Equal(before, after);
+            Assert.Equal(6, count);
+            return measured;
+        });
     }
 
     [Fact]

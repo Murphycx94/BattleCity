@@ -1,5 +1,6 @@
 using Tank.Client.Art;
 using Tank.Client.Match;
+using Tank.Net.Battle;
 using Tank.Sim.Modes;
 
 namespace Tank.Art.Tests;
@@ -55,5 +56,36 @@ public class MatchColorsTests
         Assert.Equal(Palette.EnemyBody, paint.Body);
         Assert.Equal(Palette.Track, paint.Track);
         Assert.Equal(Palette.TankHub, paint.Hub);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void The_own_base_ring_is_ally_blue_grey_and_the_other_red_from_either_team(byte ownTeam)
+    {
+        byte enemyTeam = (byte)(1 - ownTeam);
+
+        Assert.Equal(Palette.AllyBody, MatchColors.BaseRing(ownTeam, baseTeam: ownTeam));
+        Assert.Equal(Palette.EnemyBody, MatchColors.BaseRing(ownTeam, baseTeam: enemyTeam));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void The_own_base_bar_is_red_the_enemy_base_bar_ally_and_only_the_own_dims(byte ownTeam)
+    {
+        var match = new MatchBlock { Phase = MatchPhase.Playing, BaseProgress0 = 37, BaseProgress1 = 62 };
+        CaptureBars bars = CaptureText.Bars(BattleMode.Standard, ownTeam, match);
+        Assert.Equal(2, bars.Count);
+        CaptureBar own = bars[0], enemy = bars[1];
+        Assert.Equal(ownTeam == 0 ? 37 : 62, own.Points);   // the own bar is the own team's base
+
+        Assert.Equal(CaptureFill.Danger, MatchColors.FillOf(own, blinkDark: false));
+        Assert.Equal(CaptureFill.DangerDim, MatchColors.FillOf(own, blinkDark: true));
+        Assert.Equal(CaptureFill.Ally, MatchColors.FillOf(enemy, blinkDark: false));
+        Assert.Equal(CaptureFill.Ally, MatchColors.FillOf(enemy, blinkDark: true));   // the enemy bar never dims
+        Assert.Equal(Palette.UiDanger, MatchColors.FillColor(CaptureFill.Danger));
+        Assert.Equal(Palette.UiDanger, MatchColors.FillColor(CaptureFill.DangerDim));
+        Assert.Equal(MatchColors.Ui(Side.Ally), MatchColors.FillColor(CaptureFill.Ally));
     }
 }

@@ -36,6 +36,23 @@ public class ModeTextTests
     }
 
     [Fact]
+    public void The_standard_battle_is_called_standard_and_its_rule_names_the_clock_and_the_points()
+    {
+        Assert.Equal("标准战", ModeText.Name(BattleMode.Standard));
+        Assert.Contains("10 分钟", ModeText.Rule(BattleMode.Standard));
+        Assert.Contains("100 分", ModeText.Rule(BattleMode.Standard));
+    }
+
+    [Fact]
+    public void A_mode_from_another_version_has_a_name_and_no_rule()
+    {
+        var unknown = (BattleMode)200;
+
+        Assert.Equal("200", ModeText.Name(unknown));
+        Assert.Equal(string.Empty, ModeText.Rule(unknown));
+    }
+
+    [Fact]
     public void Every_catalog_tank_has_a_name_and_an_unknown_index_does_not_throw()
     {
         for (int i = 0; i < TankCatalog.All.Count; i++) Assert.Equal(TankCatalog.All[i].Name, ModeText.TankName(i));

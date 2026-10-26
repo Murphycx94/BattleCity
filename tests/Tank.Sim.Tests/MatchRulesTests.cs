@@ -8,7 +8,7 @@ using Tank.Sim.Vision;
 
 namespace Tank.Sim.Tests;
 
-/// <summary>The three modes' rules on a flat field with close-set spawns, so kills come quickly (stage 4 design §2).</summary>
+/// <summary>The modes' rules on a flat field with close-set spawns, so kills come quickly (stage 4 design §2).</summary>
 public sealed class MatchRulesTests
 {
     private const int Tps = SimConstants.TickRate;
@@ -19,13 +19,20 @@ public sealed class MatchRulesTests
             .Concat(Enumerable.Range(0, 5).Select(i => new SpawnPoint(new Vector2(60 + 20 * i, 100), MathF.PI, 1))).ToArray(),
         Solo: Enumerable.Range(0, 10).Select(i => new SpawnPoint(new Vector2(20 + 18 * i, 100 + (i % 2) * 50), (i % 2) * MathF.PI, 0)).ToArray());
 
+    /// <summary>Each 30 m behind its team's spawn line (a standard match needs them; the other modes ignore them).</summary>
+    private static readonly TeamBase[] Bases =
+    {
+        new(0, new Vector2(100, 180), TeamBase.StandardRadius),
+        new(1, new Vector2(100, 70), TeamBase.StandardRadius),
+    };
+
     private sealed class Match
     {
         public readonly Simulation Sim = new(TestWorld.FlatField());
         public readonly MatchRules Rules;
         private readonly Dictionary<int, InputCmd> _orders = new();
 
-        public Match(BattleMode mode) => Rules = new MatchRules(mode, Sim, Layout);
+        public Match(BattleMode mode) => Rules = new MatchRules(mode, Sim, Layout, bases: Bases);
 
         public int Join(byte slot, byte team = 0, TankSpec? spec = null) => Rules.Join(slot, spec ?? TankCatalog.Medium, team);
 
@@ -327,7 +334,7 @@ public sealed class MatchRulesTests
     }
 
     [Fact]
-    public void Only_a_team_battle_takes_players_in_mid_match()
+    public void Team_battle_and_standard_take_players_in_mid_match()
     {
         foreach (BattleMode mode in ModeRules.All)
         {
@@ -337,10 +344,10 @@ public sealed class MatchRulesTests
             m.Join(1, 1);
             m.Run(5);
             Assert.Equal(ModeRules.JoinsMidMatch(mode), m.Rules.AcceptsJoins);
-            if (mode == BattleMode.TeamBattle) Assert.Equal(3, m.Join(2, 1) > 0 ? m.Sim.TankCount : 0);
+            if (mode is BattleMode.TeamBattle or BattleMode.Standard) Assert.Equal(3, m.Join(2, 1) > 0 ? m.Sim.TankCount : 0);
             else Assert.Throws<InvalidOperationException>(() => m.Join(2, 1));
         }
-        Assert.Equal(new[] { "teambattle", "annihilation", "ffa" }, ModeRules.All.Select(ModeRules.Id));
+        Assert.Equal(new[] { "teambattle", "annihilation", "ffa", "standard" }, ModeRules.All.Select(ModeRules.Id));
         Assert.True(ModeRules.TryParse("FFA", out BattleMode ffa) && ffa == BattleMode.FreeForAll);
         Assert.False(ModeRules.TryParse("coop", out _));
     }
@@ -446,44 +453,54 @@ public sealed class MatchRulesTests
         Assert.Equal(7 * 60 * Tps, ModeRules.DurationTicks(BattleMode.TeamBattle));
         Assert.Equal(7 * 60 * Tps, ModeRules.DurationTicks(BattleMode.Annihilation));
         Assert.Equal(10 * 60 * Tps, ModeRules.DurationTicks(BattleMode.FreeForAll));
+        Assert.Equal(10 * 60 * Tps, ModeRules.DurationTicks(BattleMode.Standard));
     }
 
-    [Fact]
-    public void Updating_the_rules_and_the_bots_allocates_nothing_even_as_players_come_and_go()
+    [Theory]
+    [InlineData(BattleMode.TeamBattle)]
+    [InlineData(BattleMode.Annihilation)]
+    [InlineData(BattleMode.FreeForAll)]
+    [InlineData(BattleMode.Standard)]
+    public void Updating_the_rules_and_the_bots_allocates_nothing_even_as_players_come_and_go(BattleMode mode)
     {
-        var sim = new Simulation(TestWorld.FlatField());
-        var rules = new MatchRules(BattleMode.TeamBattle, sim, Layout);
-        var vision = new VisionTracker(sim);
-        var bots = new List<SkirmishBot>();
-        var waypoints = new Vector2[] { new(40, 40), new(160, 160), new(40, 160), new(160, 40) };
-        for (byte slot = 0; slot < 6; slot++)
+        Allocation.AssertNone(() =>
         {
-            int id = rules.Join(slot, TankCatalog.Medium, (byte)(slot % 2));
-            bots.Add(new SkirmishBot(id, waypoints, seed: (uint)(slot + 1)));
-        }
-        var inputs = new InputCmd[Simulation.MaxTanks];
-        void Tick()
-        {
-            int tick = sim.Tick + 1;
-            for (int k = 0; k < sim.TankCount; k++)
+            var sim = new Simulation(TestWorld.FlatField());
+            var rules = new MatchRules(mode, sim, Layout, bases: Bases);
+            var vision = new VisionTracker(sim);
+            var bots = new List<SkirmishBot>();
+            var waypoints = new Vector2[] { new(40, 40), new(160, 160), new(40, 160), new(160, 40) };
+            for (byte slot = 0; slot < 6; slot++)
             {
-                int id = sim.Tanks[k].Id;
-                inputs[k] = BattleInputBufferLike(bots, id, sim, vision, tick);
+                int id = rules.Join(slot, TankCatalog.Medium, (byte)(slot % 2));
+                bots.Add(new SkirmishBot(id, waypoints, seed: (uint)(slot + 1)));
             }
-            sim.Step(inputs.AsSpan(0, sim.TankCount));
-            vision.Update();
-            rules.Update();
-        }
-        for (int i = 0; i < 2 * Tps; i++) Tick();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 5 * Tps; i++)
-        {
-            if (i == Tps) rules.Leave(3);                              // one goes …
-            if (i == 2 * Tps) rules.Join(3, TankCatalog.Light, 1);      // … and another takes the seat (its bot is gone: it idles)
-            Tick();
-        }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.Equal(MatchPhase.Playing, rules.Phase);
+            var inputs = new InputCmd[Simulation.MaxTanks];
+            void Tick()
+            {
+                int tick = sim.Tick + 1;
+                for (int k = 0; k < sim.TankCount; k++)
+                {
+                    int id = sim.Tanks[k].Id;
+                    inputs[k] = BattleInputBufferLike(bots, id, sim, vision, tick);
+                }
+                sim.Step(inputs.AsSpan(0, sim.TankCount));
+                vision.Update();
+                rules.Update();
+            }
+            for (int i = 0; i < 2 * Tps; i++) Tick();
+            Allocation.Window window = Allocation.Start();
+            for (int i = 0; i < 5 * Tps; i++)
+            {
+                if (i == Tps) rules.Leave(3);                              // one goes …
+                if (i == 2 * Tps && rules.AcceptsJoins) rules.Join(3, TankCatalog.Light, 1);   // … and another takes the seat (its bot is gone: it idles)
+                Tick();
+            }
+            Allocation.Measured measured = window.Stop();
+            Assert.Equal(MatchPhase.Playing, rules.Phase);
+            Assert.Equal(ModeRules.JoinsMidMatch(mode), rules.Of(3).Active);
+            return measured;
+        });
     }
 
     [Fact]

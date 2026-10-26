@@ -124,6 +124,17 @@ public static class SandboxMap
     // After the spot arrays: static initialisers run in order.
     public static readonly SpawnLayout Spawns = new(TeamSpawns(), SoloSpawns());
 
+    /// <summary>
+    /// The teams' bases for a standard battle (stage 5 design §3.2), found with the riverland probe's <c>bases</c> command
+    /// and checked by MapBaseTests: flat open ground about 50 m behind each team's spawns (team 0's 51 m south-west of its
+    /// nearest spot, team 1's 44 m north-east), one rock at each rim, 361 m apart.
+    /// </summary>
+    public static readonly IReadOnlyList<TeamBase> Bases = new TeamBase[]
+    {
+        new(0, new Vector2(40, 306), TeamBase.StandardRadius),
+        new(1, new Vector2(300, 56), TeamBase.StandardRadius),
+    };
+
     /// <summary>Twenty points on open ground for the bots to drive between, at least 45 m apart and covering the map.</summary>
     public static readonly IReadOnlyList<Vector2> Waypoints = new Vector2[]
     {

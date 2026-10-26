@@ -14,8 +14,8 @@ public sealed partial class BattleServer
 
     /// <summary>
     /// Starts a match in the room's mode on the room's map with everyone seated, plus the bots asked for (named, given
-    /// random tanks, put on the thinner team), if the map is ready, there are at least two tanks and, in a team mode, both
-    /// teams have one.
+    /// random tanks, put on the thinner team), if the map is ready (and, for a standard battle, has bases), there are at
+    /// least two tanks and, in a team mode, both teams have one.
     /// </summary>
     public bool TryStartMatch(out string? reason)
     {
@@ -32,6 +32,11 @@ public sealed partial class BattleServer
             case MapState.Failed:
                 reason = "the map failed to generate";
                 return false;
+        }
+        if (ModeRules.HasBases(_mode) && _roomMap.Bases.Count == 0)   // before the bots are seated: nothing to undo
+        {
+            reason = "the map has no bases";
+            return false;
         }
         uint seed = _options.Seed ?? (uint)Random.Shared.Next(1, int.MaxValue);
         var rng = new Tank.Sim.Geometry.XorShift(seed);
@@ -58,9 +63,11 @@ public sealed partial class BattleServer
         // every client builds): about 0.1 ms even for the riverland, so the tick thread never builds a map.
         _sim = new Simulation(map.Definition.NewBattlefield());
         _vision = new VisionTracker(_sim);
-        _rules = new MatchRules(_mode, _sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null);
+        _rules = new MatchRules(_mode, _sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null,
+            bases: map.Definition.Bases);
         _matchNumber++;
         _endedAtFrame = -1;
+        _hadTank.Clear();
         foreach (BattleSeat? seat in _seats)
         {
             if (seat is null) continue;
@@ -79,7 +86,17 @@ public sealed partial class BattleServer
     {
         _rules!.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
         seat.InMatch = true;
+        if (!seat.IsBot && !ModeRules.Respawns(_mode)) _hadTank.Add(seat.Token);
     }
+
+    /// <summary>
+    /// Whether a player who isn't in the match may be put into it now: it takes joins, and — in a mode without respawns
+    /// — the player's token hasn't had a tank in it yet. Leaving counts as going out there (<see cref="MatchRules.Leave"/>),
+    /// so a player who comes back, eliminated or not, after the seat was freed (quit to the menu, or away past the
+    /// reconnect grace) waits in the room for the next match instead of taking a fresh tank. One still within the grace
+    /// period never gets here: the seat, still in the match, hands back the tank it has, wreck or not.
+    /// </summary>
+    private bool MayJoinMatch(BattleSeat seat) => _rules!.AcceptsJoins && !_hadTank.Contains(seat.Token);
 
     public void EndMatch()
     {
@@ -90,6 +107,7 @@ public sealed partial class BattleServer
         _rules = null;
         _matchMap = null;
         _endedAtFrame = -1;
+        _hadTank.Clear();
         RemoveBots();
         for (byte slot = 0; slot < _seats.Length; slot++)
         {
@@ -138,20 +156,42 @@ public sealed partial class BattleServer
 
         if (rules.Phase == MatchPhase.Ended)
         {
-            if (_endedAtFrame < 0) _endedAtFrame = _frame;
+            if (_endedAtFrame < 0)
+            {
+                _endedAtFrame = _frame;
+                _log($"match ended: {ModeRules.Id(_mode)}, {WinnerText(rules)}, {ReasonText(rules.EndReason)}");
+            }
             if (_frame - _endedAtFrame >= _options.ReturnToRoomSeconds * SimConstants.TickRate) EndMatch();
         }
-        else if (!AnyHumanSeated())   // seated, connected or not: a dropped player has the grace period to come back
+        else if (!AnyHumanInMatch())   // in the match, connected or not: a dropped player has the grace period to come back
         {
             _log("nobody left in the match");
             EndMatch();
         }
     }
 
-    private bool AnyHumanSeated()
+    /// <summary>The winner for the log: "team N", "slot N" (a free-for-all) or "draw".</summary>
+    private static string WinnerText(MatchRules rules) =>
+        rules.WinnerTeam != MatchRules.NoTeam && ModeRules.HasTeams(rules.Mode) ? $"team {rules.WinnerTeam}"
+        : rules.WinnerSlot != MatchRules.NoSlot ? $"slot {rules.WinnerSlot}"
+        : "draw";
+
+    private static string ReasonText(MatchEndReason reason) => reason switch
+    {
+        MatchEndReason.TimeUp => "time up",
+        MatchEndReason.Eliminated => "eliminated",
+        MatchEndReason.Captured => "captured",
+        _ => $"reason {(byte)reason}",
+    };
+
+    /// <summary>
+    /// Whether a player is in the match: connected, or away within the reconnect grace period (the seat, still in the
+    /// match, is held). One waiting in the room for the next match (turned away from this one) doesn't keep it going.
+    /// </summary>
+    private bool AnyHumanInMatch()
     {
         foreach (BattleSeat? seat in _seats)
-            if (seat is { IsBot: false }) return true;
+            if (seat is { IsBot: false, InMatch: true }) return true;
         return false;
     }
 
@@ -244,17 +284,31 @@ public sealed partial class BattleServer
             RespawnIn = mine.RespawnAt >= 0 ? System.Math.Max(0, mine.RespawnAt - sim.Tick) : 0,
             TeamScore0 = rules.TeamScore(0),
             TeamScore1 = rules.TeamScore(1),
+            // the bases' progress goes to everyone, seen or not (stage 5 design §3.3): standing in a base doesn't spot a tank
+            BaseProgress0 = rules.Capture?.Progress(0) ?? 0,
+            BaseProgress1 = rules.Capture?.Progress(1) ?? 0,
+            EndReason = rules.EndReason,
         };
+        bool playing = rules.Phase == MatchPhase.Playing;
         for (byte slot = 0; slot < s.Players.Length; slot++)
         {
             ref readonly Standing p = ref rules.Of(slot);
             s.Players[slot] = p.Active ? new PlayerStats
             {
                 Active = true, Team = p.Team, Spec = _seats[slot]?.TankIndex ?? 0, TankId = p.TankId,
-                Kills = p.Kills, Deaths = p.Deaths, Alive = p.Alive, Rank = p.Rank,
+                Kills = p.Kills, Deaths = p.Deaths, Alive = p.Alive, Rank = p.Rank, Capture = CaptureFor(viewer, p, slot, playing, rules),
             } : default;   // an empty line, not the leaver's stale one (the wire drops inactive fields anyway)
         }
     }
+
+    /// <summary>
+    /// The capture the viewer may read on <paramref name="slot"/>'s line: its own and its team-mates' always, an enemy's
+    /// only once the match has ended (0 till then). Standing in a base doesn't spot a tank (stage 5 design §3.3), and an
+    /// enemy's capture ticking up would tell the defenders who is in it. The viewer's team is the seat's, as for the
+    /// spotted lamp (<see cref="ViewerOf"/>), alive, a wreck or watching.
+    /// </summary>
+    private static byte CaptureFor(Viewer viewer, in Standing line, byte slot, bool playing, MatchRules rules) =>
+        playing && line.Team != viewer.Team ? (byte)0 : rules.CaptureBest(slot);
 
     private static readonly Comparison<BattleEntity> ByIdComparison = static (a, b) => a.Id.CompareTo(b.Id);
 
@@ -283,8 +337,9 @@ public sealed partial class BattleServer
     };
 
     /// <summary>
-    /// The match as it stands, for a seat that joins, rejoins or resyncs: with the map's prepared bytes copied in (not
-    /// encoded again), or without the map for a connection that has it (<paramref name="withMap"/> false).
+    /// The match as it stands (with the bases in a standard battle), for a seat that joins, rejoins or resyncs: with the
+    /// map's prepared bytes copied in (not encoded again), or without the map for a connection that has it
+    /// (<paramref name="withMap"/> false).
     /// </summary>
     private void SendMatchStart(BattleSeat seat, bool withMap)
     {
@@ -297,7 +352,9 @@ public sealed partial class BattleServer
             int left = sim.Field.Durability(p.Id);
             if (left != p.MaxDurability) props.Add(new PropState(p.Id, BattleProtocol.QuantizeDurability(left, p.MaxDurability)));
         }
-        var start = new MatchStartMessage(_mode, _matchNumber, sim.Tick, _rules!.EndTick, withMap ? map.Data : null, props, TankOf(seat.Slot));
+        // the bases only where they count: a client draws the circles of a standard battle alone
+        IReadOnlyList<TeamBase>? bases = ModeRules.HasBases(_mode) ? map.Definition.Bases : null;
+        var start = new MatchStartMessage(_mode, _matchNumber, sim.Tick, _rules!.EndTick, withMap ? map.Data : null, props, TankOf(seat.Slot), bases);
         _mapWriter.Reset();
         if (withMap) BattleMessages.Write(_mapWriter, start, map.EncodedMap);
         else BattleMessages.Write(_mapWriter, start);

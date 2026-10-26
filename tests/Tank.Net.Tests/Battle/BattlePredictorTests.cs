@@ -98,22 +98,6 @@ public sealed class BattlePredictorTests
     }
 
     [Fact]
-    public void An_ack_far_older_than_the_input_history_is_taken_at_once_without_replaying_millions_of_ticks()
-    {
-        Battlefield field = TestWorld.FlatField();
-        BattlePredictor p = Established(field);
-        DriveFor(p, field, 10, mark: 4);
-        foreach (int ack in new[] { -10_000_000, int.MinValue, -1_000, 9 - 128 - 1 })   // the history holds 128 inputs: ticks -118 … 9 are replayable
-        {
-            var sw = Stopwatch.StartNew();
-            p.Reconcile(Medium(), ack, false, field, ReadOnlySpan<Obb2>.Empty);
-            Assert.True(sw.ElapsedMilliseconds < 50, $"ack {ack}: {sw.ElapsedMilliseconds} ms");
-            Assert.Equal(Start, p.Current.Position);   // the server's state, nothing replayed
-            Assert.Equal(Vector2.Zero, p.VisualOffset);
-        }
-    }
-
-    [Fact]
     public void An_ack_just_inside_the_input_history_is_replayed_in_full()
     {
         Battlefield field = TestWorld.FlatField();
@@ -220,5 +204,27 @@ public sealed class BattlePredictorTests
         copy.Position = Vector2.Zero;
         Assert.Equal(Start, p.Current.Position);
         Assert.IsAssignableFrom<IReadOnlyList<PredictedShell>>(p.Shells);
+    }
+
+    /// <summary>The wall-clock test, on its own in the <see cref="TimingCollection"/>.</summary>
+    [Collection(TimingCollection.Name)]
+    public sealed class Timed
+    {
+        [Fact]
+        public void An_ack_far_older_than_the_input_history_is_taken_at_once_without_replaying_millions_of_ticks()
+        {
+            Battlefield field = TestWorld.FlatField();
+            BattlePredictor p = Established(field);
+            DriveFor(p, field, 10, mark: 4);
+            p.Reconcile(Medium(), -10_000_000, false, field, ReadOnlySpan<Obb2>.Empty);   // warm up: the timing below is not JIT
+            foreach (int ack in new[] { -10_000_000, int.MinValue, -1_000, 9 - 128 - 1 })   // the history holds 128 inputs: ticks -118 … 9 are replayable
+            {
+                var sw = Stopwatch.StartNew();
+                p.Reconcile(Medium(), ack, false, field, ReadOnlySpan<Obb2>.Empty);
+                Assert.True(sw.ElapsedMilliseconds < 50, $"ack {ack}: {sw.ElapsedMilliseconds} ms");
+                Assert.Equal(Start, p.Current.Position);   // the server's state, nothing replayed
+                Assert.Equal(Vector2.Zero, p.VisualOffset);
+            }
+        }
     }
 }

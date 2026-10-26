@@ -68,14 +68,19 @@ public struct MatchBlock : IEquatable<MatchBlock>
     public int RespawnIn;      // ticks until the client's tank comes back, 0 otherwise
     public int TeamScore0;     // the teams' kills, leavers' included (two-team modes; 0 in a free-for-all)
     public int TeamScore1;
+    public byte BaseProgress0;         // how far team 1 has taken team 0's base, 0–100 (0 outside a standard match)
+    public byte BaseProgress1;         // how far team 0 has taken team 1's base
+    public MatchEndReason EndReason;   // the rules' EndReason: None while playing
 
     public readonly bool Equals(MatchBlock o) =>
         Phase == o.Phase && TicksLeft == o.TicksLeft && Spotted == o.Spotted && WinnerTeam == o.WinnerTeam && WinnerSlot == o.WinnerSlot
-        && RespawnIn == o.RespawnIn && TeamScore0 == o.TeamScore0 && TeamScore1 == o.TeamScore1;
+        && RespawnIn == o.RespawnIn && TeamScore0 == o.TeamScore0 && TeamScore1 == o.TeamScore1
+        && BaseProgress0 == o.BaseProgress0 && BaseProgress1 == o.BaseProgress1 && EndReason == o.EndReason;
 
     public override readonly bool Equals(object? obj) => obj is MatchBlock m && Equals(m);
 
-    public override readonly int GetHashCode() => HashCode.Combine(Phase, TicksLeft, Spotted, WinnerTeam, WinnerSlot, RespawnIn, TeamScore0, TeamScore1);
+    public override readonly int GetHashCode() => HashCode.Combine(
+        HashCode.Combine(Phase, TicksLeft, Spotted, WinnerTeam, WinnerSlot, RespawnIn, TeamScore0, TeamScore1), BaseProgress0, BaseProgress1, EndReason);
 }
 
 /// <summary>One player's line on the scoreboard.</summary>
@@ -89,13 +94,15 @@ public struct PlayerStats : IEquatable<PlayerStats>
     public int Deaths;
     public bool Alive;
     public byte Rank;
+    public byte Capture;   // MatchRules.CaptureBest(slot): the most points the player's tank held at once this match, 0–100
 
     public readonly bool Equals(PlayerStats o) =>
-        Active == o.Active && Team == o.Team && Spec == o.Spec && TankId == o.TankId && Kills == o.Kills && Deaths == o.Deaths && Alive == o.Alive && Rank == o.Rank;
+        Active == o.Active && Team == o.Team && Spec == o.Spec && TankId == o.TankId && Kills == o.Kills && Deaths == o.Deaths && Alive == o.Alive && Rank == o.Rank
+        && Capture == o.Capture;
 
     public override readonly bool Equals(object? obj) => obj is PlayerStats p && Equals(p);
 
-    public override readonly int GetHashCode() => HashCode.Combine(Active, Team, TankId, Kills, Deaths, Alive, Rank);
+    public override readonly int GetHashCode() => HashCode.Combine(Active, Team, TankId, Kills, Deaths, Alive, Rank, Capture);
 }
 
 /// <summary>

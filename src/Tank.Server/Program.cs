@@ -11,14 +11,14 @@ namespace Tank.Server;
 
 /// <summary>
 /// Headless dedicated server: a room that runs <see cref="BattleServer"/> matches at 30 Hz.
-/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa] [--map sandbox|riverland] [--bots N] [--name "Room"]
+/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa|standard] [--map sandbox|riverland] [--bots N] [--name "Room"]
 /// With no --mode, team battle; with no --map, the riverland; the last of each given wins. The map is generated in the
 /// background: the room takes players at once and starts a match once the map is ready. If that first map can't be
 /// generated (a bug), the server says so and exits with code 3.
 /// </summary>
 public static class Program
 {
-    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
+    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa|standard] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
         "  no --mode: teambattle; no --map: riverland (the last of each given wins); --bots: 0 to 9, added when a match starts";
 
     private const int MapFailedExitCode = 3;

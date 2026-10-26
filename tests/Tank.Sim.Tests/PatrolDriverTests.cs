@@ -216,24 +216,27 @@ public sealed class PatrolDriverTests
     [Fact]
     public void Driving_waiting_and_shooting_allocate_nothing_per_tick()
     {
-        var world = new World(NorthThenEast(), Start, 0f, new Vector2(100, 20));
-        world.Run(20 * Tps);   // warm up: drive, stop, wait, shoot, drive on
-        var inputs = new InputCmd[2];
-        int shots = 0, stops = 0;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 40 * Tps; i++)   // round again to the stop and shoot there
+        Allocation.AssertNone(() =>
         {
-            int tick = world.Sim.Tick + 1;
-            bool waiting = world.Driver.Waiting;
-            inputs[0] = world.Driver.Command(world.Sim.Tanks[0], world.Sim.Field, tick, world.ShootAt);
-            inputs[1] = new InputCmd(tick, 0, 0, 0f, 0f, false);
-            world.Sim.Step(inputs);
-            if (!waiting && world.Driver.Waiting) stops++;
-            foreach (GameEvent e in world.Sim.Events) if (e.TankId == world.Patrol && e.Type == GameEventType.ShellFired) shots++;
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.True(stops >= 1 && shots >= 2, $"{stops} stops and {shots} shots while measuring");
-        Assert.Equal(0, allocated);
+            var world = new World(NorthThenEast(), Start, 0f, new Vector2(100, 20));
+            world.Run(20 * Tps);   // warm up: drive, stop, wait, shoot, drive on
+            var inputs = new InputCmd[2];
+            int shots = 0, stops = 0;
+            Allocation.Window window = Allocation.Start();
+            for (int i = 0; i < 40 * Tps; i++)   // round again to the stop and shoot there
+            {
+                int tick = world.Sim.Tick + 1;
+                bool waiting = world.Driver.Waiting;
+                inputs[0] = world.Driver.Command(world.Sim.Tanks[0], world.Sim.Field, tick, world.ShootAt);
+                inputs[1] = new InputCmd(tick, 0, 0, 0f, 0f, false);
+                world.Sim.Step(inputs);
+                if (!waiting && world.Driver.Waiting) stops++;
+                foreach (GameEvent e in world.Sim.Events) if (e.TankId == world.Patrol && e.Type == GameEventType.ShellFired) shots++;
+            }
+            Allocation.Measured measured = window.Stop();
+            Assert.True(stops >= 1 && shots >= 2, $"{stops} stops and {shots} shots while measuring");
+            return measured;
+        });
     }
 
     [Fact]

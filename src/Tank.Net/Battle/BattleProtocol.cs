@@ -31,8 +31,12 @@ public enum BattleMessage : byte
 /// <summary>Numbers of the battle protocol (stage 4 design §5), and the quantisation the wire uses for angles and positions.</summary>
 public static class BattleProtocol
 {
-    /// <summary>3: maps carry their ground kinds and water level, houses and trees, up to 16384 props (riverland design §5.1).</summary>
-    public const int Version = 3;
+    /// <summary>
+    /// 4: the standard battle (stage 5 design §3.3) — the match block carries both bases' progress and why the match
+    /// ended, the scoreboard each player's capture, the match start the bases. 3: maps carry their ground kinds and water
+    /// level, houses and trees, up to 16384 props (riverland design §5.1).
+    /// </summary>
+    public const int Version = 4;
 
     /// <summary>The UDP port a room listens on unless told otherwise; discovery broadcasts only reach rooms on it.</summary>
     public const int DefaultPort = 27015;

@@ -74,6 +74,8 @@ public class LaunchOptionsTests
     [InlineData("ffa", BattleMode.FreeForAll)]
     [InlineData("TeamBattle", BattleMode.TeamBattle)]
     [InlineData("FFA", BattleMode.FreeForAll)]
+    [InlineData("standard", BattleMode.Standard)]
+    [InlineData("Standard", BattleMode.Standard)]
     public void Mode_takes_the_battle_mode_ids_in_any_case(string value, BattleMode expected)
     {
         LaunchOptions options = LaunchOptions.Parse(new[] { "--mode", value });
@@ -96,6 +98,14 @@ public class LaunchOptionsTests
         Assert.Null(options.Mode);
         string warning = Assert.Single(options.Warnings);
         Assert.Contains("teambattle|annihilation|ffa", warning);
+    }
+
+    [Fact]
+    public void A_bad_mode_warning_lists_all_four_modes()
+    {
+        string warning = Assert.Single(LaunchOptions.Parse(new[] { "--mode", "nope" }).Warnings);
+
+        Assert.Contains("teambattle|annihilation|ffa|standard", warning);
     }
 
     [Theory]

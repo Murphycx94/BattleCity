@@ -51,6 +51,18 @@ public static class RiverlandMap
     /// <summary>Where the tanks of a match start: <see cref="SpawnLayout.Team"/> 5 west (team 0) + 5 east (team 1), <see cref="SpawnLayout.Solo"/> 16.</summary>
     public static readonly SpawnLayout Spawns = new(TeamSpawns(), SoloSpawns());
 
+    /// <summary>
+    /// The teams' bases for a standard battle (stage 5 design §3.2), found with the riverland probe's <c>bases</c> command
+    /// and checked by MapBaseTests: team 0's on the grass south-west of its spawns, 46 m out (straight behind them is the
+    /// plateau's cliff and its rocks), three rocks at its rim; team 1's 47 m straight behind its spawns, one rock at its
+    /// rim; 983 m apart.
+    /// </summary>
+    public static readonly IReadOnlyList<TeamBase> Bases = new TeamBase[]
+    {
+        new(0, new Vector2(152, 398), TeamBase.StandardRadius),
+        new(1, new Vector2(1024, 852), TeamBase.StandardRadius),
+    };
+
     /// <summary>Forty points on open ground for the bots to drive between, at least 137 m apart, 8 to 12 in each quarter of the map.</summary>
     public static readonly IReadOnlyList<Vector2> Waypoints = new Vector2[]
     {

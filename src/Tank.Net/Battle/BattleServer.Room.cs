@@ -19,7 +19,9 @@ public sealed partial class BattleServer
         bool isOwner = _options.OwnerToken is { } owner && owner != 0 && hello.SessionToken == owner;
         BattleSeat? seat = SeatWithToken(hello.SessionToken);
         if (seat is { Connected: true }) TakeOver(seat);   // the same player from a new connection: the old one is dead to us
-        seat ??= AllocateSeat(isOwner ? hello.SessionToken : null);
+        // A player whose seat was freed during this match keeps the token in a new one, so the match still knows them.
+        bool hadTank = seat is null && hello.SessionToken != 0 && _hadTank.Contains(hello.SessionToken);
+        seat ??= AllocateSeat(isOwner || hadTank ? hello.SessionToken : null);
         if (seat is null)
         {
             Reject(peerId, "房间已满。");
@@ -40,7 +42,11 @@ public sealed partial class BattleServer
         _roomDirty = true;
 
         if (_sim is null || _rules is null) return;
-        if (!seat.InMatch && _rules.AcceptsJoins) PutIntoMatch(seat);
+        if (!seat.InMatch)
+        {
+            if (MayJoinMatch(seat)) PutIntoMatch(seat);
+            else if (_rules.AcceptsJoins) _log($"slot {seat.Slot} already had a tank in this match; waiting for the next");
+        }
         if (seat.InMatch)
         {
             seat.ResetForMatch();
@@ -83,13 +89,24 @@ public sealed partial class BattleServer
         return null;
     }
 
-    /// <summary>Reconnect tokens let a client reclaim its seat, so they must not be guessable.</summary>
-    private static uint NewToken()
+    /// <summary>
+    /// Reconnect tokens let a client reclaim its seat, so they must not be guessable — nor clash: never 0 (no token),
+    /// never one a seat holds (whoever presented it would get that seat), one barred from this match (the newcomer would
+    /// be turned away) or the owner's (it makes the host).
+    /// </summary>
+    private uint NewToken()
     {
         uint token;
         do token = (uint)System.Security.Cryptography.RandomNumberGenerator.GetInt32(1, int.MaxValue) ^ ((uint)System.Security.Cryptography.RandomNumberGenerator.GetInt32(0, 2) << 31);
-        while (token == 0);
+        while (token == 0 || _hadTank.Contains(token) || token == _options.OwnerToken || SeatHolds(token));
         return token;
+    }
+
+    private bool SeatHolds(uint token)
+    {
+        foreach (BattleSeat? s in _seats)
+            if (s is not null && s.Token == token) return true;
+        return false;
     }
 
     private void Reject(int peerId, string reason)

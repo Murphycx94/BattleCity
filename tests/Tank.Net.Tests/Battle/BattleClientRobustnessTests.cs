@@ -56,25 +56,6 @@ public sealed class BattleClientRobustnessTests
     // ---- hostile snapshots ----
 
     [Fact]
-    public void A_snapshot_acking_inputs_millions_of_ticks_back_is_handled_at_once_and_the_client_lives_on()
-    {
-        BattleClient a = InMatch(out BattleHarness h);
-        a.OnData(0, Snapshot(a.Latest!, a.Latest!.Tick + 1, a.Latest.Tick));   // warm the code paths up: the timing below is not JIT
-        foreach (int back in new[] { 10_000_000, int.MaxValue })
-        {
-            int ack = back == int.MaxValue ? int.MinValue : a.Predictor.LastPredictedTick - back;
-            var sw = Stopwatch.StartNew();
-            a.OnData(0, Snapshot(a.Latest!, a.Latest!.Tick + 1, ack));
-            Assert.True(sw.ElapsedMilliseconds < 50, $"{sw.ElapsedMilliseconds} ms for an ack {back} ticks behind");
-        }
-        Assert.Equal(BattlePhase.InMatch, a.Phase);
-        Assert.True(a.HasTank);
-        Frames(a, h, 30);
-        h.Run(0.5);
-        Assert.Equal(BattlePhase.InMatch, a.Phase);
-    }
-
-    [Fact]
     public void A_snapshot_acking_inputs_beyond_its_own_tick_is_refused()
     {
         BattleClient a = InMatch(out _);
@@ -424,18 +405,22 @@ public sealed class BattleClientRobustnessTests
     [Fact]
     public void Reading_the_shells_does_not_change_them_and_costs_nothing()
     {
-        BattleClient a = InMatch(out BattleHarness h);
-        int tick = a.Latest!.Tick - 10;
-        var shot = new GameEvent(GameEventType.ShellFired, tick, 9999, 31, new Vector3(50, 60f, 50), new Vector3(0, 0, -1), Ammo: AmmoType.AP);
-        a.OnData(0, Events(new EventBatch(tick, new[] { shot }, Array.Empty<PropState>())));
-        Frames(a, h, 2);
-        IReadOnlyList<ShellView> first = a.Shells;
-        Assert.Single(first);
-        Assert.Same(first, a.Shells);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) _ = a.Shells.Count;
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.Single(a.Shells);
+        Allocation.AssertNone(() =>
+        {
+            BattleClient a = InMatch(out BattleHarness h);
+            int tick = a.Latest!.Tick - 10;
+            var shot = new GameEvent(GameEventType.ShellFired, tick, 9999, 31, new Vector3(50, 60f, 50), new Vector3(0, 0, -1), Ammo: AmmoType.AP);
+            a.OnData(0, Events(new EventBatch(tick, new[] { shot }, Array.Empty<PropState>())));
+            Frames(a, h, 2);
+            IReadOnlyList<ShellView> first = a.Shells;
+            Assert.Single(first);
+            Assert.Same(first, a.Shells);
+            Allocation.Window window = Allocation.Start();
+            for (int i = 0; i < 1000; i++) _ = a.Shells.Count;
+            Allocation.Measured measured = window.Stop();
+            Assert.Single(a.Shells);
+            return measured;
+        });
     }
 
     [Fact]
@@ -445,5 +430,30 @@ public sealed class BattleClientRobustnessTests
         BattleClient a = h.AddClient("A");
         Assert.Equal(MatchRules.NoTeam, a.Match.WinnerTeam);
         Assert.Equal(MatchRules.NoSlot, a.Match.WinnerSlot);
+    }
+
+    /// <summary>The wall-clock test, on its own in the <see cref="TimingCollection"/>.</summary>
+    [Collection(TimingCollection.Name)]
+    public sealed class Timed
+    {
+        [Fact]
+        public void A_snapshot_acking_inputs_millions_of_ticks_back_is_handled_at_once_and_the_client_lives_on()
+        {
+            BattleClient a = InMatch(out BattleHarness h);
+            a.OnData(0, Snapshot(a.Latest!, a.Latest!.Tick + 1, a.Latest.Tick));   // warm the code paths up: the timing below is not JIT
+            a.OnData(0, Snapshot(a.Latest!, a.Latest!.Tick + 1, a.Predictor.LastPredictedTick - 10_000_000));   // and the far-ack one itself
+            foreach (int back in new[] { 10_000_000, int.MaxValue })
+            {
+                int ack = back == int.MaxValue ? int.MinValue : a.Predictor.LastPredictedTick - back;
+                var sw = Stopwatch.StartNew();
+                a.OnData(0, Snapshot(a.Latest!, a.Latest!.Tick + 1, ack));
+                Assert.True(sw.ElapsedMilliseconds < 50, $"{sw.ElapsedMilliseconds} ms for an ack {back} ticks behind");
+            }
+            Assert.Equal(BattlePhase.InMatch, a.Phase);
+            Assert.True(a.HasTank);
+            Frames(a, h, 30);
+            h.Run(0.5);
+            Assert.Equal(BattlePhase.InMatch, a.Phase);
+        }
     }
 }
