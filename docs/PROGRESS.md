@@ -9,7 +9,7 @@
 - **阶段**：5（5v5），分 5A 河谷地图、5B 标准战、5C 机器人、5D 小地图。设计已确认：[阶段 5 设计](superpowers/specs/2026-10-22-stage5-design.md)；5A 照 [河谷设计](superpowers/specs/2026-10-19-riverland-map-design.md) 做，改动见阶段 5 设计 §2。
 - **用户的要求**：设计确认后一路做完（含审查、验收、squash 合入本地 main），中途不问，做完汇报；不推远端（推远端走 PR）；只做 macOS。
 - **用户的选择**（2026-10-22）：四步拆分；标准战是新增的第四种模式；机器人数量照旧房主设；河谷 1200 m、标准战限时 10 分钟；机器人中等档（寻路、分工、回防、交战）；小地图标准版；所有模式 × 两张图，新房间默认河谷。
-- **进度**：5A ✅ 全部 26 个任务、六批审查都做完，squash 合入本地 main（提交说明 `feat: stage 5A — riverland map, room map choice, protocol v3`，没推远端）。分支 `feat/stage5a-riverland`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage5a`，从 main `7633d77` 拉出。10/19 的旧河谷计划拷成 `docs/superpowers/plans/2026-10-19-riverland-map-old.md` 作参考；旧目录 `BattleCity-map`（`feat/map-riverland`，没有代码提交）不再用，可删。
+- **进度**：5A ✅ 全部 26 个任务、六批审查都做完，squash 合入本地 main `cc939c0`（提交说明 `feat: stage 5A — riverland map, room map choice, protocol v3`，没推远端）。分支 `feat/stage5a-riverland`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage5a`，从 main `7633d77` 拉出。10/19 的旧河谷计划拷成 `docs/superpowers/plans/2026-10-19-riverland-map-old.md` 作参考；旧目录 `BattleCity-map`（`feat/map-riverland`，没有代码提交）不再用，可删。
 - **5A 计划**：`docs/superpowers/plans/2026-10-22-stage5a-riverland.md`（26 个任务，批 A 仿真基础 1～4、B 河谷生成 5～9、C 联网 10～14、D 客户端地面和水 15～20、E 客户端物件 21～22、F 收尾 23～26；末尾有验收清单和 20 条与设计的偏差）。计划由子代理按现在的代码重写，实测基线 Sim 639、Net 170、Art 882、Update 42；确认 `MaxUnreliableBytes` 1150 超过 LiteNetLib 单包上限 1023（实测 1024 字节抛 `TooBigPacketException`），任务 10 改为 1000。基线截图 `build/shots/base/`（六张试驾场 + 回环对局）。
 - **下一步**：5A 已 squash 合入本地 main（见“阶段总览”）。5B 标准战从新 main 拉分支 `feat/stage5b-standard`：先按阶段 5 设计写 5B 计划（注意 5A 留下的“两队出生区相距 899 m、基地位置”问题），再照 5A 的方式一路做完。worktree 里 52 个 4B/4C 漏交的 `.uid` 未跟踪，没动。
 - **之前**：阶段 4 全部合入 main，v0.3.0 已发版（GitHub Release + 更新源）；main 上 `6f97958` 改成只打 Mac 包（本地，未推送）。阶段 4 的记录见下方“4C/4B/4A 节点记录”。
@@ -25,7 +25,7 @@
 | 2C 可破坏物（墙、栅栏、草丛、瓦砾、撞墙） | ✅ 已合入 main（`7d398b6`，squash） | 用户已试玩确认，没有要改的 |
 | 3 点亮 | ✅ 已合入 main（`cf0d593`，squash） | 用户已试玩确认，没有要改的 |
 | 4 联网 | ✅ 4A、4B、4C 已合入 main（4C `88044b6`），v0.3.0 已发版；待用户试玩 | 本文件“当前位置” |
-| 5 5v5 | 🔄 5A 河谷地图已合入本地 main（squash）；接着 5B 标准战 | 本文件“当前位置” |
+| 5 5v5 | 🔄 5A 河谷地图已合入本地 main（`cc939c0`，squash；合入后 0 警告，Sim 830、Net 231、Art 1039、Update 42）；接着 5B 标准战 | 本文件“当前位置” |
 | 6 吃鸡 | ⏳ 未开始 | |
 
 ## 5A 节点记录
