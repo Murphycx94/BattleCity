@@ -51,6 +51,16 @@ public sealed class MapCatalogTests
     }
 
     [Fact]
+    public void The_catalog_maps_carry_their_bot_data()
+    {
+        Assert.Same(SandboxMap.Bots, MapCatalog.Sandbox.Bots);
+        Assert.Same(RiverlandMap.Bots, MapCatalog.Riverland.Bots);
+        Assert.Same(BotMapData.None, Counted(() => { }).Bots);
+        var given = new MapDefinition("given", "给", SandboxMap.Create, SandboxMap.Spawns, SandboxMap.Waypoints, SandboxMap.Bases, SandboxMap.Bots);
+        Assert.Same(SandboxMap.Bots, given.Bots);
+    }
+
+    [Fact]
     public void Map_data_is_built_once()
     {
         int calls = 0;

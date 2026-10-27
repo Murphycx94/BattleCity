@@ -135,6 +135,22 @@ public static class SandboxMap
         new(1, new Vector2(300, 56), TeamBase.StandardRadius),
     };
 
+    /// <summary>
+    /// The bots' attack lanes and cover points (stage 5 design §4.2), found with the riverland probe's <c>nav</c> command
+    /// and checked by MapBotDataTests on the navigation grid. After <see cref="Bases"/>: static initialisers run in order.
+    /// Lanes from team 0's side (team 1 drives them backwards): <c>north</c>, <c>middle</c> and <c>south</c>, the flank
+    /// (133 m off the line between the bases). Four cover points a team on the side the lanes come from.
+    /// </summary>
+    public static readonly BotMapData Bots = new(
+        new BotLane[]
+        {
+            new("north", new Vector2[] { new(100, 220), new(150, 120), new(226, 70) }),
+            new("middle", new Vector2[] { new(166, 238), new(240, 160) }),
+            new("south", new Vector2[] { new(180, 320), new(280, 260), new(330, 160) }),
+        },
+        new Vector2[] { new(70, 334), new(94, 322), new(78, 290), new(58, 278) },
+        new Vector2[] { new(274, 114), new(254, 106), new(322, 114), new(286, 86) });
+
     /// <summary>Twenty points on open ground for the bots to drive between, at least 45 m apart and covering the map.</summary>
     public static readonly IReadOnlyList<Vector2> Waypoints = new Vector2[]
     {

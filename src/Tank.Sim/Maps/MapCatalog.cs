@@ -6,10 +6,12 @@ namespace Tank.Sim.Maps;
 public static class MapCatalog
 {
     public static MapDefinition Sandbox { get; } =
-        new(SandboxMap.Id, "试驾场地图", SandboxMap.Create, SandboxMap.Spawns, SandboxMap.Waypoints, SandboxMap.Bases);
+        new(SandboxMap.Id, "试驾场地图", SandboxMap.Create, SandboxMap.Spawns, SandboxMap.Waypoints, SandboxMap.Bases,
+            SandboxMap.Bots);
 
     public static MapDefinition Riverland { get; } =
-        new(RiverlandMap.Id, "河谷", RiverlandMap.Create, RiverlandMap.Spawns, RiverlandMap.Waypoints, RiverlandMap.Bases);
+        new(RiverlandMap.Id, "河谷", RiverlandMap.Create, RiverlandMap.Spawns, RiverlandMap.Waypoints, RiverlandMap.Bases,
+            RiverlandMap.Bots);
 
     /// <summary>The sandbox first, then the riverland.</summary>
     public static IReadOnlyList<MapDefinition> All { get; } = new[] { Sandbox, Riverland };

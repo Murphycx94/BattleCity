@@ -24,7 +24,7 @@ public sealed class StandardMatchTests
 
     public static TheoryData<string> Maps => new() { "sandbox", "riverland" };
 
-    /// <summary>A standard match on a catalog map, stepped like the server: bots, then the step, vision and the rules.</summary>
+    /// <summary>A standard match on a catalog map, stepped like the server: the bot director and the commands, then the step, vision and the rules.</summary>
     private sealed class Game
     {
         public readonly MapDefinition Map;
@@ -33,7 +33,6 @@ public sealed class StandardMatchTests
         public readonly VisionTracker Vision;
         public readonly int StartTick;
         private readonly Dictionary<int, InputCmd> _orders = new();
-        private readonly List<SkirmishBot> _bots = new();
         private readonly InputCmd[] _inputs = new InputCmd[Simulation.MaxTanks];
 
         public Game(string mapId)
@@ -45,10 +44,13 @@ public sealed class StandardMatchTests
             StartTick = Sim.Tick;
         }
 
+        /// <summary>The match's bots, made with the first one (a match without bots has none, as on the server).</summary>
+        public BotDirector? Director { get; private set; }
+
         public int Join(byte slot, byte team, TankSpec? spec = null) => Rules.Join(slot, spec ?? TankCatalog.Medium, team);
 
-        /// <summary>Hands <paramref name="tankId"/> to a skirmish bot on the map's waypoints.</summary>
-        public void Bot(int tankId, uint seed) => _bots.Add(new SkirmishBot(tankId, Map.Waypoints, seed));
+        /// <summary>Hands <paramref name="tankId"/> to a bot of the match's <see cref="BotDirector"/>.</summary>
+        public void Bot(int tankId, uint seed) => (Director ??= new BotDirector(Sim, Vision, Rules, Map, Map.NewNavGrid())).Add(tankId, seed);
 
         public void Order(int tankId, InputCmd cmd) => _orders[tankId] = cmd;
 
@@ -74,6 +76,7 @@ public sealed class StandardMatchTests
         /// <summary>One tick; allocation-free.</summary>
         public void Step()
         {
+            Director?.Update();
             int tick = Sim.Tick + 1, n = Sim.TankCount;
             for (int k = 0; k < n; k++) _inputs[k] = Command(Sim.Tanks[k], tick);
             Sim.Step(_inputs.AsSpan(0, n));
@@ -107,8 +110,7 @@ public sealed class StandardMatchTests
 
         private InputCmd Command(in TankState t, int tick)
         {
-            for (int i = 0; i < _bots.Count; i++)
-                if (_bots[i].TankId == t.Id) return _bots[i].Command(Sim, Vision, tick);
+            if (Director?.Find(t.Id) is not null) return Director.Command(t.Id, tick);
             return _orders.TryGetValue(t.Id, out InputCmd cmd) ? cmd : new InputCmd(tick, 0, 0, t.Yaw, 0f, false);
         }
     }
@@ -240,7 +242,7 @@ public sealed class StandardMatchTests
         });
     }
 
-    /// <summary>Five against five in every kind of tank, each driven by a skirmish bot (seeds 1–10).</summary>
+    /// <summary>Five against five in every kind of tank, each driven by a bot of the director (seeds 1–10).</summary>
     private static Game TenBots(string id)
     {
         var g = new Game(id);

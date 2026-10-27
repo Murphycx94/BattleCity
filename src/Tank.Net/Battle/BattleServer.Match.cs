@@ -10,12 +10,12 @@ namespace Tank.Net.Battle;
 
 public sealed partial class BattleServer
 {
-    private const int BotSeedStride = 7919;   // a prime: each bot's seed differs from the match seed in its own way
-
     /// <summary>
     /// Starts a match in the room's mode on the room's map with everyone seated, plus the bots asked for (named, given
-    /// random tanks, put on the thinner team), if the map is ready (and, for a standard battle, has bases), there are at
-    /// least two tanks and, in a team mode, both teams have one.
+    /// random tanks, put on the thinner team: <see cref="BotSeating"/>), if the map is ready (and, for a standard battle,
+    /// has bases), there are at least two tanks and, in a team mode, both teams have one. The match is built whole —
+    /// battlefield, rules, tanks, the bots' director — before any of it becomes the server's: if the bots fail to start
+    /// (a bug), that is logged, the bot seats are taken away again and the room stays as it was.
     /// </summary>
     public bool TryStartMatch(out string? reason)
     {
@@ -38,13 +38,12 @@ public sealed partial class BattleServer
             reason = "the map has no bases";
             return false;
         }
-        uint seed = _options.Seed ?? (uint)Random.Shared.Next(1, int.MaxValue);
-        var rng = new Tank.Sim.Geometry.XorShift(seed);
+        var seating = new BotSeating(_options.Seed ?? (uint)Random.Shared.Next(1, int.MaxValue));
         int humans = _seats.Count(s => s is { IsBot: false });
         for (int i = 0; i < _bots && humans + i < BattleProtocol.MaxPlayers; i++)
         {
             byte slot = (byte)Array.FindIndex(_seats, s => s is null);
-            var bot = new BattleSeat(slot, 0, isBot: true) { Name = $"机器人 {i + 1}", TankIndex = (byte)(rng.NextUInt() % (uint)TankCatalog.All.Count) };
+            var bot = new BattleSeat(slot, 0, isBot: true) { Name = $"机器人 {i + 1}", TankIndex = (byte)seating.NextTankIndex() };
             bot.Team = ThinnerTeam(slot);
             _seats[slot] = bot;
         }
@@ -58,33 +57,75 @@ public sealed partial class BattleServer
         }
 
         PreparedMap map = _maps.Get(_roomMap);
-        _matchMap = map;
         // A Fresh() copy of the battlefield ServerMaps built while preparing the map (bit for bit map.Data.Build(), what
         // every client builds): about 0.1 ms even for the riverland, so the tick thread never builds a map.
-        _sim = new Simulation(map.Definition.NewBattlefield());
-        _vision = new VisionTracker(_sim);
-        _rules = new MatchRules(_mode, _sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null,
+        var sim = new Simulation(map.Definition.NewBattlefield());
+        var vision = new VisionTracker(sim);
+        var rules = new MatchRules(_mode, sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null,
             bases: map.Definition.Bases);
+        foreach (BattleSeat? seat in _seats)
+            if (seat is not null) rules.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
+        BotDirector? director;
+        try
+        {
+            director = SeatBots(sim, vision, rules, map.Definition, seating);
+        }
+        catch (Exception ex)
+        {
+            RemoveBots();
+            _log($"match not started: the bots failed: {ex}");
+            reason = "the bots failed to start";
+            return false;
+        }
+
+        (_sim, _vision, _rules, _director, _matchMap) = (sim, vision, rules, director, map);
         _matchNumber++;
         _endedAtFrame = -1;
         _hadTank.Clear();
         foreach (BattleSeat? seat in _seats)
         {
             if (seat is null) continue;
-            PutIntoMatch(seat);
-            if (seat.IsBot) seat.Bot = new SkirmishBot(_rules.Of(seat.Slot).TankId, map.Definition.Waypoints, seed ^ (uint)(seat.Slot * BotSeedStride));
-            else seat.ResetForMatch();
+            MarkInMatch(seat);
+            if (!seat.IsBot) seat.ResetForMatch();
         }
-        _log($"match started: {ModeRules.Id(_mode)}, map {map.Definition.Id}, {humans} players, {seated - humans} bots, seed {seed}");
+        _log($"match started: {ModeRules.Id(_mode)}, map {map.Definition.Id}, {humans} players, {seated - humans} bots, seed {seating.MatchSeed}");
+        if (director is not null) _log($"bots: {director.Describe()}");
         foreach (BattleSeat seat in _byPeer.Values) SendMatchStart(seat, withMap: true);
         _roomDirty = true;
         reason = null;
         return true;
     }
 
+    /// <summary>
+    /// A new <see cref="BotDirector"/> for the match being built with every bot seat's tank (each bot with its own seed
+    /// from the match's: <see cref="BotSeating.BotSeed"/>) and the roles given out; none without bot seats. Bots join only
+    /// here, at the start (a player may join later, a bot never): their number can't change mid-match. The grid is a copy
+    /// (about 180 KB on the riverland) of the one <see cref="ServerMaps"/> built while preparing the map, so the tick thread
+    /// never builds one.
+    /// </summary>
+    private BotDirector? SeatBots(Simulation sim, VisionTracker vision, MatchRules rules, MapDefinition map, BotSeating seating)
+    {
+        if (!_seats.Any(s => s is { IsBot: true })) return null;
+        var director = new BotDirector(sim, vision, rules, map, map.NewNavGrid());
+        DirectorMade?.Invoke(director);
+        foreach (BattleSeat? seat in _seats)
+            if (seat is { IsBot: true }) director.Add(rules.Of(seat.Slot).TankId, seating.BotSeed(seat.Slot));
+        director.AssignRoles();
+        return director;
+    }
+
+    /// <summary>Tests: called with each new director before its bots are added; throwing stands for bots that fail to start.</summary>
+    internal Action<BotDirector>? DirectorMade { get; set; }
+
+    /// <summary>A player who comes into the running match: a tank in it, at once.</summary>
     private void PutIntoMatch(BattleSeat seat)
     {
         _rules!.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
+        MarkInMatch(seat);
+    }
+
+    private void MarkInMatch(BattleSeat seat)
+    {
         seat.InMatch = true;
         if (!seat.IsBot && !ModeRules.Respawns(_mode)) _hadTank.Add(seat.Token);
     }
@@ -98,13 +139,19 @@ public sealed partial class BattleServer
     /// </summary>
     private bool MayJoinMatch(BattleSeat seat) => _rules!.AcceptsJoins && !_hadTank.Contains(seat.Token);
 
+    /// <summary>
+    /// Back to the room: after the results, on the host's word, or with nobody left in the match. The bots' summary is
+    /// logged here if the match didn't get to its end (it is logged with the end otherwise): once a match either way.
+    /// </summary>
     public void EndMatch()
     {
         if (_sim is null) return;
         _log("match over, back to the room");
+        if (_director is not null && _endedAtFrame < 0) _log($"bots: {_director.Summary()}");
         _sim = null;
         _vision = null;
         _rules = null;
+        _director = null;
         _matchMap = null;
         _endedAtFrame = -1;
         _hadTank.Clear();
@@ -133,13 +180,14 @@ public sealed partial class BattleServer
         MatchRules rules = _rules!;
         int tick = sim.Tick + 1;
 
-        // Inputs, one per tank in slot order: players from their buffers, bots from their brains.
+        // Inputs, one per tank in slot order: players from their buffers, bots from the director (brought up to date first).
+        _director?.Update();
         ReadOnlySpan<TankState> tanks = sim.Tanks;
         for (int i = 0; i < tanks.Length; i++)
         {
             BattleSeat? seat = SeatOfTank(tanks[i].Id);
             _tickInputs[i] = seat is null ? BattleInputBuffer.Idle(tick, default)
-                : seat.IsBot ? seat.Bot!.Command(sim, vision, tick)
+                : seat.IsBot ? _director!.Command(tanks[i].Id, tick)
                 : seat.Inputs.Take(tick);
         }
         sim.Step(_tickInputs.AsSpan(0, tanks.Length));
@@ -160,6 +208,7 @@ public sealed partial class BattleServer
             {
                 _endedAtFrame = _frame;
                 _log($"match ended: {ModeRules.Id(_mode)}, {WinnerText(rules)}, {ReasonText(rules.EndReason)}");
+                if (_director is not null) _log($"bots: {_director.Summary()}");
             }
             if (_frame - _endedAtFrame >= _options.ReturnToRoomSeconds * SimConstants.TickRate) EndMatch();
         }

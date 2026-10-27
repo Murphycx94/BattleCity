@@ -27,9 +27,10 @@ internal sealed class PreparedMap
 }
 
 /// <summary>
-/// The maps a server has generated and encoded (riverland design §5.2, stage 5 design §2): each at most once, so every
-/// match start copies the same bytes. A real host prepares them on a worker, so the tick thread never generates a map and
-/// only looks them up; tests and the loopback host prepare them on the calling thread, which keeps a run deterministic.
+/// The maps a server has generated and encoded (riverland design §5.2, stage 5 design §2), with the bots' navigation
+/// grid built: each at most once, so every match start copies the same bytes. A real host prepares them on a worker, so
+/// the tick thread never generates a map or builds a grid and only looks them up; tests and the loopback host prepare
+/// them on the calling thread, which keeps a run deterministic.
 /// The generated <see cref="MapData"/> and the battlefield matches start from (<see cref="MapDefinition.NewBattlefield"/>)
 /// are the definition's own, shared by every server in the process; the encoding is this server's.
 /// </summary>
@@ -58,9 +59,11 @@ internal sealed class ServerMaps
 
     /// <summary>
     /// Generates <paramref name="map"/> (unless the process already has), builds the battlefield matches start from and
-    /// encodes the map, on a worker or right here; nothing if it is prepared or under way. A generator that throws is a
-    /// bug: it is logged and the map is <see cref="MapState.Failed"/> for good (no retry). Nothing is thrown to the caller
-    /// in either mode, so a room command that picks a broken map can't leave the tick half done.
+    /// the bots' navigation grid, and encodes the map, on a worker or right here; nothing if it is prepared or under way.
+    /// A generator, or a navigation grid build, that throws is a bug: it is logged and the map is
+    /// <see cref="MapState.Failed"/> for good (no retry).
+    /// Nothing is thrown to the caller in either mode, so a room command that picks a broken map can't leave the tick
+    /// half done.
     /// </summary>
     public void Prepare(MapDefinition map)
     {
@@ -105,8 +108,11 @@ internal sealed class ServerMaps
     {
         MapData data = map.Data;
         // The quantised battlefield, built once and kept by the definition: a match start takes a Fresh() copy of it (about
-        // 0.1 ms, bit for bit Data.Build()) instead of building the map from its data on the tick thread.
-        map.NewBattlefield();
+        // 0.1 ms, bit for bit Data.Build()) instead of building the map from its data on the tick thread. Likewise the bots'
+        // navigation grid (about 20–40 ms on the riverland in Release), built from that battlefield: built here once (building
+        // the battlefield first), a match with bots only copies it. A grid that fails to build fails the map, as a
+        // generator that throws does.
+        map.EnsureNavGrid();
         var writer = new BitWriter(EncodeWriterBytes);
         BattleMessages.WriteMap(writer, data);
         if (writer.BitLength % 8 != 0)   // copied in with WriteAligned: what follows it in a match start must start on a byte

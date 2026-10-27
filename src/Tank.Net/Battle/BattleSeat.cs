@@ -1,5 +1,3 @@
-using Tank.Sim.Ai;
-
 namespace Tank.Net.Battle;
 
 /// <summary>A seat in the room: a player (surviving a disconnect for the reconnect grace period) or a bot.</summary>
@@ -40,8 +38,6 @@ internal sealed class BattleSeat
 
     /// <summary>The snapshots sent to this player, by tick, for delta baselines (players only).</summary>
     public BattleSnapshot[]? History { get; }
-
-    public SkirmishBot? Bot { get; set; }
 
     public bool Connected => PeerId >= 0;
 

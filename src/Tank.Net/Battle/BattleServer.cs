@@ -63,6 +63,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
     private Simulation? _sim;
     private VisionTracker? _vision;
     private MatchRules? _rules;
+    private BotDirector? _director;   // drives the match's bot seats; null without bots and between matches
     private long _endedAtFrame = -1;
 
     /// <summary>
@@ -112,6 +113,9 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
     public Simulation? Simulation => _sim;
     public VisionTracker? Vision => _vision;
     public MatchRules? Rules => _rules;
+
+    /// <summary>The running match's bots (tests); null between matches and in a match without bots.</summary>
+    internal BotDirector? Director => _director;
     public int ConnectedCount => _seats.Count(s => s is { Connected: true });
 
     /// <summary>The map the room's next match is played on.</summary>

@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Numerics;
+using Tank.Sim.Ai;
 using Tank.Sim.Maps;
 using Tank.Sim.Maps.Riverland;
+using Tank.Sim.Navigation;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
 using Xunit.Abstractions;
@@ -54,26 +57,79 @@ public sealed class RiverlandPerformanceTests
     }
 
     [Fact]
+    public void The_navigation_grid_builds_within_budget()
+    {
+        Battlefield field = RiverlandFixture.Field;
+        double best = BestSeconds(() => NavGrid.Build(field), "NavGrid.Build(riverland)");
+#if DEBUG
+        const double Limit = 4.0;
+#else
+        const double Limit = 0.5;
+#endif
+        Assert.True(best <= Limit, $"the grid took {best:F2} s at best (limit {Limit} s)");
+    }
+
+    [Fact]
+    public void Searches_across_the_riverland_are_cheap()
+    {
+        IReadOnlyList<Vector2> waypoints = MapCatalog.Riverland.Waypoints;
+        var finder = new PathFinder(RiverlandFixture.Grid, RiverlandFixture.Field);
+        for (int k = 1; k < waypoints.Count; k++) finder.FindNow(waypoints[0], waypoints[k]);   // warm-up
+
+        long ticks = 0, expansions = 0;
+        int searches = 0, found = 0, most = 0;
+        for (int a = 0; a < waypoints.Count; a++)
+        for (int b = 0; b < waypoints.Count; b++)
+        {
+            if (a == b) continue;
+            long start = Stopwatch.GetTimestamp();
+            PathStatus status = finder.FindNow(waypoints[a], waypoints[b]);
+            ticks += Stopwatch.GetTimestamp() - start;
+            searches++;
+            if (status == PathStatus.Found) found++;
+            expansions += finder.Expansions;
+            most = Math.Max(most, finder.Expansions);
+        }
+        double microseconds = Milliseconds(ticks) * 1000.0 / expansions;
+        _output.WriteLine($"{searches} searches between the riverland's {waypoints.Count} waypoints: {found} found, {expansions / (double)searches:F0} expansions on average, " +
+                          $"{most} at most, {Milliseconds(ticks):F0} ms in all, {microseconds:F3} µs an expansion");
+#if DEBUG
+        const double Limit = 2.0;
+#else
+        const double Limit = 0.3;
+#endif
+        Assert.Equal(waypoints.Count * (waypoints.Count - 1), searches);
+        Assert.Equal(searches, found);
+        Assert.True(microseconds <= Limit, $"{microseconds:F3} µs an expansion (limit {Limit} µs)");
+    }
+
+    [Fact]
     public void A_tick_with_ten_tanks_is_cheap()
     {
-        var (sim, vision, bots) = RiverlandFingerprintTests.TenBots();
+        BotArena arena = RiverlandFingerprintTests.TenBots();
+        BotDirector director = arena.Director;
+        Simulation sim = arena.Sim;
         var inputs = new InputCmd[sim.TankCount];
         const int Warmup = 300, Block = 300;
         var blocks = new double[Repeats];
         for (int i = 0; i < Warmup + Repeats * Block; i++)
         {
             long start = Stopwatch.GetTimestamp();
-            for (int k = 0; k < bots.Length; k++) inputs[k] = bots[k].Command(sim, vision, sim.Tick + 1);
+            director.Update();
+            for (int k = 0; k < inputs.Length; k++) inputs[k] = director.Command(sim.Tanks[k].Id, sim.Tick + 1);
             sim.Step(inputs);
             if (i >= Warmup) blocks[(i - Warmup) / Block] += Milliseconds(Stopwatch.GetTimestamp() - start) / Block;
-            vision.Update();   // timed by the spotting test
+            arena.Vision.Update();   // timed by the spotting test
+            arena.Rules.Update();
         }
         double ms = blocks.Min();
-        _output.WriteLine($"ten tanks on the riverland: {ms:F3} ms a tick at best (bots and Simulation.Step; blocks of {Block} ticks: {Join(blocks)})");
+        _output.WriteLine($"ten tanks on the riverland: {ms:F3} ms a tick at best (the bot director with its searches, the bots' commands and Simulation.Step; blocks of {Block} ticks: {Join(blocks)})");
+        // The bots' searches have a budget of their own, about 0.3 ms a tick (PathService.ExpansionsPerTick); the server's
+        // gate is the whole tick's p99 under 2 ms with nine bots (stage 5C task 9).
 #if DEBUG
-        const double Limit = 3.0;
+        const double Limit = 5.0;
 #else
-        const double Limit = 0.5;
+        const double Limit = 1.0;
 #endif
         Assert.True(ms <= Limit, $"a tick took {ms:F3} ms at best (limit {Limit} ms)");
     }

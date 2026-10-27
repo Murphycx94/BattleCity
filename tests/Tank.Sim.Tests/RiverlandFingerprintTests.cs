@@ -2,7 +2,6 @@ using Tank.Sim.Ai;
 using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
-using Tank.Sim.Vision;
 
 namespace Tank.Sim.Tests;
 
@@ -33,33 +32,23 @@ public sealed class RiverlandFingerprintTests
     {
         Allocation.AssertNone(() =>
         {
-            var (sim, vision, bots) = TenBots();
-            var inputs = new InputCmd[sim.TankCount];
-            void Tick()
-            {
-                for (int k = 0; k < bots.Length; k++) inputs[k] = bots[k].Command(sim, vision, sim.Tick + 1);
-                sim.Step(inputs);
-                vision.Update();
-            }
-            for (int i = 0; i < 300; i++) Tick();
+            BotArena arena = TenBots();
+            arena.Run(300);
             Allocation.Window window = Allocation.Start();
-            for (int i = 0; i < 300; i++) Tick();
+            arena.Run(300);   // the director, the bots' commands, the step, the vision and the rules
             return window.Stop();
         });
     }
 
-    /// <summary>Ten tanks of every kind on the first ten free-for-all spawns, each its own team, driven by skirmish bots.</summary>
-    internal static (Simulation Sim, VisionTracker Vision, SkirmishBot[] Bots) TenBots()
+    /// <summary>
+    /// A free-for-all on the riverland: ten tanks of every kind, each its own team, wandering between the map's waypoints
+    /// under the <see cref="BotDirector"/> (seeds 1–10); the arena keeps no events.
+    /// </summary>
+    internal static BotArena TenBots()
     {
-        var sim = new Simulation(MapCatalog.Riverland.NewBattlefield());
+        var arena = new BotArena(BattleMode.FreeForAll, MapCatalog.Riverland) { Recording = false };
         TankSpec[] kinds = { TankCatalog.Medium, TankCatalog.Heavy, TankCatalog.Light, TankCatalog.Td };
-        var bots = new SkirmishBot[10];
-        for (int k = 0; k < bots.Length; k++)
-        {
-            SpawnPoint spawn = RiverlandMap.Spawns.Solo[k];
-            int id = sim.AddTank(kinds[k % kinds.Length], spawn.Position, spawn.Yaw, team: (byte)k);
-            bots[k] = new SkirmishBot(id, RiverlandMap.Waypoints, seed: (uint)(k + 1));
-        }
-        return (sim, new VisionTracker(sim), bots);
+        for (int k = 0; k < 10; k++) arena.Bot(kinds[k % kinds.Length], team: 0, seed: (uint)(k + 1));   // a free-for-all: each its own team
+        return arena;
     }
 }

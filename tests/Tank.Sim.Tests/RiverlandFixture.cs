@@ -1,12 +1,13 @@
 using Tank.Sim.Maps;
 using Tank.Sim.Maps.Building;
 using Tank.Sim.Maps.Riverland;
+using Tank.Sim.Navigation;
 
 namespace Tank.Sim.Tests;
 
 /// <summary>
 /// The riverland from the map catalog, generated once for the whole test run and only read (a test that changes prop
-/// state uses <c>Field.Fresh()</c>), plus distance grids stamped from the layout's centre lines for the tests' own lookups.
+/// state uses <c>Field.Fresh()</c>) with its navigation grid, plus distance grids stamped from the layout's centre lines for the tests' own lookups.
 /// </summary>
 internal static class RiverlandFixture
 {
@@ -14,11 +15,15 @@ internal static class RiverlandFixture
     public const float GridReach = 160f;
 
     private static readonly Lazy<Battlefield> LazyField = new(MapCatalog.Riverland.NewBattlefield);
+    private static readonly Lazy<NavGrid> LazyGrid = new(MapCatalog.Riverland.NewNavGrid);
     private static readonly Lazy<DistanceGrid> LazyRiver = new(() => Stamp(new[] { RiverlandLayout.River }));
     private static readonly Lazy<DistanceGrid> LazyRoads = new(() => Stamp(RiverlandLayout.Roads.Select(r => r.Line).ToArray()));
     private static readonly Lazy<DistanceGrid> LazyTracks = new(() => Stamp(RiverlandLayout.Tracks.Select(r => r.Line).ToArray()));
 
     public static Battlefield Field => LazyField.Value;
+
+    /// <summary>The navigation grid of <see cref="Field"/> (<see cref="MapDefinition.NewNavGrid"/>), only read (a test that changes cells makes its own <c>Copy()</c>).</summary>
+    public static NavGrid Grid => LazyGrid.Value;
 
     /// <summary>Distance to the river's centre line, per height-field sample.</summary>
     public static DistanceGrid River => LazyRiver.Value;

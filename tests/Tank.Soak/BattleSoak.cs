@@ -9,7 +9,8 @@ namespace Tank.Soak;
 /// <summary>
 /// Battle soak (stage 4 design §6): one battle server, 4 scripted clients and 4 bots on a deterministic simulated
 /// network under several link qualities, a minute each. Prints the design's acceptance numbers — downstream under
-/// 20 KB/s for each client throughout, corrections small, nobody dropped, the server tick within budget — and returns
+/// 20 KB/s for each client throughout, corrections small (and how many came with another tank within 10 m, a shove most
+/// likely, and how many without), nobody dropped, the server tick within budget — and returns
 /// false if any is violated. The client must also be seen to work: it has its tank at the end, takes at least
 /// <see cref="MinSnapshotsPerSecond"/> snapshots a second, and on the wired link drops no packet and never asks for a resync.
 /// </summary>
@@ -31,6 +32,9 @@ public static class BattleSoak
     /// <summary>Tick timings from the first seconds are dominated by JIT/tiered compilation, not by the game.</summary>
     private const double TimingWarmupSeconds = 2.5;
 
+    /// <summary>A correction counts as "near" with another tank this close to the client's on the server, m (a shove, most likely).</summary>
+    private const float NearM = 10f;
+
     public static bool Run(double tickBudgetMs)
     {
         var scenarios = new[]
@@ -44,7 +48,7 @@ public static class BattleSoak
         Run(scenarios[0] with { Name = "(warm-up)" }, tickBudgetMs, seconds: 8, report: false);
 
         Console.WriteLine($"battle: {Clients} clients + {Bots} bots, team battle, {MatchSeconds:F0} s each; every client's down < {DownBudgetKBps} KB/s in every second after the first {JoinBurstSeconds:F0}, snap/s >= {MinSnapshotsPerSecond}, tick p99 < {tickBudgetMs} ms");
-        Console.WriteLine($"{"scenario",-26}{"corr/min",10}{"mean m",8}{"max m",8}{"down max KB/s",15}{"up KB/s",9}{"snap/s min",11}{"snap B",8}{"interp ms",10}{"tick p50/p99 ms",17}{"kills",7}{"left",6}{"bad pkts",9}{"resyncs",8}  result");
+        Console.WriteLine($"{"scenario",-26}{"corr/min",10}{"near/apart",12}{"mean m",8}{"max m",8}{"down max KB/s",15}{"up KB/s",9}{"snap/s min",11}{"snap B",8}{"interp ms",10}{"tick p50/p99 ms",17}{"kills",7}{"left",6}{"bad pkts",9}{"resyncs",8}  result");
         bool ok = true;
         foreach (Scenario s in scenarios) ok &= Run(s, tickBudgetMs);
         return ok;
@@ -62,6 +66,8 @@ public static class BattleSoak
         double serverAccumulator = 0;
         bool started = false;
         double nextSample = 0, maxDown = 0;   // maxDown: the largest downstream any client had in any sampled second, B/s
+        var seen = new int[Clients];          // each client's corrections so far
+        int near = 0, apart = 0;              // the corrections made with another tank within NearM of the client's, and without
         int frames = (int)((seconds + 1) / FrameDt);
         for (int f = 0; f < frames; f++)
         {
@@ -75,6 +81,14 @@ public static class BattleSoak
                 serverAccumulator -= ServerDt;
             }
             for (int i = 0; i < clients.Count; i++) clients[i].Update(FrameDt, Drive(i, net.Now));
+            for (int i = 0; i < clients.Count; i++)
+            {
+                int now = clients[i].Stats.Corrections;
+                if (now == seen[i]) continue;
+                if (NearAnother(server, clients[i])) near += now - seen[i];
+                else apart += now - seen[i];
+                seen[i] = now;
+            }
 
             // The host starts once everyone is in the room; a team battle lasts longer than the soak, so no restarts.
             if (!started && net.Now > 0.5 && f % 30 == 0 && clients.All(c => c.Phase == BattlePhase.Room))
@@ -111,8 +125,21 @@ public static class BattleSoak
         bool pass = started && server.MatchRunning && dropped == 0 && allHaveTanks && minSnapshots >= MinSnapshotsPerSecond
             && max <= scenario.MaxCorrectionM && down < DownBudgetKBps && p99 < tickBudgetMs
             && (!scenario.Clean || (badPackets == 0 && resyncs == 0));
-        Console.WriteLine($"{scenario.Name,-26}{perMinute,10:F1}{mean,8:F3}{max,8:F2}{down,15:F1}{up,9:F1}{minSnapshots,11:F0}{snapBytes,8}{interp,10:F1}{$"{p50:F3}/{p99:F3}",17}{kills,7}{dropped,6}{badPackets,9}{resyncs,8}  {(pass ? "PASS" : "FAIL")}");
+        double perMinuteOf(int n) => n / (double)Clients / (seconds / 60);
+        Console.WriteLine($"{scenario.Name,-26}{perMinute,10:F1}{$"{perMinuteOf(near):F1}/{perMinuteOf(apart):F1}",12}{mean,8:F3}{max,8:F2}{down,15:F1}{up,9:F1}{minSnapshots,11:F0}{snapBytes,8}{interp,10:F1}{$"{p50:F3}/{p99:F3}",17}{kills,7}{dropped,6}{badPackets,9}{resyncs,8}  {(pass ? "PASS" : "FAIL")}");
         return pass;
+    }
+
+    /// <summary>Whether another tank is within <see cref="NearM"/> of <paramref name="client"/>'s on the server (false out of a match).</summary>
+    private static bool NearAnother(BattleServer server, BattleClient client)
+    {
+        if (server.Simulation is not { } sim || server.Rules is not { } rules) return false;
+        int slot = sim.SlotOf(rules.Of(client.Slot).TankId);
+        if (slot < 0) return false;
+        System.Numerics.Vector2 at = sim.Tanks[slot].Position;
+        for (int k = 0; k < sim.TankCount; k++)
+            if (k != slot && System.Numerics.Vector2.Distance(sim.Tanks[k].Position, at) < NearM) return true;
+        return false;
     }
 
     /// <summary>Drive about, turn often, swing the turret and shoot a lot: a worst-case-ish human.</summary>

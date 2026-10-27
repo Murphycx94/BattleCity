@@ -63,6 +63,27 @@ public static class RiverlandMap
         new(1, new Vector2(1024, 852), TeamBase.StandardRadius),
     };
 
+    /// <summary>
+    /// The bots' attack lanes and cover points (stage 5 design §4.2), found with the riverland probe's <c>nav</c> command
+    /// and checked by MapBotDataTests on the navigation grid. After <see cref="Bases"/>: static initialisers run in order.
+    /// Lanes, from team 0's side (team 1 drives them backwards): <c>north</c> along the south edge of the central forest,
+    /// fording the deep river at z ≈ 410, along the north road and through the east forest down onto team 1's base from
+    /// the north (the flank: 289 m off the line between the bases); <c>town</c> along the east-west road, over the town's
+    /// ford and out of town to the south-east; <c>south</c> past the lake's east shore, farm 1 and south-west of farm 4,
+    /// over the ford of the southern dune track at (855, 1000) and up the dunes from the south-west. Cover points 34–70 m
+    /// from the own base's centre on the side the lanes come from, flat dry grass at least 20 m apart, picked for the
+    /// bushes beside them, the rocks in front or a tree's crown overhead.
+    /// </summary>
+    public static readonly BotMapData Bots = new(
+        new BotLane[]
+        {
+            new("north", new Vector2[] { new(330, 450), new(560, 410), new(800, 410), new(960, 520), new(1040, 700) }),
+            new("town", new Vector2[] { new(330, 530), new(500, 548), new(670, 556), new(860, 600), new(930, 700) }),
+            new("south", new Vector2[] { new(300, 620), new(470, 720), new(630, 910), new(855, 1000), new(930, 950) }),
+        },
+        new Vector2[] { new(182, 422), new(182, 442), new(218, 386), new(214, 430) },
+        new Vector2[] { new(990, 798), new(1018, 786), new(1002, 826), new(966, 822) });
+
     /// <summary>Forty points on open ground for the bots to drive between, at least 137 m apart, 8 to 12 in each quarter of the map.</summary>
     public static readonly IReadOnlyList<Vector2> Waypoints = new Vector2[]
     {

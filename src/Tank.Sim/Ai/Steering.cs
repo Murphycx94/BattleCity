@@ -7,7 +7,7 @@ namespace Tank.Sim.Ai;
 /// <summary>
 /// How a driver gets a tank to a point: steer toward it (turning on the spot when it lies more than
 /// <see cref="TurnInPlace"/> off the heading), and brake in time to stop on it when asked to. Shared by the
-/// <see cref="PatrolDriver"/> and the <see cref="SkirmishBot"/>.
+/// <see cref="PatrolDriver"/> and the <see cref="Bot"/>.
 /// </summary>
 public static class Steering
 {

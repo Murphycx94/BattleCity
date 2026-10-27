@@ -1,4 +1,5 @@
 using Tank.Net.Protocol;
+using Tank.Sim.Ai;
 using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
@@ -187,7 +188,7 @@ public sealed partial class BattleServer
             if (s.Team == 0) a++;
             else b++;
         }
-        return (byte)(b < a ? 1 : 0);
+        return BotSeating.ThinnerTeam(a, b);
     }
 
     private void BroadcastRoom()

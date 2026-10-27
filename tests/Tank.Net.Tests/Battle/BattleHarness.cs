@@ -22,6 +22,12 @@ internal sealed class BattleHarness
     public List<BattleClient> Clients { get; } = new();
     public List<LoopbackClientTransport> Links { get; } = new();
 
+    /// <summary>When set, each <see cref="BattleServer.Tick"/> that <see cref="Run"/> makes is timed into it, ms.</summary>
+    public List<double>? TickTimes { get; set; }
+
+    /// <summary>When set, called after each <see cref="BattleServer.Tick"/> that <see cref="Run"/> makes (outside <see cref="TickTimes"/>).</summary>
+    public Action<BattleServer>? AfterServerTick { get; set; }
+
     public BattleClient AddClient(string name, LinkConditions? up = null, LinkConditions? down = null, uint token = 0, int version = BattleProtocol.Version)
     {
         LoopbackClientTransport link = Net.Connect(up, down);
@@ -40,7 +46,10 @@ internal sealed class BattleHarness
             _serverAccumulator += frameDt;
             while (_serverAccumulator >= ServerDt - 1e-9)
             {
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
                 Server.Tick();
+                TickTimes?.Add(System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                AfterServerTick?.Invoke(Server);
                 _serverAccumulator -= ServerDt;
             }
             for (int i = 0; i < Clients.Count; i++)

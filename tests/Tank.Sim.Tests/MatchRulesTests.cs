@@ -2,6 +2,7 @@ using System.Numerics;
 using Tank.Sim.Ai;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
@@ -465,24 +466,25 @@ public sealed class MatchRulesTests
     {
         Allocation.AssertNone(() =>
         {
-            var sim = new Simulation(TestWorld.FlatField());
+            var sim = new Simulation(BotField.NewBattlefield());
             var rules = new MatchRules(mode, sim, Layout, bases: Bases);
             var vision = new VisionTracker(sim);
-            var bots = new List<SkirmishBot>();
-            var waypoints = new Vector2[] { new(40, 40), new(160, 160), new(40, 160), new(160, 40) };
+            var director = new BotDirector(sim, vision, rules, BotField, BotField.NewNavGrid());
             for (byte slot = 0; slot < 6; slot++)
             {
                 int id = rules.Join(slot, TankCatalog.Medium, (byte)(slot % 2));
-                bots.Add(new SkirmishBot(id, waypoints, seed: (uint)(slot + 1)));
+                if (slot != 3) director.Add(id, seed: (uint)(slot + 1));   // the bots are seated once, at the start; slot 3 is a player's, idle
             }
+            director.AssignRoles();
             var inputs = new InputCmd[Simulation.MaxTanks];
             void Tick()
             {
+                director.Update();
                 int tick = sim.Tick + 1;
                 for (int k = 0; k < sim.TankCount; k++)
                 {
                     int id = sim.Tanks[k].Id;
-                    inputs[k] = BattleInputBufferLike(bots, id, sim, vision, tick);
+                    inputs[k] = director.Find(id) is not null ? director.Command(id, tick) : new InputCmd(tick, 0, 0, 0f, 0f, false);
                 }
                 sim.Step(inputs.AsSpan(0, sim.TankCount));
                 vision.Update();
@@ -493,7 +495,7 @@ public sealed class MatchRulesTests
             for (int i = 0; i < 5 * Tps; i++)
             {
                 if (i == Tps) rules.Leave(3);                              // one goes …
-                if (i == 2 * Tps && rules.AcceptsJoins) rules.Join(3, TankCatalog.Light, 1);   // … and another takes the seat (its bot is gone: it idles)
+                if (i == 2 * Tps && rules.AcceptsJoins) rules.Join(3, TankCatalog.Light, 1);   // … and another takes the seat (a player's: it idles)
                 Tick();
             }
             Allocation.Measured measured = window.Stop();
@@ -502,6 +504,10 @@ public sealed class MatchRulesTests
             return measured;
         });
     }
+
+    /// <summary>The flat field with <see cref="Layout"/>, <see cref="Bases"/> and four waypoints, for bots (its battlefield and grid built once).</summary>
+    private static readonly MapDefinition BotField = new("flat", "flat", () => TestWorld.FlatField(), Layout,
+        new Vector2[] { new(40, 40), new(160, 160), new(40, 160), new(160, 40) }, Bases);
 
     [Fact]
     public void A_configured_duration_sets_the_clock_and_a_match_started_on_a_later_tick_counts_from_there()
@@ -542,12 +548,5 @@ public sealed class MatchRulesTests
     {
         var sim = new Simulation(TestWorld.FlatField());
         Assert.Throws<ArgumentOutOfRangeException>(() => new MatchRules(BattleMode.TeamBattle, sim, Layout, durationTicks: ticks));
-    }
-
-    private static InputCmd BattleInputBufferLike(List<SkirmishBot> bots, int id, Simulation sim, VisionTracker vision, int tick)
-    {
-        for (int i = 0; i < bots.Count; i++)
-            if (bots[i].TankId == id) return bots[i].Command(sim, vision, tick);
-        return new InputCmd(tick, 0, 0, 0f, 0f, false);
     }
 }

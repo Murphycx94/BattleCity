@@ -158,6 +158,19 @@ public sealed class ServerMapTests
     // ---- encoded once ----
 
     [Fact]
+    public void Preparing_a_map_builds_the_bots_navigation_grid()
+    {
+        // The tick thread only copies the grid at a match start (about 20–40 ms to build on the riverland in Release).
+        MapDefinition map = TestMaps.Small("small");
+        Assert.False(map.IsNavGridReady);
+
+        var rig = new Rig(TestMaps.Options(map));
+
+        Assert.True(rig.Server.RoomMapReady);
+        Assert.True(map.IsNavGridReady);
+    }
+
+    [Fact]
     public void The_map_is_encoded_once_however_many_join()
     {
         var rig = new Rig(TestMaps.Options(TestMaps.Small("small")) with { Bots = 1 });
