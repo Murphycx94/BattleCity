@@ -1,11 +1,21 @@
+using System.Numerics;
+using Tank.Client.Minimap;
 using Tank.Net.Battle;
 using Tank.Sim;
+using Tank.Sim.Geometry;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Client.Match;
 
-/// <summary>One screen of the HUD gallery: the frame, the kills already on the feed, whether the F3 panel is open and whether Tab is "held".</summary>
-public sealed record HudDemo(string Name, MatchHudFrame Frame, FeedLine[] Kills, bool NetPanelOpen, bool ScoreboardOpen = false);
+/// <summary>
+/// One screen of the HUD gallery: the frame, the kills already on the feed, whether the F3 panel is open, whether Tab is
+/// "held", and the map's icons over a map from the catalog (null: no map on the screen).
+/// </summary>
+public sealed record HudDemo(string Name, MatchHudFrame Frame, FeedLine[] Kills, bool NetPanelOpen, bool ScoreboardOpen = false, MinimapDemo? Minimap = null);
+
+/// <summary>The gallery's map: the catalog map <paramref name="MapId"/>'s ground under <paramref name="Frame"/>'s icons, the corner map or the full one.</summary>
+public sealed record MinimapDemo(string MapId, MinimapFrame Frame, bool FullOpen);
 
 /// <summary>
 /// Canned HUD frames for <c>--hud-demo NAME</c> (blueprint §2.1): every state the match HUD can show, from fixed data, so
@@ -17,7 +27,7 @@ public static class HudDemoFrames
     private const string LongName = "Sergeant_Wolfgang_Becker";   // as long as a name gets on the wire: 24 ASCII bytes
     private static readonly string[] Roster = { "阿成", "小林", "老周", "小雨", "机器人 1", "机器人 2", "机器人 3", "机器人 4", "机器人 5", "机器人 6" };
 
-    private static readonly string[] AllNames = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture" };
+    private static readonly string[] AllNames = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture", "minimap", "map-full" };
 
     /// <summary>The gallery's screen names, in a fixed order.</summary>
     public static IReadOnlyList<string> Names => AllNames;
@@ -42,6 +52,8 @@ public static class HudDemoFrames
             "results-ffa" => ResultsSolo(),
             "standard" => Standard(),
             "capture" => CaptureWin(),
+            "minimap" => MapScreen("minimap", fullOpen: false),
+            "map-full" => MapScreen("map-full", fullOpen: true),
             _ => null!,
         };
         return demo is not null;
@@ -177,6 +189,40 @@ public static class HudDemoFrames
         for (int i = 0; i < capture.Length; i++) players[i].Capture = (byte)capture[i];
         var info = new ResultsInfo(0, MatchRules.NoSlot, 6 * SimConstants.TickRate, true, MatchEndReason.Captured);
         return Make("capture", Ended(BattleMode.Standard, players, 6, 0, 0, info, progress0: 12, progress1: BaseCapture.PointsToWin));
+    }
+
+    /// <summary>
+    /// The standard screen with the riverland map, as the corner map or the full one. The player's arrow stands 120 m out
+    /// of the own (west) base towards the enemy's and points at it, the camera turned 0.4 rad to the right of the hull;
+    /// both bases carry the standard screen's points (37 taken of ours, 62 of theirs). Four teammates, one of each shape
+    /// and one of them a wreck, hold the west; three enemies, one a wreck, are about the middle of the map. Every point is
+    /// on the map's lanes and cover points (<see cref="RiverlandMap.Bots"/>), well inside the playable square.
+    /// </summary>
+    private static HudDemo MapScreen(string name, bool fullOpen) =>
+        Standard() with { Name = name, Minimap = new MinimapDemo(RiverlandMap.Id, RiverlandFrame(), fullOpen) };
+
+    private const float EyeOutOfBase = 120f, EyeCameraTurn = 0.4f, EyeHalfFov = 0.9f;
+
+    private static MinimapFrame RiverlandFrame()
+    {
+        var frame = new MinimapFrame();
+        TeamBase own = RiverlandMap.Bases[0], enemy = RiverlandMap.Bases[1];
+        frame.AddBase(new MinimapBase(own.Centre, own.Radius, Own: true, Points: 37));
+        frame.AddBase(new MinimapBase(enemy.Centre, enemy.Radius, Own: false, Points: 62));
+
+        // Every shape shows standing at least once: the wrecks are a teammate's medium and an enemy's light.
+        frame.AddTank(new MinimapTank(new Vector2(330, 450), Side.Ally, MinimapShape.Light, Destroyed: false));
+        frame.AddTank(new MinimapTank(new Vector2(330, 530), Side.Ally, MinimapShape.Td, Destroyed: false));
+        frame.AddTank(new MinimapTank(new Vector2(300, 620), Side.Ally, MinimapShape.Heavy, Destroyed: false));
+        frame.AddTank(new MinimapTank(new Vector2(214, 430), Side.Ally, MinimapShape.Medium, Destroyed: true));
+        frame.AddTank(new MinimapTank(new Vector2(560, 410), Side.Enemy, MinimapShape.Medium, Destroyed: false));
+        frame.AddTank(new MinimapTank(new Vector2(670, 556), Side.Enemy, MinimapShape.Heavy, Destroyed: false));
+        frame.AddTank(new MinimapTank(new Vector2(564, 624), Side.Enemy, MinimapShape.Light, Destroyed: true));
+
+        Vector2 towards = Vector2.Normalize(enemy.Centre - own.Centre);
+        float yaw = Angles.YawOf(towards);
+        frame.Eye = new MinimapEye(EyeKind.Arrow, own.Centre + towards * EyeOutOfBase, yaw, Angles.Wrap(yaw - EyeCameraTurn), EyeHalfFov);
+        return frame;
     }
 
     /// <summary>The match over: the plate and the results banner for <paramref name="info"/>, the clock at 0.</summary>

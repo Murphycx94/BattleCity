@@ -178,4 +178,45 @@ public class ShotPlanTests
         Assert.False(plan.TakeScreenshot(3.9));
         Assert.True(plan.TakeScreenshot(4.0));
     }
+
+    [Fact]
+    public void A_due_screenshot_waits_for_the_map_and_is_taken_the_frame_it_is_ready()
+    {
+        ShotPlan plan = Sandbox("--screenshot", "s.png", "--screenshot-at", "6", "--quit-after", "8");
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(5.9, mapReady: false));
+        Assert.False(plan.HoldingForMap);                                          // not due yet: nothing held
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(6.0, mapReady: false));
+        Assert.True(plan.HoldingForMap);
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(9.0, mapReady: false));
+        Assert.False(plan.QuitDue(9.0));                                           // the quit waits with it
+        Assert.Equal(ShotCall.Take, plan.TakeScreenshot(9.5, mapReady: true));
+        Assert.False(plan.HoldingForMap);
+        Assert.True(plan.QuitDue(9.5));
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(10, mapReady: true));     // taken once
+    }
+
+    [Fact]
+    public void A_held_screenshot_is_taken_anyway_once_the_wait_runs_out()
+    {
+        ShotPlan plan = Match("--screenshot", "s.png", "--shot-after", "death:2", "--quit-after", "10");
+        plan.OnMoment(ShotMoment.Death, 3);
+        double due = 3 + 2;
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(due + ShotPlan.MapWaitSeconds - 0.01, mapReady: false));
+        Assert.False(plan.QuitDue(due + ShotPlan.MapWaitSeconds - 0.01));
+        Assert.Equal(ShotCall.TakeWithoutMap, plan.TakeScreenshot(due + ShotPlan.MapWaitSeconds, mapReady: false));
+        Assert.False(plan.HoldingForMap);
+        Assert.True(plan.QuitDue(due + ShotPlan.MapWaitSeconds));
+        Assert.Equal(20, ShotPlan.MapWaitSeconds);
+    }
+
+    [Fact]
+    public void A_spent_screenshot_holds_nothing_and_the_plain_call_never_waits()
+    {
+        ShotPlan taken = Sandbox("--screenshot-at", "1", "--quit-after", "4");
+        taken.MarkScreenshotTaken();
+        Assert.Equal(ShotCall.None, taken.TakeScreenshot(5, mapReady: false));
+        Assert.False(taken.HoldingForMap);                                       // spent elsewhere: no wait
+        Assert.True(taken.QuitDue(5));
+        Assert.True(Sandbox("--screenshot-at", "1").TakeScreenshot(1));         // the plain call: as before, no map to wait for
+    }
 }

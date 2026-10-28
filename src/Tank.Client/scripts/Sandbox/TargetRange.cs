@@ -1,6 +1,7 @@
 using Godot;
 using Tank.Client.Art;
 using Tank.Client.Combat;
+using Tank.Client.Minimap;
 using Tank.Client.Vehicles;
 using Tank.Client.World;
 using Tank.Sim;
@@ -10,6 +11,7 @@ using Tank.Sim.Maps;
 using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
+using Side = Tank.Client.Match.Side;   // not Godot.Side
 using SN = System.Numerics;
 
 namespace Tank.Client.Sandbox;
@@ -23,7 +25,8 @@ namespace Tank.Client.Sandbox;
 /// blows up, throws its turret (a tank destroyer has none), chars and smokes; ten seconds later it is revived where it
 /// stands (the patrol then drives on).
 /// A target the player's team doesn't see (<see cref="VisionTracker"/>) isn't drawn. Each <see cref="Sync"/> also notes
-/// every target's head point, health and whether it is shown, for the HUD.
+/// every target's head point, health and whether it is shown, for the HUD, and where it is drawn, for the map
+/// (<see cref="FillMinimap"/>).
 /// </summary>
 public partial class TargetRange : Node3D
 {
@@ -44,6 +47,7 @@ public partial class TargetRange : Node3D
         public required float Yaw;  // the heading it was placed with: a still target's gun stays straight ahead
         public required TankActor Actor;   // the patrol's alone kicks up dust
         public TankState Previous, Current;   // the last two ticks, drawn between
+        public SN.Vector2 Drawn;   // where the last Sync drew it (x, z), for the map
         public int WreckedTick = -1;
         public float Health = 1f;   // share left, 0 … 1
         public bool Alive = true;
@@ -85,7 +89,7 @@ public partial class TargetRange : Node3D
         var actor = new TankActor();
         AddChild(actor);
         actor.Build(spec, Paint, dust);
-        var target = new Target { Id = id, Slot = slot, Yaw = yaw, Actor = actor, Previous = sim.Tanks[slot], Current = sim.Tanks[slot] };
+        var target = new Target { Id = id, Slot = slot, Yaw = yaw, Actor = actor, Previous = sim.Tanks[slot], Current = sim.Tanks[slot], Drawn = sim.Tanks[slot].Position };
         actor.Present(target.Current, Observe(target, target.Current, sim.Field.Terrain), 0f, 0f, shown: true);   // heads are known before the first Sync
         _targets.Add(target);
         return target;
@@ -177,11 +181,26 @@ public partial class TargetRange : Node3D
         foreach (Target target in _targets)
         {
             TankState state = TankInterpolation.Between(target.Previous, target.Current, alpha);
+            target.Drawn = state.Position;
             bool shown = _vision.IsVisible(target.Id, PlayerTeam);
             target.Shown = shown;
             TankPose pose = Observe(target, state, sim.Field.Terrain);
             float yawRate = Angles.Wrap(target.Current.Yaw - target.Previous.Yaw) / SimConstants.Dt;
             target.Actor.Present(state, pose, yawRate, delta, shown);   // a hidden patrol leaves no trail, to pop in when it shows
+        }
+    }
+
+    /// <summary>
+    /// The map's icons for the targets (stage 5 design §5): every one the player's team sees (not <see cref="IsHidden"/>),
+    /// as an enemy of its kind, where the last <see cref="Sync"/> drew it, a wreck while knocked out. Call after
+    /// <see cref="Sync"/>; allocates nothing.
+    /// </summary>
+    public void FillMinimap(MinimapFrame frame)
+    {
+        foreach (Target target in _targets)
+        {
+            if (!_vision.IsVisible(target.Id, PlayerTeam)) continue;   // IsHidden, without the lookup
+            frame.AddTank(new MinimapTank(target.Drawn, Side.Enemy, MinimapFeed.ShapeOf(target.Current.Spec), Destroyed: !target.Alive));
         }
     }
 

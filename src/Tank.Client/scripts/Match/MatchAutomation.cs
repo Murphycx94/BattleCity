@@ -13,8 +13,9 @@ namespace Tank.Client.Match;
 /// drives loops, firing whenever the gun is roughly level), and the shared capture pieces — the timetable is a
 /// <see cref="ShotPlan"/> (<c>--screenshot-at</c> counts from the match scene's creation, <c>--shot-after</c> waits for
 /// <c>fire|hit|kill|death|ended</c>, <c>--quit-after</c> quits) and a <see cref="CaptureRun"/> executes it, with
-/// <c>--fps-log</c>'s once-a-second line; a screenshot Main or an earlier match already took is not taken again. Any
-/// of these makes the run ignore the mouse and keyboard. The moments come
+/// <c>--fps-log</c>'s once-a-second line (a screenshot due while the map is still baking waits for its picture), and <c>--full-map</c> (the full-screen map opened once the scene is up); a
+/// screenshot Main or an earlier match already took is not taken again. Any of these makes the run ignore the mouse and
+/// keyboard. The moments come
 /// from the scene: the server's events (<see cref="OnEvent"/>), the predicted own shot (<see cref="NotifyFired"/>: an
 /// own shot never reaches the event queue), the own wreck state (<see cref="NotifyDeath"/>, which beats the late
 /// destroy event) and the results screen (<see cref="NotifyEnded"/>). Times are the match clock — wall seconds, or the
@@ -32,6 +33,7 @@ public sealed class MatchAutomation
     private readonly MapSite _site;
     private readonly ShotPlan _plan;
     private CaptureRun? _capture;   // built in Start: the fps log needs the host's viewport, so the host must be in the tree
+    private bool _fullMapPending;   // --full-map: not yet opened
 
     /// <param name="screenshotTaken">The run's screenshot is already taken (by Main in the room, or by an earlier match): none here.</param>
     /// <param name="site">The match's map site, whose presets <c>--camera-preset</c> may name; null for the sandbox's.</param>
@@ -42,6 +44,7 @@ public sealed class MatchAutomation
         _plan = ShotPlan.ForMatch(options);
         if (screenshotTaken) _plan.MarkScreenshotTaken();
         HasPreset = CameraPresets.IsKnownFor(options.CameraPreset, _site);
+        _fullMapPending = options.FullMap;
     }
 
     /// <summary>A <c>--camera-preset</c> known on the match's map is on: the camera is fixed and the tank stands still.</summary>
@@ -99,6 +102,20 @@ public sealed class MatchAutomation
     public (float Yaw, float Pitch)? CameraAngles(float tankYaw) =>
         _options.AutoDrive ? (tankYaw + AutoCameraYaw, AutoCameraPitch) : null;
 
-    /// <summary>Call once per frame, last: logs render costs, takes the screenshot when due and quits when time is up.</summary>
-    public void EndFrame(double delta, double time) => _capture?.EndFrame(delta, time);
+    /// <summary><c>--full-map</c>: true once, the first frame the scene shows its map, for the scene to open the full one.</summary>
+    public bool TakeFullMap()
+    {
+        if (!_fullMapPending) return false;
+        _fullMapPending = false;
+        return true;
+    }
+
+    /// <summary>Whether a due screenshot is held for the map's picture: Main's quit, on the process clock, waits for it.</summary>
+    public bool HoldingScreenshot => _capture is { HoldingScreenshot: true };
+
+    /// <summary>
+    /// Call once per frame, last: logs render costs, takes the screenshot when due — held while <paramref name="mapReady"/>
+    /// is false (the map still baking), up to <see cref="ShotPlan.MapWaitSeconds"/> — and quits when time is up.
+    /// </summary>
+    public void EndFrame(double delta, double time, bool mapReady) => _capture?.EndFrame(delta, time, mapReady);
 }

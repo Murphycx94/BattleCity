@@ -54,6 +54,7 @@ public partial class BattleWorld : Node3D
         AddChild(terrain);
         // A map with ground kinds or water brings its own ground; the sandbox's grass islands come from the style.
         DirtMask dirt = DirtMask.FromField(field) ?? new DirtMask(field.Terrain.SizeX, field.Terrain.SizeZ, style.GrassIslands, style.Seed);
+        GroundMask = dirt;
         terrain.Build(field.Terrain, dirt, field.WaterLevel);
         var rocks = new RockMeshes();
         AddChild(rocks);
@@ -94,6 +95,12 @@ public partial class BattleWorld : Node3D
         _treeLine.SetFarView(true);
         _forest.SetFarView(true);
     }
+
+    /// <summary>
+    /// The bare-ground mask the terrain and the grass were built with (<see cref="Build"/>), for the minimap's ground; null
+    /// before <see cref="Build"/>. Read-only: the scenery shares it.
+    /// </summary>
+    public DirtMask? GroundMask { get; private set; }
 
     /// <summary>The map's forests the trees were sorted into conifers and broadleaves by (<see cref="TreeFit.ForestsOf"/>), for the effects.</summary>
     public IReadOnlyList<TreeFit.ConiferRegion> Forests => _forests;

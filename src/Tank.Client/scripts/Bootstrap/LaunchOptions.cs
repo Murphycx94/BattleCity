@@ -22,6 +22,7 @@ namespace Tank.Client.Bootstrap;
 /// --shot-after fire|hit|kill|prop|down|death|ended:SECONDS（玩家第一次开炮、第一次命中坦克、第一次击毁坦克、第一次有墙受伤（prop，仅试驾场）、第一次有物件被毁（down，仅试驾场）、
 /// 自己的坦克第一次被击毁（death，仅对局）或对局结算开始（ended，仅对局）后再过 SECONDS 秒截图）
 /// --tank light|medium|heavy|td（开局的车型：试驾场里默认中坦；房间里则在连上后自动选这辆）  --spot-debug（试驾场：一开始就显示点亮调试文字，同 V 键）
+/// --full-map（进场后打开全屏地图，截图用）
 /// A plain parser, free of the engine: values it can't read fall back to defaults and are listed in <see cref="Warnings"/>
 /// for the caller to report, and so are a switch it doesn't know and a switch that needs a value but is followed by
 /// another switch (or by nothing), which is then left as it was. This is the only place the client reads its arguments.
@@ -75,6 +76,9 @@ public sealed record LaunchOptions
     public double? FxShotDelay { get; init; }
     public bool Sniper { get; init; }
     public bool SpotDebug { get; init; }
+
+    /// <summary>Open the full-screen map once the scene is up (<c>--full-map</c>), for screenshots.</summary>
+    public bool FullMap { get; init; }
     public string? RangeDemo { get; init; }
 
     /// <summary>"fire", "hit", "kill", "prop", "down", "death" or "ended" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
@@ -126,6 +130,7 @@ public sealed record LaunchOptions
                 "--fps-log" => o with { FpsLog = true },
                 "--sniper" => o with { Sniper = true },
                 "--spot-debug" => o with { SpotDebug = true },
+                "--full-map" => o with { FullMap = true },
                 "--fx-shot" => o with { FxShotDelay = Seconds("--fx-shot", Next(), 0.05, warnings) },
                 "--range-demo" => o with { RangeDemo = Next() },
                 "--shot-after" => ParseShotAfter(o, Next(), warnings),

@@ -1,5 +1,7 @@
 using Godot;
+using Tank.Client.Minimap;
 using Tank.Sim.Terrain;
+using SN = System.Numerics;
 
 namespace Tank.Client.Cameras;
 
@@ -76,6 +78,24 @@ public partial class OrbitCamera : Node3D
     }
 
     public void ToggleSniper() => Sniper = !Sniper;
+
+    /// <summary>
+    /// The camera's heading on the ground as it is drawn (<see cref="MinimapEyes.CameraYaw"/>): the orbit's yaw, or a
+    /// fixed preset's, which sets the camera itself; looking straight down, its screen's up.
+    /// </summary>
+    public float GroundHeading()
+    {
+        Basis basis = _camera.GlobalBasis;
+        Vector3 forward = -basis.Z, up = basis.Y;
+        return MinimapEyes.CameraYaw(new SN.Vector3(forward.X, forward.Y, forward.Z), new SN.Vector3(up.X, up.Y, up.Z));
+    }
+
+    /// <summary>The camera's horizontal half-angle, radians, for the viewport's visible rectangle: narrower through the scope.</summary>
+    public float HalfFov()
+    {
+        Vector2 size = GetViewport().GetVisibleRect().Size;
+        return MinimapEyes.HalfFov(_camera.Fov, size.Y > 0 ? size.X / size.Y : 1f);
+    }
 
     /// <param name="pivot">Hull origin the orbit circles.</param>
     /// <param name="sniperEye">Eye position in sniper mode, just above the gun.</param>

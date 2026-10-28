@@ -309,4 +309,15 @@ public class LaunchOptionsTests
             (options.Mode!.Value, options.Bots, options.Players, options.Seed!.Value, options.MatchSeconds!.Value, options.Tank, options.Port));
         Assert.Empty(options.Warnings);
     }
+
+    [Fact]
+    public void Full_map_opens_the_full_map_only_when_asked_for()
+    {
+        Assert.False(LaunchOptions.Parse(Array.Empty<string>()).FullMap);
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--host", "--full-map", "--map", "riverland" });
+        Assert.True(options.FullMap);
+        Assert.True(options.Host);
+        Assert.Equal("riverland", options.Map);
+        Assert.Empty(options.Warnings);
+    }
 }

@@ -20,7 +20,7 @@ public readonly record struct HudRect(float X, float Y, float Width, float Heigh
 /// <summary>Where every HUD block goes on one screen size.</summary>
 public readonly record struct HudBoxes(
     HudRect ScorePlate, HudRect ModeLabel, HudRect KillFeed, HudRect NetPanel, HudRect Banner, HudRect SpectateBar,
-    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable, HudRect CaptureBars)
+    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable, HudRect CaptureBars, HudRect Minimap, HudRect FullMap)
 {
     /// <summary>Row <paramref name="index"/> (0 = top) of the kill feed.</summary>
     public HudRect KillRow(int index) => new(KillFeed.X, KillFeed.Y + index * (HudLayout.KillRowHeight + HudLayout.KillRowGap), KillFeed.Width, HudLayout.KillRowHeight);
@@ -67,6 +67,18 @@ public static class HudLayout
     /// <summary>The status panel's room, its vehicle name above and the lamp included (see <c>StatusPanel</c>: 24 from the edges, 178 tall, about 360 wide).</summary>
     public const float StatusWidth = 360f, StatusHeight = 178f, StatusNameRoom = 36f;
 
+    /// <summary>The corner map (stage 5 design §5): a square this wide, <see cref="Margin"/> in from the right and bottom edges.</summary>
+    public const float MinimapSize = 240f;
+
+    /// <summary>
+    /// The full map: the largest square that leaves this much above and below (and at the sides), centred across. The
+    /// bottom margin is wider than <see cref="FullMapHintHeight"/>, so the hint's strip under the square stays on screen.
+    /// </summary>
+    public const float FullMapMargin = 64f;
+
+    /// <summary>The strip under the full map's square that holds "M / Esc 关闭": inside the bottom <see cref="FullMapMargin"/>.</summary>
+    public const float FullMapHintHeight = 28f;
+
     public static HudBoxes For(Vector2 size)
     {
         float cx = size.X / 2;
@@ -74,6 +86,7 @@ public static class HudLayout
         var label = new HudRect(plate.X, plate.Bottom + ModeLabelGap, PlateWidth, ModeLabelHeight);
         var results = new HudRect(cx - ResultsWidth / 2, ResultsTop, ResultsWidth, ResultsHeight);
         float feedHeight = KillRows * KillRowHeight + (KillRows - 1) * KillRowGap;
+        float fullSide = MathF.Max(0, MathF.Min(size.X, size.Y) - 2 * FullMapMargin);   // a window too small for the margins gets an empty square
         return new HudBoxes(
             plate,
             label,
@@ -85,6 +98,8 @@ public static class HudLayout
             new HudRect(Margin, size.Y - Margin - StatusHeight - StatusNameRoom, StatusWidth, StatusHeight + StatusNameRoom),
             results,
             new HudRect(cx - ScoreboardWidth / 2, results.Y + ResultsTableTop, ScoreboardWidth, ScoreboardHeight),
-            new HudRect(plate.X, CaptureTop, PlateWidth, CaptureRows * CaptureBarHeight + (CaptureRows - 1) * CaptureBarGap));
+            new HudRect(plate.X, CaptureTop, PlateWidth, CaptureRows * CaptureBarHeight + (CaptureRows - 1) * CaptureBarGap),
+            new HudRect(size.X - Margin - MinimapSize, size.Y - Margin - MinimapSize, MinimapSize, MinimapSize),
+            new HudRect(cx - fullSide / 2, FullMapMargin, fullSide, fullSide));
     }
 }

@@ -12,7 +12,9 @@ namespace Tank.Client.Sandbox;
 /// with --range-demo (lay the gun on a target and fire), --autodrive (drive loops, always firing) or a fixed
 /// --camera-preset (stand still); a range demo that fires once stops after the player's first shot. The timetable (the
 /// screenshot's moment and delay, the --fx-shot warm-up, --quit-after) is a <see cref="ShotPlan"/> and the screenshot,
-/// fps log and quit themselves a <see cref="CaptureRun"/>, both shared with the match.
+/// fps log and quit themselves a <see cref="CaptureRun"/>, both shared with the match (a screenshot due while the map is
+/// still baking waits for its picture); --full-map opens the full-screen
+/// map once the scene is up, as in a match.
 /// Moments and the delays after them are wall-clock seconds (the screenshot is of what is on screen); only a range
 /// demo's first shot is timed in simulation ticks (<see cref="RangeDemo.FireTick"/>), so the shot itself is repeatable.
 /// </summary>
@@ -30,6 +32,7 @@ public sealed class SandboxAutomation
     private readonly MapSite _site;
     private readonly ShotPlan _plan;
     private readonly CaptureRun _capture;
+    private bool _fullMapPending;   // --full-map: not yet opened
 
     /// <param name="host">The sandbox node: its viewport is captured and measured, its tree quit.</param>
     /// <param name="standStill">A fixed camera preset is on: nobody drives.</param>
@@ -40,6 +43,7 @@ public sealed class SandboxAutomation
         Demo = site.FindDemo(options.RangeDemo);
         _plan = ShotPlan.ForSandbox(options);
         _capture = new CaptureRun(options, host, _plan);
+        _fullMapPending = options.FullMap;
     }
 
     /// <summary>The scripted range demo, or null.</summary>
@@ -83,8 +87,23 @@ public sealed class SandboxAutomation
         return null;
     }
 
-    /// <summary>Call at the end of every frame: logs render costs, takes the screenshot when due and quits when time is up.</summary>
-    public void EndFrame(double delta, double time) => _capture.EndFrame(delta, time);
+    /// <summary><c>--full-map</c>: true once, the first frame the scene shows its map, for the scene to open the full one.</summary>
+    public bool TakeFullMap()
+    {
+        if (!_fullMapPending) return false;
+        _fullMapPending = false;
+        return true;
+    }
+
+    /// <summary>Whether a due screenshot is held for the map's picture: Main's quit (a sandbox under the menu) waits for it.</summary>
+    public bool HoldingScreenshot => _capture.HoldingScreenshot;
+
+    /// <summary>
+    /// Call at the end of every frame: logs render costs, takes the screenshot when due — held while
+    /// <paramref name="mapReady"/> is false (the map still baking), up to <see cref="ShotPlan.MapWaitSeconds"/> — and
+    /// quits when time is up (the quit waits for a held screenshot).
+    /// </summary>
+    public void EndFrame(double delta, double time, bool mapReady) => _capture.EndFrame(delta, time, mapReady);
 
     /// <summary>--autodrive: full throttle, steering right part of the time (so it drives loops), always firing.</summary>
     private static InputCmd AutoDrive(in InputCmd player, double time) => player with

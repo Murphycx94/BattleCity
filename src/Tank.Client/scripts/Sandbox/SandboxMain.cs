@@ -3,6 +3,7 @@ using Tank.Client.Bootstrap;
 using Tank.Client.Cameras;
 using Tank.Client.Combat;
 using Tank.Client.Driving;
+using Tank.Client.Minimap;
 using Tank.Client.UI;
 using Tank.Client.Vehicles;
 using Tank.Client.World;
@@ -21,13 +22,14 @@ namespace Tank.Client.Sandbox;
 /// (team 0); the practice targets (<see cref="TargetRange"/>, team 1, the patrolling one last) take the next slots. A
 /// <see cref="VisionTracker"/> works out after every step who sees whom: targets the player's team doesn't see aren't drawn.
 /// Keys: 1 AP, 2 HE, R restock, T restore the walls, fences and bushes, F1–F4 another tank (<c>TankCatalog.All</c> in
-/// order), V the spotting numbers over every target. Scenery, HUD and scripted runs live in <see cref="BattleWorld"/>,
-/// <see cref="SandboxHud"/> and <see cref="SandboxAutomation"/>.
+/// order), V the spotting numbers over every target, M the full-screen map (which Esc closes first). Scenery, HUD, the
+/// map and scripted runs live in <see cref="BattleWorld"/>, <see cref="SandboxHud"/>, <see cref="MinimapLayer"/> and
+/// <see cref="SandboxAutomation"/>.
 /// The map is the <see cref="MapSite"/> of <c>--map</c> (the sandbox map by default): its spawn, targets, patrol (if any)
 /// and camera presets.
 /// Launch: godot-mono --path src/Tank.Client res://scenes/Sandbox.tscn [-- --map sandbox|riverland --tank light|medium|heavy|td --autodrive
 /// --camera-preset front|side|hill|spin|orbit|bush|target|yard|gate|patrol|overview|town|ford|map|... --fps-log --sniper --spot-debug
-/// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp
+/// --full-map --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp
 /// --screenshot FILE --screenshot-at S --fx-shot S --shot-after fire|hit|kill|prop|down:S --quit-after S]
 /// </summary>
 public partial class SandboxMain : Node3D
@@ -40,6 +42,7 @@ public partial class SandboxMain : Node3D
     private const float GroundBurstHeight = 0.5f;   // a shell bursting higher than this over the ground hit a rock or a tank
 
     private readonly SandboxInput _input = new();
+    private readonly MinimapFrame _minimapFrame = new();   // the map's icons, filled again every frame
 
     /// <summary>Raised by a second Esc (the first lets go of the mouse); only the menu, which hosts the sandbox as a child, listens.</summary>
     public event Action? ExitRequested;
@@ -62,6 +65,7 @@ public partial class SandboxMain : Node3D
     private VisionTracker _vision = null!;
     private BattleFx _fx = null!;
     private SandboxHud _hud = null!;
+    private MinimapLayer _minimap = null!;
     private double _accumulator;
     private double _time;
     private float _aimYaw;
@@ -70,6 +74,9 @@ public partial class SandboxMain : Node3D
 
     /// <summary>Hands over Main's launch options, whose unreadable values Main has already reported; call before adding the node to the tree.</summary>
     public void Setup(LaunchOptions options) => _given = options;
+
+    /// <summary>Whether a due screenshot waits for the map's picture: Main's <c>--quit-after</c> waits with it.</summary>
+    public bool HoldingScreenshot => _automation is { HoldingScreenshot: true };
 
     public override void _Ready()
     {
@@ -102,6 +109,10 @@ public partial class SandboxMain : Node3D
         if (_options.Sniper) _camera.ToggleSniper();
         _hud = Add(new SandboxHud());
         _hud.Build(_camera, _targets, _sim.Field, _vision, _current.Id, _options.SpotDebug);
+        _minimap = Add(new MinimapLayer());   // after the HUD: on top of it in the same layer
+        // Baked on a worker thread with the scenery's own bare-ground mask; the corner shows an empty panel meanwhile.
+        Func<float, float, float> notGrassAt = _world.GroundMask is { } mask ? mask.At : (_, _) => 0f;
+        _minimap.Build(_sim.Field, notGrassAt, _site.Map.Name);
 
         _automation.ReportBadOptions(unreadOptions: _given is null);
         if (!_options.AutoDrive && !IgnoresInput) Input.MouseMode = Input.MouseModeEnum.Captured;
@@ -145,6 +156,20 @@ public partial class SandboxMain : Node3D
         }
         if (e.IsActionPressed(DriveInput.SniperToggle)) _camera.ToggleSniper();
         if (e.IsActionPressed(SandboxInput.SpotDebug)) _hud.ToggleSpotDebug();
+        // M opens and closes the full map; it neither takes nor lets go of the mouse.
+        if (e.IsActionPressed(DriveInput.MapToggle))
+        {
+            _minimap.ToggleFull();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        // Esc closes an open full map first, and that is all it does; otherwise the first lets go of the mouse, the second exits.
+        if (e.IsActionPressed(DriveInput.UiCancel) && _minimap.FullOpen)
+        {
+            _minimap.CloseFull();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (e.IsActionPressed(DriveInput.UiCancel))
         {
             if (captured) Input.MouseMode = Input.MouseModeEnum.Visible;
@@ -171,7 +196,8 @@ public partial class SandboxMain : Node3D
         _targets.Sync(_sim, alpha, (float)delta);
         _shells.Sync(_sim.Shells, alpha, (float)delta);
         _hud.Refresh(tank, _sim.Tick);
-        _automation.EndFrame(delta, _time);
+        ShowMinimap(tank);
+        _automation.EndFrame(delta, _time, mapReady: _minimap.HasPicture);   // a due screenshot waits for the map's picture
     }
 
     private void StepSimulation()
@@ -191,6 +217,23 @@ public partial class SandboxMain : Node3D
         foreach (GameEvent e in _sim.Events) OnEvent(e);
         _previous = _current;
         _current = _sim.Tanks[0];
+    }
+
+    /// <summary>
+    /// The map's icons for this frame (stage 5 design §5): the eye on the player's tank as drawn — an arrow along its hull,
+    /// a ring and the wreck's cross while it is knocked out (the test drive has no spectating) — with the fan along the
+    /// camera's view, and the targets the player's team sees (<see cref="TargetRange.FillMinimap"/>). No bases.
+    /// </summary>
+    private void ShowMinimap(in TankState tank)
+    {
+        MinimapFrame frame = _minimapFrame;
+        frame.Clear();
+        bool wreck = tank.IsDestroyed;
+        frame.Eye = new MinimapEye(wreck ? EyeKind.Ring : EyeKind.Arrow, tank.Position, wreck ? 0f : tank.Yaw, _camera.GroundHeading(), _camera.HalfFov());
+        frame.OwnWreck = wreck ? tank.Position : null;
+        _targets.FillMinimap(frame);
+        _minimap.Show(frame, _sim.Field);
+        if (_automation.TakeFullMap() && !_minimap.FullOpen) _minimap.ToggleFull();
     }
 
     /// <summary>Makes the player's tank <paramref name="spec"/> where it stands, with a fresh model and dust trail and AP selected.</summary>

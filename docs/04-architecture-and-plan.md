@@ -75,17 +75,18 @@ flowchart LR
 
 | 目录 | 内容 |
 |---|---|
-| `Bootstrap/` | `Main`：根节点和界面流程（菜单 → 连接中 → 房间 → 对局 → 房间，试驾场作为子节点挂上）；`LaunchOptions`：唯一读启动参数的地方；`CaptureRun` 和 `Logic/ShotPlan`：脚本化截图、帧时间日志、定时退出 |
+| `Bootstrap/` | `Main`：根节点和界面流程（菜单 → 连接中 → 房间 → 对局 → 房间，试驾场作为子节点挂上）；`LaunchOptions`：唯一读启动参数的地方；`CaptureRun` 和 `Logic/ShotPlan`：脚本化截图（场景的小地图还没有图时，到点的截图等它，最多 20 秒）、帧时间日志、定时退出 |
 | `Online/Logic/` | `BattleSession`（一个会话：客户端加可选的房主后端）、`ThreadedHost`（房主服务器线程）、`LoopbackHost`（`--loopback` 的虚拟网络）、`LanBrowser`（房间列表）、`Reconnector`（断线重连）、`SeatTokens`（按规整过的房间地址在内存里记住重连令牌，从菜单再进时带上）、`AutoRoom`（按启动参数自动操作房间）、`TickProbe`（量服务器 tick 耗时） |
 | `UI/` | `MenuScreen`（名字、开房间、试驾场、局域网列表、手填地址）、`RoomScreen`（模式、地图、机器人、车型、换队、准备、开局）、`UiKit`（按钮和文字样式）；`Logic/` 里是房间规则、名字截断和 `MapText`（地图名、窗口标题） |
-| `Match/` | `MatchMain`：对局场景，每帧驱动 `BattleClient` 并画出它知道的一切；`TankActors`（别人的车）、`MatchInput`、`MatchHud`、比分板、击毁提示、计分板、结算、暂停层、F3 面板、`CaptureBarsView`（标准战比分板下的占领进度条）、`HudGallery`（`--hud-demo`）；`Logic/` 里是布局、文字、阵营色、观战状态、计分板模型、进度条和它的报警（`CaptureBars`） |
-| `Sandbox/` | 试驾场：`SandboxMain`（本地跑 `Simulation`）、`TargetRange`（靶车）、`RangeDemo`（`--range-demo` 自动打靶）、`SandboxInput`、`SandboxHud`；`Logic/MapSites`（每张图的站点：出生点、靶车、有没有巡逻车、机位锚点和可用的机位、演示，对局的固定机位也从这里取）、`Logic/RiverlandDemos`（河谷的演示） |
-| `World/` | `BattleWorld`：天空、地形网格（32 × 32 格一块，河谷用层叠的地面图层）、`WaterSurface`（水面，只建在有水的格子上）、岩石、草丛、墙和栅栏、`ForestViews`（林中的树，按扇区的 `MultiMesh`，倒下动画）、`HouseViews`（房子、倒塌、废墟）、`BaseRings`（标准战地上的两个基地圈，带宽和实线在 `Logic/RingBand`）、地面小草、外围树林；物件状态变了才全量同步瓦砾、倒下的栅栏和没了的草丛；树和房子挡住自己的车时变半透明（`Logic/SeeThroughFades`） |
+| `Match/` | `MatchMain`：对局场景，每帧驱动 `BattleClient` 并画出它知道的一切；`TankActors`（别人的车）、`MatchInput`、`MatchHud`、比分板、击毁提示、计分板、结算、暂停层、F3 面板、`CaptureBarsView`（标准战比分板下的占领进度条）、`HudGallery`（`--hud-demo`；`minimap`、`map-full` 两屏带河谷的小地图）；`Logic/` 里是布局、文字、阵营色、观战状态、计分板模型、进度条和它的报警（`CaptureBars`） |
+| `Sandbox/` | 试驾场：`SandboxMain`（本地跑 `Simulation`）、`TargetRange`（靶车；`FillMinimap` 把本队看得见的靶车填进小地图）、`RangeDemo`（`--range-demo` 自动打靶）、`SandboxInput`、`SandboxHud`；`Logic/MapSites`（每张图的站点：出生点、靶车、有没有巡逻车、机位锚点和可用的机位、演示，对局的固定机位也从这里取）、`Logic/RiverlandDemos`（河谷的演示） |
+| `World/` | `BattleWorld`：天空、地形网格（建地形用的地面遮罩留在 `GroundMask`，小地图烘底图用同一张）（32 × 32 格一块，河谷用层叠的地面图层）、`WaterSurface`（水面，只建在有水的格子上）、岩石、草丛、墙和栅栏、`ForestViews`（林中的树，按扇区的 `MultiMesh`，倒下动画）、`HouseViews`（房子、倒塌、废墟）、`BaseRings`（标准战地上的两个基地圈，带宽和实线在 `Logic/RingBand`）、地面小草、外围树林；物件状态变了才全量同步瓦砾、倒下的栅栏和没了的草丛；树和房子挡住自己的车时变半透明（`Logic/SeeThroughFades`） |
+| `Minimap/` | 小地图（规则见 [01 §9.1](01-game-design.md#91-小地图)）：`MinimapLayer`（一个场景一个，和 HUD 同在第 2 层、加在它后面；右下角的小图和全屏组（压暗、地图名、“M / Esc 关闭”），位置取 `HudLayout` 的 `Minimap`、`FullMap`；`Build` 把底图交给工作线程烘，`Show` 每帧取烘好的底图、局部重画、按需上传纹理；`HasPicture` 给脚本截图等图）、`MinimapView`（一张图：圆角底框、带 mipmap 的底图、按顺序画图标，`_Draw` 不分配）；`Logic/` 里是引擎无关的部分：`MinimapArea`（图上的正方形和地面坐标的换算）、`MinimapGround`（烘底图：地面类型、草、岩石、水深、树冠密度加闭运算、西北光的明暗；只读一局里不变的数据）、`MinimapImage`（底图加房子和墙，按 32 像素的块局部重画）、`MinimapStyle`（底图的系数和派生色、两套图标大小 `MinimapIconSizes`、图标颜色）、`MinimapFrame`（一帧的图标：车、基地、视点 `MinimapEye`、自己的残骸，数组预分配）、`MinimapFeed`（从对局数据填图标：只用快照里的车和基地分数）、`MinimapEyes`（视点放在哪；镜头的地面朝向和水平半视角）、`MinimapGlyphs`（箭头、四种形状、叉、扇形、进度弧的几何，写进调用方的缓冲） |
 | `Vehicles/` | `TankModel`（程序化的玩具坦克）、`TankActor`（模型 + 残骸黑烟 + 扬尘）、外观数据、履带滚动和车体点头、炮管后坐、击毁时飞起的炮塔 |
 | `Combat/` | 炮口火光和爆炸、曳光（这两样池化，不在每发炮弹时分配）、物件被毁的碎块、扬尘、残骸黑烟；涉水的水花和落水的水柱（`Logic/SplashRules`，特效自己找 `WaterSurface` 查水深） |
 | `Overlay/` | `CombatHud`（试驾场和对局共用）：准星、状态面板（含地面提示 `Logic/GroundText`）、命中大字和伤害数字、血条和名字、狙击镜暗角、点亮调试文字 |
 | `Driving/` | `DriveInput`（驾驶和开火键，运行时注册）、`AimSolver` + `Logic/AimMath`（屏幕中心 → 瞄准角）、`Logic/FireLatch`（开火锁存） |
-| `Cameras/` | `OrbitCamera`（第三人称和狙击镜）、`CameraPresets`（截图和测帧用的固定机位） |
+| `Cameras/` | `OrbitCamera`（第三人称和狙击镜；`GroundHeading`、`HalfFov`：镜头在地面上的朝向和水平半视角，给小地图的扇形）、`CameraPresets`（截图和测帧用的固定机位） |
 | `Art/` | `Palette`（全部颜色）、`Materials`（加载着色器）、`Mesh/`（网格库：挤出、旋转体、圆角板、岩石、草丛、树、墙、房子、水面、贴地的圆环带 `RingMesh`、地面图层贴图、扇区网格等） |
 | `Update/` | `UpdateService`：把 `Tank.Update` 接到引擎上，只在正式包里启用 |
 
@@ -106,8 +107,14 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 事件 → 特效和 HUD（开炮、爆炸、命中字、击毁、物件被毁）
 自己的车：Predictor 的上一 tick / 这一 tick 按 Clock.Alpha 插值 + 平滑偏移
 别人的车：client.Others（插值后）；炮弹：client.Shells
-镜头 → 瞄准角（AimSolver）→ 世界、车、炮弹、HUD 刷新 → 截图自动化
+镜头 → 瞄准角（AimSolver）→ 世界、车、炮弹、HUD 刷新 → 小地图（填图标、Show）→ 截图自动化（到点的截图等小地图的图）
 ```
+
+**小地图**（`Minimap/`）：场景建好时 `MinimapLayer.Build` 把底图交给工作线程（`Task.Run` 里的 `MinimapGround.Bake`，1024 × 1024；只读地形、地面类型、水和树的位置，这些一局里不变，所以场景照常往下跑；出错由工作线程记日志），烘好记一行 `[minimap] baked 1024 px in … ms`，5 秒还没好记一行 `still baking`。画廊里同步烘。每帧 HUD 刷新之后：
+
+- 填图标：`MinimapFrame.Clear`，`MinimapFeed.AddBases`（对局块里两个基地的分数），`MinimapEyes.Pick`（视点和自己的残骸，镜头朝向和半视角取自 `OrbitCamera`），`MinimapFeed.AddOthers`（`client.Others`，跳过视点所在的那辆）；试驾场是自己的箭头（车被打掉时是圈和残骸叉）加 `TargetRange.FillMinimap`。图标每帧重填，不分配。小地图只读快照，所以服务器的可见性裁剪（[03 §5](03-netcode.md#5-可见性裁剪)）就是它的全部过滤；
+- `MinimapLayer.Show(frame, field)`：底图烘好后的第一次在场景线程上画上房子和墙（`MinimapImage`），上传纹理（带 mipmap，小图上 1024 像素缩到 232 不闪），下一帧起 `HasPicture` 为真；之后 `MinimapImage.Refresh` 先比 `Battlefield.StateVersion`，没变就什么也不做，变了只比每个房子和墙的站立状态，把变了的那几个碰到的 32 像素块从底图拷回、再把登记在块里的房子和墙按现在的样子画上，结果和整张重画逐字节相同、不分配（推倒一座房子重画 1 块，约 0.35 ms）。纹理最多每 0.2 秒上传一次：0.2 秒内连着倒的几样合在一次上传里，停下后最后那次也会传上去；局部重画后的每次上传记一行 `[minimap] repainted N tiles`（整张上传不记）；
+- 重同步换来的同一张图的新场地（`Fresh()` 的副本，共用物件表）照常局部重画；同一地形、物件表不同的场地在同一张底图上整张重画一次；地形不同的报错一次、留着旧图。
 
 三个时间域不要混：自己的车在“现在”（领先服务器），别人的车在“过去”（约 100 ms），炮弹在客户端 tick 上步进。
 
@@ -121,17 +128,17 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 |---|---|---|
 | `Tank.Sim.Tests` | 仿真的每条规则：地形采样和求交、平地和坡上的运动、爬坡上限、碰撞、弹道、装甲盒求交、击穿和跳弹的边界、高爆弹衰减、散布、墙和草丛被毁、撞墙、点亮公式和视线、四种模式的规则和结束原因、出生点和路点、架构纯度；导航（网格的代价和关格、物件倒下只重算周围且只会变通变便宜、和重建相同；A\* 和 Dijkstra 代价一致、分次搜索结果相同、网格变化时接着搜、拉直后离障碍 ≥ 2.5 m 且不超过原路 5%、绕开残骸和停着的车；排队按车号、每 tick 预算；两张图的车道和掩护位、所有要去的点连通）；机器人（提前量和下坠、炮打不着时瞄炮塔、选目标的顺序和保持、视线和残骸、只打本队看得见的、400 m；沿路开、每 5 秒重算、卡住倒车、放弃一段；分工、回防和解除、占领点、后撤、全队压上；穿甲打光打高爆、太近时倒退；让开队友；坐法；整局（两张图上十个机器人，河谷上九个机器人加一个不动的真人；坐法和服务器相同）：10 分钟内结束、没有机器人原地卡住 10 秒、每张图至少一局有基地得过分、河谷上两队的进攻车都进过对方基地圈、河谷的固定种子里有一局以占领结束，逐位重放，每 tick 零分配）；标准战（两张图的基地：半径、离本队出生区 40～80 m、平地干地、空旷、两队开得到、间距；占领：每秒 1 分、3 辆上限按车号、挨打和阵亡清零、守军暂停、离圈保留、满 100 不早一 tick、同 tick 双胜平局；两张真图上全歼、占领、10 分钟超时三种结束，十个机器人每 tick 零分配）；物件网格索引（随机查询和全表扫描相同；试驾场地图、密集场地、合成树林、林中房子上开关索引逐 tick 相同；河谷上的查询不超出缓冲的一半）；地面和水的速度系数；树和房子（撞倒、撞塌、打塌发数、遮挡、废墟、恢复）；试驾场地图的指纹不变；河谷的生成（确定、水、公路、房子、树、岩石、草丛、出生点和路点的间距与连通、靶车的意图、Release 下的耗时上限） | `PenetrationTests`、`SpottingTests`、`MatchRulesTests`、`NavGridTests`、`PathFinderTests`、`PathServiceTests`、`NavObstacleTests`、`MapBotDataTests`、`GunneryTests`、`TargetPickerTests`、`BotDriveTests`、`BotFireTests`、`BotObstacleTests`、`BotRoleTests`、`BotMateTests`、`BotSeatingTests`、`BotMatchTests`、`PropIndexEquivalenceTests`、`GroundDrivingTests`、`TreeTests`、`HouseRamTests`、`SandboxFingerprintTests`、`RiverlandTerrainTests`、`RiverlandSpawnTests`、`RiverlandPerformanceTests`、`MapBaseTests`、`BaseCaptureTests`、`StandardRulesTests`、`StandardMatchTests` |
 | `Tank.Net.Tests` | 位流；输入、快照（完整和增量）、事件、地图、房间消息的编码往返和截断乱包；v3 地图（地面、水、新物件）和各项上限；可见性裁剪（字节流里搜不到看不见的敌人）；预测和对账（完美网络零修正、坏网络下有上限并收敛）；插值；时钟同步；发现；回环网络下四种模式各打完一局；河谷和一张混合小地图上的对局（开局消息 < 1 MiB、开过水沙路和撞倒树零修正、撞树撞房后服务器和客户端的物件状态一致），真 UDP 上的河谷开局；选地图（只有房主、对局中不能设、生成中和失败时不能开局）、地图只准备和编码一次、重同步不重发地图；不可靠包上限；断线重连、中途加入、版本不符、房间已满；服务器每 tick 零分配；协议 v4（基地分数、结束原因、占领、开局消息的基地的往返，越界和截断报错，满员标准战快照小于不可靠包上限，别的版本的房间带不认识的模式照样列出）；标准战服务器（开局要基地、看不见进攻车也收到基地分数、敌方占领分结束后才发、中途加入、一人一局一辆车、宽限内回来拿回原车、只剩等着的人时结束、河谷带机器人打完）；服务器上的机器人（开局分工和 `bots:` 日志、沿车道走、没有机器人数据的地图照样进攻、结束摘要每局只记一次、机器人起不来时房间不变、中途进出、每局按房间的机器人数、同一种子重放、服务器和测试的整局 30 秒逐位相同；9 个机器人时服务器每 tick p99 < 2 ms，量到对局结束） | `BattleIntegrationTests`、`BattleServerTests`、`ClockSync30Tests`、`MapWireV3Tests`、`RiverlandMatchTests`、`RoomMapTests`、`ServerMapTests`、`UnreliableLimitTests`、`StandardWireTests`、`StandardServerTests`、`BotServerTests`、`BotLoadTests` |
-| `Tank.Art.Tests` | 网格库的各种形状、调色板和着色器默认值一致、车辆外观数据、HUD 布局（1600×900、1600×1200、2100×900）、启动参数解析、房间规则、观战状态、重连逻辑、房主线程；`--map` 和每张图的站点（机位锚点在图内）、地面图层贴图和着色器一致、水面网格在岸线处水深为 0、倒树姿态、房子填满长方体、地面提示文字、水花规则、河谷演示在无画面的仿真里的结果、房间里的地图选择；标准战的文字（比分板、七种结算原因）、占领进度条和报警、计分板的占领格、基地圈的网格和带宽、圈和进度条按两队的颜色、重连令牌的地址规整 | `HudLayoutTests`、`LaunchOptionsTests`、`ReconnectorTests`、`MapSitesTests`、`GroundLayersTests`、`WaterMeshTests`、`HouseShapesTests`、`RiverlandDemoTests`、`StandardHudTextTests`、`CaptureBarsTests`、`RingMeshTests`、`RingBandTests`、`SeatTokensTests` |
+| `Tank.Art.Tests` | 网格库的各种形状、调色板和着色器默认值一致、车辆外观数据、HUD 布局（1600×900、1600×1200、2100×900）、启动参数解析、房间规则、观战状态、重连逻辑、房主线程；`--map` 和每张图的站点（机位锚点在图内）、地面图层贴图和着色器一致、水面网格在岸线处水深为 0、倒树姿态、房子填满长方体、地面提示文字、水花规则、河谷演示在无画面的仿真里的结果、房间里的地图选择；标准战的文字（比分板、七种结算原因）、占领进度条和报警、计分板的占领格、基地圈的网格和带宽、圈和进度条按两队的颜色、重连令牌的地址规整；小地图（显示的正方形和坐标换算、图像第 0 行是 z 最小的一行；底图的颜色：平地的草和土、公路、岸线、水深、陡坡岩石、西北光、树林只在树冠附近变深而孤树不变大、河谷的林子里读作树林、同一场地烘出同样的字节；房子和墙：站着的颜色和描边、倒了是瓦砾、斜墙至少 2 像素宽且连成一条、推倒和随机倒下立起后局部重画和整张重画逐字节相同（跨块的墙、墙压房子）、没变化不重画、不分配、别的图和别的物件表报错；图标只来自快照（离开快照的下一帧不留痕、各自为战里同队号也是敌人、残骸、跟随的车留给箭头、超出上限丢掉并在 Debug 断言、最多两个基地和各自的分数、填一帧不分配；回环对局里每帧图上的敌人就是快照里的敌人）；四种形状、箭头、叉、扇形、进度弧的几何和图标的大小颜色；视点的选法、镜头的地面朝向和半视角；画廊的两屏地图、点都在可开的地上；小图贴着右下角不压别的块、全屏图居中并留出提示条；`--full-map`；截图等底图、超时照拍、`--quit-after` 跟着等） | `HudLayoutTests`、`LaunchOptionsTests`、`ReconnectorTests`、`MapSitesTests`、`GroundLayersTests`、`WaterMeshTests`、`HouseShapesTests`、`RiverlandDemoTests`、`StandardHudTextTests`、`CaptureBarsTests`、`RingMeshTests`、`RingBandTests`、`SeatTokensTests`、`MinimapAreaTests`、`MinimapGroundTests`、`MinimapImageTests`、`MinimapFeedTests`、`MinimapGlyphsTests`、`MinimapEyesTests`、`HudDemoFramesTests`、`ShotPlanTests` |
 | `Tank.Update.Tests` | 版本比较、清单解析和签名校验、解包（含防路径穿越）、找安装目录、替换和失败回退 | `UpdaterTests`、`ManifestAndSignatureTests` |
 | `Tank.Soak` | 4 个脚本客户端 + 4 个机器人，试驾场地图上的团队对战，四种模拟链路各 60 秒，超标就非零退出 | 验收表见 [03 §11](03-netcode.md#11-网络手感验收标准) |
 
-计墙钟时间的测试放在不并行的 `Timing` 集合里（Sim 和 Net 各一个），等并行的测试跑完再跑。零分配测试共用 `tests/Shared/Allocation.cs`：偶尔有一个测量窗口里量到几 KB 不是被测代码分配的运行时噪声，所以每次重建整个场景、最多量 3 次，有一次为 0 就算过；真的每 tick 分配三次都会失败。2026-10-27 的测试数：Sim 1100、Net 294、Art 1137、Update 42。
+计墙钟时间的测试放在不并行的 `Timing` 集合里（Sim 和 Net 各一个），等并行的测试跑完再跑。零分配测试共用 `tests/Shared/Allocation.cs`：偶尔有一个测量窗口里量到几 KB 不是被测代码分配的运行时噪声，所以每次重建整个场景、最多量 3 次，有一次为 0 就算过；真的每 tick 分配三次都会失败。2026-10-28 的测试数：Sim 1100、Net 294、Art 1238、Update 42。
 
 **Godot 截图自动化**：画面相关的改动靠启动参数跑出截图人工比对（参数全表在 `Bootstrap/LaunchOptions.cs` 文件头）：
 
-- `--screenshot FILE --screenshot-at S`：S 秒后截一张；`--shot-after fire|hit|kill|prop|down|death|ended:S`：某件事第一次发生后 S 秒截；`--quit-after S` 定时退出；
+- `--screenshot FILE --screenshot-at S`：S 秒后截一张；`--shot-after fire|hit|kill|prop|down|death|ended:S`：某件事第一次发生后 S 秒截；`--quit-after S` 定时退出。对局和试驾场里，到点时小地图还没有图（`MinimapLayer.HasPicture`），截图就等（对局场景还没建好时不等），最多等到点后 20 秒（`ShotPlan.MapWaitSeconds`），超时照拍并报错 `[minimap] screenshot taken before the map was baked`；`--quit-after` 跟着等（`Main` 按进程时钟的退出也等）；
 - `--loopback --seed N --autodrive`：房主用虚拟网络和固定步长，自动开车开炮，同一个命令每次打出同一局；
-- `--hud-demo NAME`：HUD 画廊，用预制数据在纯色底上画 HUD 的各种状态（`timer`、`feed`、`respawn`、`spectate`、`scoreboard`、`results-win` 等；标准战是 `standard`：进行中的比分板、两条进度条和计分板，`capture`：占领获胜的结算）；
+- `--hud-demo NAME`：HUD 画廊，用预制数据在纯色底上画 HUD 的各种状态（`timer`、`feed`、`respawn`、`spectate`、`scoreboard`、`results-win` 等；标准战是 `standard`：进行中的比分板、两条进度条和计分板，`capture`：占领获胜的结算；`minimap`、`map-full`：标准战那一屏加上河谷的小图 / 全屏图，四种形状、残骸叉、两个基地的圈和进度弧、箭头和扇形，底图在 `_Ready` 里同步烘）；`--full-map`：进场后打开全屏地图（对局和试驾场）；
 - 试驾场：`--sandbox`、`--map sandbox|riverland`（用哪张图，默认试驾场地图；开房时它定房间的地图，默认河谷；写错时警告并用默认的）、`--camera-preset NAME`（固定机位；河谷另有 `overview`、`town`、`ford`、`forest`、`plateau`、`dunes` 和正上方正交俯视的 `map`；两张图都有对着基地、从本队一侧看的 `base0`、`base1`（45 m 外、30 m 高）、`base0near`、`base1near`（30 m 外、4 m 高，坦克的高度）、`base0far`、`base1far`（坦克在离圆心 46 m 处时的跟车视角）；圈只在标准战对局里画，所以配 `--host --mode standard` 用）、`--range-demo NAME`（自动打靶、撞墙、看点亮；河谷是 `house`、`ram-house`、`trees`、`ford`）、`--fps-log`（每秒打印帧时间）。试驾场地图专有的机位和演示在河谷上不可用，会给出警告。
 
 **打包冒烟**：`tools/ship.sh build` 在 macOS 上把导出的游戏启动一次（`--headless -- --host --port 27091 --bots 1 --autostart --quit-after 10`），日志里要同时有“[server] match started”和“[match] entered match”，才算打包成功。
@@ -152,10 +159,10 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 | 5A 河谷地图 | 1200 m 的河谷（台地、山、沙丘、河、湖、浅滩、公路、村镇、五片树林）；地面类型和浅水影响车速；树和房子；物件网格索引；协议 v3（地图带地面和水）；房间里选地图、新房间默认河谷、`Tank.Server --map`；客户端的地面图层、水面、树林、房子、水花、地面提示 | ✅ |
 | 5B 标准战 | 第四种模式 `standard`：两队基地（半径 25 m，河谷相距 983 m）、占领（按 tick 整数记，圈内进攻车每秒 +1 分，最多按 3 辆车号最小的算，守军暂停，挨打清零，满 100 分赢）、全歼或占领获胜、限时 10 分钟、可以中途加入；协议 v4（基地分数、结束原因、每人的占领分、开局带基地）；不复活的模式里一人一局一辆车（按重连令牌）；进度条、计分板“占领”列、结算原因、地上的圈；`Tank.Server --mode standard`。机器人还不会占领和回防（5C） | ✅ |
 | 5C 机器人 | 寻路（4 m 通行网格、A\*、拉直、每 tick 3000 次扩展的共享预算、绕开残骸和停着的车）；标准战分工（TD 守家最多 2 个、按车道进攻、轻坦走侧翼、进圈后各自停在占领点上）、回防、全队压上、残血后撤；交战（只用本队看得见的、400 m、视线、3 秒内打过我 > 血量比例 > 距离、保持 2 秒、提前量和下坠、停车开火）；让开队友；两张图的车道和掩护位；服务器的机器人换成 `BotDirector`（原来直线开向路点的简单机器人删掉）；9 个机器人时服务器每 tick p99 约 0.2 ms | ✅ |
-| 5D 小地图 | 右下角小地图，按 M 放大成全屏 | 未开始 |
+| 5D 小地图 | 右下角 240 × 240 的小图显示整张图（可开车的范围扩成正方形），按 M 放大成全屏（不暂停，Esc 先关全屏），对局和试驾场都有；底图 1024 × 1024 进场时在后台线程烘（地面类型、水深、陡坡岩石、树林按树冠密度并合拢、西北光的明暗），房子和墙按 32 像素块局部重画、纹理最多每 0.2 秒上传一次；图标每帧只从快照填（基地的圈、填色和进度弧，自己的箭头和镜头扇形，四种车型形状，残骸叉；观战时箭头跟被跟随的车，自由视角和残骸特写是圈），回环整合测试证明不泄露；画廊 `minimap`、`map-full`，`--full-map`；脚本截图等底图最多 20 秒 | ✅ |
 | 6 吃鸡 | 1000 m 大地图；毒圈分阶段收缩；补给箱（维修、弹药、加固装甲、快速装填、光学设备）；最多 16 人；排名结算 | 未开始 |
 
-阶段 5 的设计见 [阶段 5 设计](superpowers/specs/2026-10-22-stage5-design.md)（5A 照 [河谷设计](superpowers/specs/2026-10-19-riverland-map-design.md) 做）；6 的设想见 [总体设计](superpowers/specs/2026-10-13-third-person-tank-design.md) §3、§7、§12，开工前另写设计。每个阶段的做法：先写设计、用户确认；做草稿并截图验证；审查后导出实施计划；按计划逐批实现、每批审查；验收、用户试玩；squash 合入 main。进度和下一步记在 [PROGRESS.md](PROGRESS.md)。
+阶段 5（5A～5D）已全部完成，等用户试玩。阶段 5 的设计见 [阶段 5 设计](superpowers/specs/2026-10-22-stage5-design.md)（5A 照 [河谷设计](superpowers/specs/2026-10-19-riverland-map-design.md) 做）；6 的设想见 [总体设计](superpowers/specs/2026-10-13-third-person-tank-design.md) §3、§7、§12，开工前另写设计。每个阶段的做法：先写设计、用户确认；做草稿并截图验证；审查后导出实施计划；按计划逐批实现、每批审查；验收、用户试玩；squash 合入 main。进度和下一步记在 [PROGRESS.md](PROGRESS.md)。
 
 ## 7. 编码约定（摘要）
 
@@ -175,6 +182,7 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 | 预测不撞倒物件 | 撞栅栏、砖墙时偶尔约 1 m 的拉回；撞塌房子后要等物件状态到了才按废墟减速 | 已知，只在撞物件时出现；试玩时看 F3 的“最大” |
 | 地图体积 | 河谷的开局消息约 555 KB，每次都发整张图会占带宽、拖慢开局 | 每张图只编码一次、拷进每个座位的开局消息；走可靠通道；同一局的重同步不重发地图（只发十来个字节，再加上变了的物件状态）；测试要求 < 1 MiB |
 | 地图生成耗时 | 河谷生成要上百毫秒（Release 实测 60～130 ms，Debug 约 0.4 s），在 tick 线程上做会卡住所有人 | 真房间在后台线程生成，房间先开、地图好了才能开局（“地图生成中…”）；每张图一个进程只生成一次；开局复制准备好的场地（约 0.1 ms）；Release 下生成 ≤ 1.5 s 的测试 |
+| 小地图烘图耗时 | 河谷 1024 × 1024 的底图 Release 约 0.15～0.3 秒，Debug 在忙的机器上 7 秒多；在场景线程上做会卡住进场 | 在工作线程上烘（只读一局里不变的数据），没好时只画底框和图标；房子和墙按块局部重画，纹理最多每 0.2 秒上传一次；脚本截图等底图最多 20 秒 |
 | 物件多了画面变慢 | 河谷约 5600 个物件，掉帧 | 仿真查询用网格索引；树按扇区分组、远处淡出、近处才投影；物件状态变了才全量同步；实测河谷约 120～130 帧（GPU 受限），目标 ≥ 60 |
 | Wi-Fi 抖动和丢包 | 别人的车卡顿 | 自适应插值延迟 + 短时外推；soak 的 Wi-Fi 和糟糕链路都通过 |
 | GC 停顿 | 周期性卡顿 | 热路径零分配，服务器线程低延迟 GC；分配测试 |

@@ -1,5 +1,8 @@
+using System.Numerics;
 using Tank.Client.Match;
+using Tank.Client.Minimap;
 using Tank.Net.Battle;
+using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Art.Tests;
@@ -215,5 +218,84 @@ public class HudDemoFramesTests
         Assert.Equal(3, rows.Single(r => r.Side == Side.Own).Rank);
         Assert.Equal("第 3 名", HudText.Results(f.Mode, f.OwnSlot, f.OwnTeam, f.Results, f.Plate, f.Players, f.Names).Title);
         Assert.Equal("机器人 1 是最后的幸存者", HudText.Results(f.Mode, f.OwnSlot, f.OwnTeam, f.Results, f.Plate, f.Players, f.Names).Subtitle);
+    }
+
+    private static readonly string[] ScreensBeforeTheMap = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture" };
+
+    [Fact]
+    public void The_map_screens_come_last_and_leave_the_others_as_they_were()
+    {
+        Assert.Equal(ScreensBeforeTheMap.Append("minimap").Append("map-full"), HudDemoFrames.Names);
+        foreach (string name in ScreensBeforeTheMap)
+        {
+            HudDemoFrames.TryGet(name, out HudDemo demo);
+            Assert.Null(demo.Minimap);
+        }
+    }
+
+    [Theory]
+    [InlineData("minimap", false)]
+    [InlineData("map-full", true)]
+    public void The_map_screens_carry_the_riverland_map_over_the_standard_screen(string name, bool fullOpen)
+    {
+        Assert.True(HudDemoFrames.TryGet(name, out HudDemo demo));
+        HudDemoFrames.TryGet("standard", out HudDemo standard);
+
+        Assert.NotNull(demo.Minimap);
+        Assert.Equal(RiverlandMap.Id, demo.Minimap.MapId);
+        Assert.Equal(fullOpen, demo.Minimap.FullOpen);
+        Assert.Equal(BattleMode.Standard, demo.Frame.Mode);
+        Assert.Equal(standard.Frame.Capture, demo.Frame.Capture);
+        Assert.Equal(standard.Kills, demo.Kills);
+    }
+
+    [Fact]
+    public void The_canned_map_frame_has_both_bases_seven_tanks_and_the_own_arrow()
+    {
+        HudDemoFrames.TryGet("minimap", out HudDemo demo);
+        MinimapFrame frame = demo.Minimap!.Frame;
+        MinimapTank[] tanks = frame.Tanks.ToArray();
+
+        Assert.Equal(2, frame.Bases.Length);
+        MinimapBase own = frame.Bases.ToArray().Single(b => b.Own), enemy = frame.Bases.ToArray().Single(b => !b.Own);
+        Assert.Equal(RiverlandMap.Bases[0].Centre, own.Centre);
+        Assert.Equal(RiverlandMap.Bases[1].Centre, enemy.Centre);
+        Assert.Equal(37, own.Points);    // as the standard screen's bars: the enemy has taken 37 of ours
+        Assert.Equal(62, enemy.Points);
+        Assert.Equal(7, tanks.Length);
+        Assert.Equal(4, tanks.Count(t => t.Side == Side.Ally));
+        Assert.Equal(3, tanks.Count(t => t.Side == Side.Enemy));
+        Assert.Equal(2, tanks.Count(t => t.Destroyed));
+        Assert.Single(tanks, t => t.Side == Side.Ally && t.Destroyed);
+        Assert.Single(tanks, t => t.Side == Side.Enemy && t.Destroyed);
+        Assert.Equal(Enum.GetValues<MinimapShape>(), tanks.Where(t => t.Side == Side.Ally).Select(t => t.Shape).Order());   // one of each shape
+        Assert.Equal(Enum.GetValues<MinimapShape>(), tanks.Where(t => !t.Destroyed).Select(t => t.Shape).Distinct().Order());   // and each drawn standing at least once
+        Assert.Null(frame.OwnWreck);
+
+        MinimapEye eye = frame.Eye;
+        Assert.Equal(EyeKind.Arrow, eye.Kind);
+        Vector2 towardsEnemy = Vector2.Normalize(enemy.Centre - own.Centre);
+        Assert.Equal(120f, Vector2.Distance(own.Centre, eye.Position), 0.01f);
+        Assert.True(Vector2.Dot(Vector2.Normalize(eye.Position - own.Centre), towardsEnemy) > 0.999f, "the arrow is in front of the own base");
+        Assert.True(Vector2.Dot(Tank.Sim.Geometry.Angles.Forward(eye.Yaw), towardsEnemy) > 0.999f, "the arrow points at the enemy base");
+        Assert.Equal(-0.4f, Tank.Sim.Geometry.Angles.Wrap(eye.CameraYaw - eye.Yaw), 0.001f);   // the camera looks 0.4 rad right of the hull
+        Assert.Equal(0.9f, eye.HalfFov, 0.001f);
+    }
+
+    [Theory]
+    [InlineData("minimap")]
+    [InlineData("map-full")]
+    public void Every_point_of_the_canned_map_frame_is_on_drivable_ground(string name)
+    {
+        HudDemoFrames.TryGet(name, out HudDemo demo);
+        MinimapFrame frame = demo.Minimap!.Frame;
+        float size = (RiverlandMap.Samples - 1) * RiverlandMap.CellSize;
+        var points = frame.Tanks.ToArray().Select(t => t.Position).Concat(frame.Bases.ToArray().Select(b => b.Centre)).Append(frame.Eye.Position);
+
+        foreach (Vector2 p in points)
+        {
+            Assert.InRange(p.X, RiverlandMap.Border, size - RiverlandMap.Border);
+            Assert.InRange(p.Y, RiverlandMap.Border, size - RiverlandMap.Border);
+        }
     }
 }

@@ -22,6 +22,9 @@ public class DriveInput
     // Also read by the scenes' input handlers; UiCancel is Godot's built-in action, not registered here.
     internal static readonly StringName FireGun = "fire_gun", SniperToggle = "sniper_toggle", UiCancel = "ui_cancel";
 
+    /// <summary>M: opens and closes the full-screen map (stage 5 design §5); read by the scenes' input handlers.</summary>
+    internal static readonly StringName MapToggle = "map_toggle";
+
     private readonly FireLatch _fire = new();
 
     public static void RegisterActions()
@@ -35,6 +38,7 @@ public class DriveInput
         AddMouse(FreeLookAction, MouseButton.Right);
         AddKey(AmmoAp, Key.Key1);
         AddKey(AmmoHe, Key.Key2);
+        AddKey(MapToggle, Key.M);
     }
 
     /// <summary>The round the player wants loaded.</summary>

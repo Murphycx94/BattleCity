@@ -15,7 +15,8 @@ namespace Tank.Client.Match;
 /// and the gun is laid where it looks, unless a fixed preset frames the shot or the player holds free look; a wreck's gun
 /// stays put. Dead, the camera walks the spectate chain (<see cref="SpectateState"/>): the wreck close-up, a followed
 /// tank, or the free focus WASD drives. The mouse is captured on entering (not in scripted or captured runs), let go by
-/// Esc — which brings up the pause layer — or by losing focus, and taken again by 继续 or a click.
+/// Esc — which brings up the pause layer — or by losing focus, and taken again by 继续 or a click. M opens and closes
+/// the full map, which Esc closes first; it neither takes the mouse nor pauses.
 /// </summary>
 public partial class MatchMain
 {
@@ -55,6 +56,21 @@ public partial class MatchMain
         }
         // The scope is the gun's: not for the dead (they hold Shift to speed the free camera), nor paused, on the results or before the own tank is there.
         if (e.IsActionPressed(DriveInput.SniperToggle) && _camera is not null && _client.HasTank && !_dead && !Paused && !_resultsShown) _camera.ToggleSniper();
+        // M opens and closes the full map (not over the pause layer or the results, nor while loading hides the map); it
+        // neither pauses nor takes the mouse.
+        if (e.IsActionPressed(DriveInput.MapToggle) && _minimap is { Visible: true } && !Paused && !_resultsShown)
+        {
+            _minimap.ToggleFull();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        // Esc closes an open full map first, and that is all it does.
+        if (e.IsActionPressed(DriveInput.UiCancel) && _minimap is { FullOpen: true })
+        {
+            _minimap.CloseFull();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (e.IsActionPressed(DriveInput.UiCancel) && !_resultsShown)
         {
             if (Paused) Resume();
@@ -68,6 +84,7 @@ public partial class MatchMain
     {
         Input.MouseMode = Input.MouseModeEnum.Visible;
         _input.ReleaseAll();
+        _minimap?.CloseFull();
         if (_pause is null)
         {
             _pause = new PauseOverlay(_client.IsHost);

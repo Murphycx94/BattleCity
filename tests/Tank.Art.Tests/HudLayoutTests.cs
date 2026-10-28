@@ -25,6 +25,8 @@ public class HudLayoutTests
         yield return ("results table", b.ResultsTable);
         yield return ("status panel", b.StatusPanel);
         yield return ("capture bars", b.CaptureBars);
+        yield return ("minimap", b.Minimap);
+        yield return ("full map", b.FullMap);
     }
 
     [Theory]
@@ -44,8 +46,17 @@ public class HudLayoutTests
         (string, HudRect)[] always =
         {
             ("score plate", b.ScorePlate), ("mode label", b.ModeLabel), ("kill feed", b.KillFeed), ("net panel", b.NetPanel), ("status panel", b.StatusPanel),
+            ("minimap", b.Minimap),
         };
         AssertNoOverlaps(always);
+    }
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void The_minimap_clears_the_respawn_banner(float w, float h)
+    {
+        HudBoxes b = HudLayout.For(new Vector2(w, h));
+        Assert.False(b.Minimap.Intersects(b.Banner), $"the minimap {b.Minimap} covers the banner {b.Banner}");
     }
 
     [Theory]
@@ -173,6 +184,71 @@ public class HudLayoutTests
         Assert.Equal(336, tall.Banner.Y, precision: 3);
         Assert.Equal(normal.ScorePlate, tall.ScorePlate);
         Assert.Equal(normal.NetPanel, tall.NetPanel);
+    }
+
+    public static TheoryData<float, float> MinimapScreens => new()
+    {
+        { 1600, 900 },
+        { 2560, 900 },
+        { 1600, 1200 },
+    };
+
+    [Fact]
+    public void The_minimap_is_240_square_24_in_from_the_bottom_right_at_the_base_size()
+    {
+        HudBoxes b = HudLayout.For(new Vector2(1600, 900));
+        Assert.Equal(new HudRect(1336, 636, 240, 240), b.Minimap);
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimapScreens))]
+    public void The_minimap_hugs_the_bottom_right_corner_clear_of_every_other_block(float w, float h)
+    {
+        var screen = new Vector2(w, h);
+        HudBoxes b = HudLayout.For(screen);
+        Assert.True(b.Minimap.FitsIn(screen));
+        Assert.Equal(w - HudLayout.Margin, b.Minimap.Right, precision: 3);
+        Assert.Equal(h - HudLayout.Margin, b.Minimap.Bottom, precision: 3);
+        Assert.Equal(HudLayout.MinimapSize, b.Minimap.Width);
+        Assert.Equal(HudLayout.MinimapSize, b.Minimap.Height);
+        (string Name, HudRect Rect)[] others =
+        {
+            ("status panel", b.StatusPanel), ("kill feed", b.KillFeed), ("spectate bar", b.SpectateBar), ("scoreboard", b.Scoreboard),
+            ("capture bars", b.CaptureBars), ("results", b.Results),
+        };
+        foreach ((string name, HudRect rect) in others) Assert.False(b.Minimap.Intersects(rect), $"the minimap {b.Minimap} overlaps the {name} {rect} at {w}x{h}");
+    }
+
+    [Fact]
+    public void The_full_map_is_the_largest_centred_square_that_leaves_its_margins_and_the_hint()
+    {
+        var screen = new Vector2(1600, 900);
+        HudBoxes b = HudLayout.For(screen);
+        Assert.Equal(new HudRect(414, 64, 772, 772), b.FullMap);
+        Assert.True(b.FullMap.Bottom + HudLayout.FullMapHintHeight <= screen.Y);
+        Assert.Equal(800, b.FullMap.CenterX, precision: 3);
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimapScreens))]
+    public void The_full_map_is_centred_and_square_on_any_screen(float w, float h)
+    {
+        var screen = new Vector2(w, h);
+        HudBoxes b = HudLayout.For(screen);
+        float side = MathF.Min(w, h) - 2 * HudLayout.FullMapMargin;
+        Assert.Equal(new HudRect((w - side) / 2, HudLayout.FullMapMargin, side, side), b.FullMap);
+        Assert.True(b.FullMap.FitsIn(screen));
+        Assert.True(b.FullMap.Bottom + HudLayout.FullMapHintHeight <= h);
+    }
+
+    [Fact]
+    public void The_full_map_s_bottom_margin_holds_the_hint_and_a_tiny_window_gets_an_empty_square()
+    {
+        Assert.True(HudLayout.FullMapHintHeight <= HudLayout.FullMapMargin, "the hint's strip doesn't fit under the square");
+        HudRect tiny = HudLayout.For(new Vector2(100, 90)).FullMap;
+        Assert.Equal(0, tiny.Width);
+        Assert.Equal(0, tiny.Height);
+        Assert.Equal(50, tiny.CenterX, precision: 3);
     }
 
     private static void AssertNoOverlaps((string Name, HudRect Rect)[] blocks)

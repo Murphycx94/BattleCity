@@ -2,6 +2,7 @@ using Godot;
 using Tank.Client.Bootstrap;
 using Tank.Client.Cameras;
 using Tank.Client.Combat;
+using Tank.Client.Minimap;
 using Tank.Client.Online;
 using Tank.Client.Overlay;
 using Tank.Client.Sandbox;
@@ -23,7 +24,8 @@ namespace Tank.Client.Match;
 /// and feeds it the player's command; the own tank is drawn from the prediction (between its last two ticks, at the
 /// client's render position), the others from the interpolator as <see cref="TankActors"/>, the shells from
 /// <c>client.Shells</c>, the props as the field has them; events become effects (MatchMain.Events.cs); the camera and
-/// aim follow the sandbox's, a dead player's camera the spectate chain, and Esc the pause layer (MatchMain.Camera.cs).
+/// aim follow the sandbox's, a dead player's camera the spectate chain, and Esc the pause layer (MatchMain.Camera.cs);
+/// the map (<see cref="MinimapLayer"/>) sits in the corner, M opens it full-screen, and the results hide it.
 /// Nothing here reads <c>Simulation</c>. A loopback host runs on a
 /// virtual clock, so every frame then steps by <see cref="VirtualFrame"/>. <see cref="Finished"/> fires once when the
 /// phase leaves the match; the owner then frees the scene.
@@ -41,6 +43,7 @@ public partial class MatchMain : Node3D
     private readonly List<int> _candidates = new(BattleProtocol.MaxPlayers);   // the living tanks a dead player may watch, refilled each frame
     private readonly string?[] _names = new string?[BattleProtocol.MaxPlayers];
     private readonly HeadLookup _headOf;   // cached: a method group would make a new delegate every call
+    private readonly MinimapFrame _minimapFrame = new();   // the map's icons, filled again every frame
 
     private BattleSession _session = null!;
     private BattleClient _client = null!;
@@ -62,6 +65,7 @@ public partial class MatchMain : Node3D
     private OrbitCamera _camera = null!;
     private CombatHud _combat = null!;
     private MatchHud _hud = null!;
+    private MinimapLayer _minimap = null!;
     private CanvasLayer _loading = null!;
     private PauseOverlay? _pause;   // built on the first Esc
     private double _time;
@@ -97,6 +101,9 @@ public partial class MatchMain : Node3D
 
     /// <summary>Whether the run's screenshot is spent, this match's own or an earlier one; the owner reads it as the scene goes.</summary>
     public bool ScreenshotTaken => _automation.ScreenshotTaken;
+
+    /// <summary>Whether a due screenshot waits for the map's picture: the owner's <c>--quit-after</c> waits with it.</summary>
+    public bool HoldingScreenshot => _automation.HoldingScreenshot;
 
     public override void _Ready()
     {
@@ -144,7 +151,8 @@ public partial class MatchMain : Node3D
         }
         if (!_titled && _client.Room is not null) UpdateTitle();
         StepMatch(dt);
-        _automation.EndFrame(delta, _time);   // last, and on loading frames too: the capture schedule runs on the match clock
+        // Last, and on loading frames too: the capture schedule runs on the match clock; a due screenshot waits for the map's picture.
+        _automation.EndFrame(delta, _time, mapReady: _minimap is null || _minimap.HasPicture);
     }
 
     /// <summary>The frame's match work once the client is known to be in one; early returns while the field or the first snapshot is still missing.</summary>
@@ -163,6 +171,7 @@ public partial class MatchMain : Node3D
         if (!_client.HasTank && _client.Latest is null)
         {
             _hud.Visible = false;
+            _minimap.Visible = false;
             _loading.Visible = true;   // the match start is here, the first snapshot (and so the own tank's spec) not yet (R3)
             return;
         }
@@ -177,6 +186,7 @@ public partial class MatchMain : Node3D
         if (!_ringsBuilt) BuildRings(field);
         _loading.Visible = false;
         _hud.Visible = true;
+        _minimap.Visible = true;
         RefreshNames();
 
         float fdt = (float)dt;
@@ -202,8 +212,32 @@ public partial class MatchMain : Node3D
         _combat.Refresh(own, spotted: hasTank && _client.Spotted && !own.IsDestroyed);
         _actors.FillBars(_combat.TankBars, BattleProtocol.MaxPlayers, _names);
         int resultsLeft = _resultsClock.Observe(_client.Match.Phase, dt);
-        _hud.SetScoreboardOpen(_input.ScoreboardHeld && !Paused);   // Tab is polled, so the pause layer has to veto it here
+        bool boardOpen = _input.ScoreboardHeld && !Paused;   // Tab is polled, so the pause layer has to veto it here
+        if (boardOpen) _minimap.CloseFull();   // the board shares the full map's layer and would sit under it: Tab wins
+        _hud.SetScoreboardOpen(boardOpen);
         _hud.Refresh(MatchHudFrame.From(_client, _session, OwnTeam(own), _names, (int)Engine.GetFramesPerSecond(), _spectateName, _spectateFree, resultsLeft), _input.NetPanelOpen, _time);
+        ShowMinimap(hasTank, own, field);
+    }
+
+    /// <summary>
+    /// The map's icons for this frame (stage 5 design §5): the bases with their progress, the eye (<see cref="MinimapEyes.Pick"/>:
+    /// the own tank, the one followed, or a ring on the free focus or the wreck) with the fan along the camera's view, and
+    /// every other tank the snapshot holds — the server's filter, so an enemy shows only while the team sees it.
+    /// </summary>
+    private void ShowMinimap(bool hasTank, in TankState own, Battlefield field)
+    {
+        MinimapFrame frame = _minimapFrame;
+        frame.Clear();
+        byte team = OwnTeam(own);
+        MinimapFeed.AddBases(frame, _client.MatchInfo?.Bases, team, _client.Match);
+        bool watching = _dead && !_automation.HasPreset;
+        RemoteTank? followed = watching && _spectate.Current == SpectateState.Mode.Follow && TryFindRemote(_spectate.TargetId, out RemoteTank remote) ? remote : null;
+        MinimapEyeChoice eye = MinimapEyes.Pick(hasTank, watching, _spectate.Current, followed, own.Position, own.Yaw, _focus, _camera.GroundHeading(), _camera.HalfFov());
+        frame.Eye = eye.Eye;
+        frame.OwnWreck = eye.OwnWreck;
+        MinimapFeed.AddOthers(frame, _client.Others, Mode, team, eye.EyeTankId);
+        _minimap.Show(frame, field);
+        if (_automation.TakeFullMap() && !_minimap.FullOpen) _minimap.ToggleFull();
     }
 
     /// <summary>
@@ -253,6 +287,7 @@ public partial class MatchMain : Node3D
     private void ShowResults(bool shown)
     {
         _resultsShown = shown;
+        _minimap?.SetHidden(shown);   // the maps go with the rest of the play HUD
         if (!shown) return;
         _automation.NotifyEnded(_time);
         _pause?.Close();
@@ -286,6 +321,13 @@ public partial class MatchMain : Node3D
         _combat = Add(new CombatHud());
         _combat.Build(_camera, field, _client.OwnTankId, BattleProtocol.MaxPlayers, _headOf);
         _hud = Add(new MatchHud());
+        _minimap = Add(new MinimapLayer());   // after the HUD: on top of it in the same layer
+        // Baked on a worker thread (the corner shows an empty panel meanwhile) with the scenery's own bare-ground mask,
+        // named as the title names it (no name while the map is unknown).
+        string? mapId = _client.Room?.Map ?? MapSites.IdOfGrid(field.Terrain);
+        Func<float, float, float> notGrassAt = _world.GroundMask is { } mask ? mask.At : (_, _) => 0f;
+        _minimap.Build(field, notGrassAt, mapId is null ? null : MapText.Name(mapId));
+        if (_resultsShown) _minimap.SetHidden(true);
     }
 
     /// <summary>
@@ -308,6 +350,8 @@ public partial class MatchMain : Node3D
         _world!.SetField(field);
         _combat.SetField(field);
         _actors.SetTerrain(field.Terrain);
+        // One scene, one map: a new match gets a new scene, so a field swapped in here is the same match's (a resync's
+        // Fresh() copy), which the map layer repaints by itself; it reports a field on another terrain rather than mispaint.
     }
 
     /// <summary>Builds the own actor once the own tank's spec is known (a new spec, which only a new match brings, rebuilds it).</summary>
