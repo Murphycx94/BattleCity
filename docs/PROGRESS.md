@@ -9,7 +9,7 @@
 - **阶段**：5（5v5），分 5A 河谷地图、5B 标准战、5C 机器人、5D 小地图。设计已确认：[阶段 5 设计](superpowers/specs/2026-10-22-stage5-design.md)；5A 照 [河谷设计](superpowers/specs/2026-10-19-riverland-map-design.md) 做，改动见阶段 5 设计 §2。
 - **用户的要求**：设计确认后一路做完（含审查、验收、squash 合入本地 main），中途不问，做完汇报；不推远端（推远端走 PR）；只做 macOS。
 - **用户的选择**（2026-10-22）：四步拆分；标准战是新增的第四种模式；机器人数量照旧房主设；河谷 1200 m、标准战限时 10 分钟；机器人中等档（寻路、分工、回防、交战）；小地图标准版；所有模式 × 两张图，新房间默认河谷。
-- **进度**：**阶段 5 全部完成**：5A、5B、5C、5D 都已 squash 合入本地 main，没推远端。5D 小地图 8 个任务、三批审查都做完（见“5D 节点记录”），squash 说明 `feat: stage 5D — minimap: baked map, live icons, full-screen map on M`。5A ✅ 已 squash 合入本地 main `cc939c0`。**5B 标准战 ✅ 全部 11 个任务、四批审查都做完，squash 合入本地 main `a147246`**（提交说明 `feat: stage 5B — standard battle: bases, capture, protocol v4`，没推远端）：分支 `feat/stage5b-standard`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage5b`，从 main `82c0dd1` 拉出。
+- **进度**：**阶段 5 全部完成**：5A、5B、5C、5D 都已 squash 合入本地 main，没推远端。5D 小地图 8 个任务、三批审查都做完（见“5D 节点记录”），squash 合入本地 main `7b1302f`（说明 `feat: stage 5D — minimap: baked map, live icons, full-screen map on M`），合入后 main 上五个项目 0 警告、四个测试项目全过。5A ✅ 已 squash 合入本地 main `cc939c0`。**5B 标准战 ✅ 全部 11 个任务、四批审查都做完，squash 合入本地 main `a147246`**（提交说明 `feat: stage 5B — standard battle: bases, capture, protocol v4`，没推远端）：分支 `feat/stage5b-standard`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage5b`，从 main `82c0dd1` 拉出。
 - **5B 计划**：`docs/superpowers/plans/2026-10-26-stage5b-standard.md`（`998e6e0`，11 个任务：批 A 仿真 1～4、B 联网 5～6、C 客户端 7～9、D 收尾 10～11；末尾有验收清单和 15 条与设计的偏差）。基地：河谷队 0 (152, 398)、队 1 (1024, 852)，相距 983 m（5A 出生点不动，设计写约 750 m）；试驾场 (40, 306)、(300, 56)。占领按 tick 整数记（30 tick = 1 分，3000 满），协议 v4。派实现者前用 `brief5b.py N` 生成简报。5A 计划：`docs/superpowers/plans/2026-10-22-stage5a-riverland.md`。
 - **5D 计划**：`docs/superpowers/plans/2026-10-28-stage5d-minimap.md`（`a502f21`，8 个任务：批 A 逻辑 1～3、B 视图和接线 4～6、C 收尾 7～8；末尾验收清单和 14 条与设计的偏差）。分支 `feat/stage5d-minimap`，目录 `/Users/murphy/Desktop/dev/BattleCity-stage5d`，从 main `12dd2f0` 拉出。派实现者前用 `brief5d.py N` 生成简报；试驾场回归比较用 `pngdiffdirs.py … --ignore-minimap`。
 - **下一步**：**等用户试玩阶段 5**（河谷地图、标准战、机器人、小地图，所有模式 × 两张图）。试玩意见回来后按意见改；没有要改的就开始阶段 6（吃鸡）的设计。遗留：5C 的 `BotSeating` 抽车型 `% 4` 偏（种子 11 九个机器人里八个 TD）；同一局带地图的重同步之后小地图的房子不再局部重画（正常重同步不会带地图）。
@@ -26,7 +26,7 @@
 | 2C 可破坏物（墙、栅栏、草丛、瓦砾、撞墙） | ✅ 已合入 main（`7d398b6`，squash） | 用户已试玩确认，没有要改的 |
 | 3 点亮 | ✅ 已合入 main（`cf0d593`，squash） | 用户已试玩确认，没有要改的 |
 | 4 联网 | ✅ 4A、4B、4C 已合入 main（4C `88044b6`），v0.3.0 已发版；待用户试玩 | 本文件“当前位置” |
-| 5 5v5 | ✅ 5A 河谷地图（`cc939c0`）、5B 标准战（`a147246`）、5C 机器人（`12dd2f0`）、5D 小地图都已 squash 合入本地 main（合入后五个项目 0 警告，Sim 1100、Net 294、Art 1238、Update 42）；待用户试玩 | 本文件“当前位置” |
+| 5 5v5 | ✅ 5A 河谷地图（`cc939c0`）、5B 标准战（`a147246`）、5C 机器人（`12dd2f0`）、5D 小地图（`7b1302f`）都已 squash 合入本地 main（合入后五个项目 0 警告，Sim 1100、Net 294、Art 1238、Update 42）；待用户试玩 | 本文件“当前位置” |
 | 6 吃鸡 | ⏳ 未开始 | |
 
 ## 5D 节点记录
