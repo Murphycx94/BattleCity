@@ -187,6 +187,45 @@ public sealed class BattleServerTests
         });
     }
 
+    [Fact]
+    public void A_running_royale_with_the_zone_shrinking_allocates_nothing_per_tick()
+    {
+        Allocation.AssertNone(() =>
+        {
+            const int MeasuredTicks = 300;
+            var rig = new Rig(TestMaps.Options(TestMaps.RoyaleStandIn()) with { Mode = BattleMode.Royale });
+            rig.Join(1, "p1");
+            rig.Join(2, "p2");
+            rig.StartMatch(1);
+            Assert.True(rig.Server.MatchRunning);
+            rig.Net.Capture = false;
+            MatchRules rules = rig.Server.Rules!;
+            while (rig.Server.Simulation!.Tick - rules.StartTick < ZoneSchedule.ShrinkStart(1) + 30) rig.Server.Tick();   // ring 1 shrinking
+
+            int firstTick = rig.Server.Simulation.Tick + 1;
+            var packets = new byte[2][][];
+            for (int h = 0; h < 2; h++)
+            {
+                packets[h] = new byte[MeasuredTicks][];
+                for (int i = 0; i < MeasuredTicks; i++)
+                    packets[h][i] = Input(firstTick + i, ack: firstTick + i - 2, steer: (sbyte)((i / 40 % 3) - 1), yaw: (i % 100) / 20f);
+            }
+
+            Allocation.Window window = Allocation.Start();
+            for (int i = 0; i < MeasuredTicks; i++)
+            {
+                for (int h = 0; h < 2; h++) rig.Net.Receive(h + 1, packets[h][i]);
+                rig.Server.Tick();
+            }
+            Allocation.Measured measured = window.Stop();
+
+            _output.WriteLine($"royale, 2 humans: {measured.Bytes} bytes allocated over {MeasuredTicks} ticks");
+            Assert.Equal(ZonePhase.Shrinking, rules.Zone.Phase);
+            Assert.Equal(MatchPhase.Playing, rules.Phase);
+            return measured;
+        });
+    }
+
     // ---- b. resync ----
 
     [Fact]

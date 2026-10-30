@@ -21,6 +21,8 @@ public sealed partial class BattleClient
     private readonly List<RemoteShell> _remoteShells = new(16);
     private readonly List<ShellView> _shellViews = new(16);
     private readonly Obb2[] _obstacles = new Obb2[Simulation.MaxTanks];
+    private readonly ZoneRing[] _zoneRings = new ZoneRing[BattleMessages.MaxZoneRings];
+    private int _zoneRingCount;
     private int _droppedPackets;
 
     // stats accumulators
@@ -44,6 +46,23 @@ public sealed partial class BattleClient
 
     public int OwnTankId { get; private set; }
     public BattleSnapshot? Latest => Store.Newest;
+
+    /// <summary>Whether this match has a zone: its match start carried one (a royale).</summary>
+    public bool HasZone => _zoneRingCount > 0;
+
+    /// <summary>The simulation tick the match started at, which the zone's clock counts from (0 without a zone).</summary>
+    public int ZoneStartTick { get; private set; }
+
+    /// <summary>The rings known so far: ring 0, then ring 1 up to the last announced; empty without a zone.</summary>
+    public ReadOnlySpan<ZoneRing> ZoneRings => _zoneRings.AsSpan(0, _zoneRingCount);
+
+    /// <summary>
+    /// The zone at server tick <paramref name="serverTick"/> (fractional: the interpolator's render tick) as far as the
+    /// rings known go (<see cref="ZoneState.At"/>); Phase None without a zone. For drawing and the HUD only: the server
+    /// alone deals the damage. No allocation.
+    /// </summary>
+    public ZoneState ZoneAt(double serverTick) =>
+        HasZone ? ZoneState.At(ZoneRings, (float)(serverTick - ZoneStartTick)) : default;
 
     /// <summary>The match as the newest snapshot shows it (no winner, nothing scored, before the first one).</summary>
     public MatchBlock Match => Latest?.Match ?? NoMatch;
@@ -96,6 +115,7 @@ public sealed partial class BattleClient
         Field = field;
         _needMap = false;
         OwnTankId = msg.MyTankId;
+        SetZone(ModeRules.HasZone(msg.Mode) ? msg.Zone : null);   // a zone in another mode's start is no zone of ours
         _pendingEvents.Clear();
         _remoteShells.Clear();
         if (resync) return;
@@ -115,11 +135,36 @@ public sealed partial class BattleClient
         MatchInfo = null;
         Field = null;
         OwnTankId = 0;
+        SetZone(null);
         _pendingEvents.Clear();
         _remoteShells.Clear();
         _shellViews.Clear();
         Predictor.Reset();
         _others.Clear();
+    }
+
+    /// <summary>A match start's zone replaces whatever was known (a new match, or a resync of this one); null: none.</summary>
+    private void SetZone(ZoneSync? zone)
+    {
+        _zoneRingCount = 0;
+        ZoneStartTick = 0;
+        if (zone is null) return;
+        int count = System.Math.Min(zone.Rings.Count, _zoneRings.Length);   // the reader allows at most that many
+        for (int k = 0; k < count; k++) _zoneRings[k] = zone.Rings[k];
+        _zoneRingCount = count;
+        ZoneStartTick = zone.StartTick;
+    }
+
+    /// <summary>
+    /// A ring announced: appended when it is the next one of this match. Another match's, one already known (sent again),
+    /// or one past a gap (the ring before it never came: a resync will bring them all) changes nothing. Reliable and in
+    /// order, so only a match start racing an announcement leaves either of the last two.
+    /// </summary>
+    private void HandleZone(ZoneMessage msg)
+    {
+        if (Phase != BattlePhase.InMatch || MatchInfo is null || msg.MatchNumber != MatchInfo.MatchNumber || !HasZone) return;
+        if (msg.Ring != _zoneRingCount || _zoneRingCount >= _zoneRings.Length) return;
+        _zoneRings[_zoneRingCount++] = msg.Circle;
     }
 
     private static Battlefield BuildField(MapData map)

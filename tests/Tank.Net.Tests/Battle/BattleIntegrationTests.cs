@@ -273,11 +273,12 @@ public sealed class BattleIntegrationTests
         Assert.Equal(BattlePhase.Disconnected, old.Phase);
         Assert.Contains("版本", old.DisconnectReason);
 
-        var full = new BattleHarness();
-        for (int i = 0; i < BattleProtocol.MaxPlayers; i++) full.AddClient($"P{i}");
+        var full = new BattleHarness();   // a team battle: 10 seats of the server's 16
+        int seats = ModeRules.MaxPlayersFor(BattleMode.TeamBattle);
+        for (int i = 0; i < seats; i++) full.AddClient($"P{i}");
         BattleClient extra = full.AddClient("Extra");
         full.Run(0.5);
-        Assert.Equal(BattleProtocol.MaxPlayers, full.Clients.Count(c => c.Phase == BattlePhase.Room));
+        Assert.Equal(seats, full.Clients.Count(c => c.Phase == BattlePhase.Room));
         Assert.Equal(BattlePhase.Disconnected, extra.Phase);
         Assert.Contains("满", extra.DisconnectReason);
     }

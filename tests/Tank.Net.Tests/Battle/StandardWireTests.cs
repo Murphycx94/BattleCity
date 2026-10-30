@@ -18,11 +18,9 @@ public sealed class StandardWireTests
     private const int BaseBytes = 1 + 3 * 4;   // team, x, z, radius
 
     [Fact]
-    public void The_protocol_is_version_4()
+    public void A_standard_match_start_takes_two_bases_at_most()
     {
-        Assert.Equal(4, BattleProtocol.Version);
-        Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
-        Assert.Equal(2, BattleMessages.MaxBases);
+        Assert.Equal(2, BattleMessages.MaxBases);   // the version is asserted in RoyaleWireTests
     }
 
     // ---- the mode ----
@@ -55,8 +53,8 @@ public sealed class StandardWireTests
     [Fact]
     public void A_room_of_another_version_with_a_mode_we_do_not_know_is_still_listed()
     {
-        RoomInfoMessage other = ReadRoomInfo(HandMadeRoomInfo(version: 5, mode: 9));
-        Assert.Equal(5, other.ProtocolVersion);
+        RoomInfoMessage other = ReadRoomInfo(HandMadeRoomInfo(version: 6, mode: 9));
+        Assert.Equal(6, other.ProtocolVersion);
         Assert.Equal(9, (byte)other.Mode);
         Assert.Equal(("老房", 2, 10, 27016, "riverland"), (other.RoomName, other.Players, other.MaxPlayers, other.Port, other.Map));
 
@@ -190,7 +188,7 @@ public sealed class StandardWireTests
 
         byte[] bytes = Encode(w => BattleMessages.Write(w, m));
         MatchStartMessage back = ReadMatchStart(bytes);
-        Assert.Equal(9 + 53053 + 7 + 1 + 1 + 2 * BaseBytes, bytes.Length);   // header and flags · map · two prop states · tank · two bases: 53097
+        Assert.Equal(9 + 53053 + 7 + 1 + 1 + 2 * BaseBytes + 1, bytes.Length);   // header and flags · map · two prop states · tank · two bases · no zone: 53098
         Assert.Equal(2, back.Bases!.Count);
         for (int i = 0; i < 2; i++)
         {
@@ -206,7 +204,7 @@ public sealed class StandardWireTests
         // Without bases: one byte, read back as an empty array (never null).
         byte[] none = Encode(w => BattleMessages.Write(w, m with { Bases = null }));
         Assert.Equal(bytes.Length - 2 * BaseBytes, none.Length);
-        Assert.Equal(0, none[^1]);
+        Assert.Equal(0, none[^2]);   // the base count; the ring count (none) follows
         MatchStartMessage noneBack = ReadMatchStart(none);
         Assert.NotNull(noneBack.Bases);
         Assert.Empty(noneBack.Bases);
@@ -299,7 +297,7 @@ public sealed class StandardWireTests
         var m = new MatchStartMessage(BattleMode.Standard, 3, 150, 18150, null, new[] { new PropState(300, 0) }, 7, SandboxMap.Bases);
         byte[] whole = Encode(w => BattleMessages.Write(w, m));
         ReadMatchStart(whole);
-        int countAt = whole.Length - 1 - 2 * BaseBytes;
+        int countAt = whole.Length - 1 - 2 * BaseBytes - 1;   // the ring count (none) last
         Assert.Equal(2, whole[countAt]);
         for (int len = countAt; len < whole.Length; len++)
         {
@@ -338,7 +336,8 @@ public sealed class StandardWireTests
         new BattleSnapshotCodec().Write(w, s, null, new ClientFeedback { LastProcessedInputTick = 18003, InputSlack = -3 });
 
         Assert.True(w.ByteLength < BattleServer.MaxUnreliableBytes, $"{w.ByteLength} bytes");
-        Assert.Equal(736, w.ByteLength);   // 5881 bits: v3's 5793, the match block's 18 more and 7 for each of the ten lines
+        Assert.Equal(815, w.ByteLength);
+        Assert.Equal(6515, w.BitLength);   // v4's 6235 (ten lines 5881, six more seats 59 bits each); v5: the entrants 8, a line 17 more (rank 5 bits, damage and lasted a byte each at 0)
         Assert.Equal(1000, BattleServer.MaxUnreliableBytes);
         BattleSnapshot back = Decode(w.Data.ToArray());
         Assert.Equal(s.Match, back.Match);
@@ -421,6 +420,7 @@ public sealed class StandardWireTests
         w.WriteByte(progress0);
         w.WriteByte(progress1);
         w.WriteBits((uint)MatchEndReason.None, 2);
+        w.WriteByte(0);        // no entrants
         w.WriteBool(false);    // no own tank
         w.WriteBool(false);    // the scoreboard, in full
         w.WriteBool(true);     // slot 0
@@ -430,8 +430,10 @@ public sealed class StandardWireTests
         w.WriteVarUInt(3);
         w.WriteVarUInt(1);
         w.WriteBool(true);
-        w.WriteBits(1, 4);
+        w.WriteBits(1, 5);     // rank
         w.WriteBits(capture, 7);
+        w.WriteVarUInt(0);     // damage
+        w.WriteVarUInt(0);     // lasted
         for (int i = 1; i < BattleProtocol.MaxPlayers; i++) w.WriteBool(false);
         w.WriteBool(false);    // no changed entities
         w.WriteBool(false);    // no removals
@@ -463,6 +465,7 @@ public sealed class StandardWireTests
         w.WriteVarUInt(0);     // no prop states
         w.WriteVarUInt(2);     // the client's tank
         bases(w);
+        w.WriteByte(0);        // no zone
     });
 
     /// <summary>The bases part of a match start: the count, then each base's team, x, z and radius.</summary>

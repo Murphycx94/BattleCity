@@ -20,6 +20,12 @@ public static class TankMotion
     private const float TieDepth = 0.01f;
     /// <summary>Minimum drop per metre travelled for a step to count as clearly downhill (an absolute margin would block the first, tiny steps from rest).</summary>
     private const float DescentGrade = 0.05f;
+    /// <summary>How far down the fall line a solid prop bars a hull's way down off ground too steep to climb.</summary>
+    private const float WayDownProbe = 1f;
+    /// <summary>Looking down the fall line for what bars the way down to ground a hull may climb, it steps this far at a time, m …</summary>
+    private const float WayDownStep = 0.5f;
+    /// <summary>… and gives up this far down (a face that long is one to slide down), m.</summary>
+    private const float WayDownReach = 8f;
 
     /// <summary>If collisions leave less than this fraction of the intended step, the hull was blocked head-on and stalls.</summary>
     private const float StallRatio = 0.25f;
@@ -71,8 +77,11 @@ public static class TankMotion
         int ignoredCount = KnockDown(ref t, Footprint(spec, start, oldYaw), Footprint(spec, start + intended, t.Yaw), field, felled, knockDown, ignored);
         ReadOnlySpan<int> through = ignored[..ignoredCount];
         Vector2 dest = field.ClampToPlayable(Resolve(Footprint(spec, start + intended, t.Yaw), field, obstacles, through));
-        if (IsTooSteepToEnter(spec, field.Terrain, start, dest)) dest = start;
-        (t.Position, t.Yaw) = SettleWithoutOverlap(spec, dest, t.Yaw, oldYaw, start, field, obstacles, through);
+        // Refused, the hull still turns, pushed out of whatever it swings into: on a slope it may not climb, a collision
+        // pushing it up is no climbing, and a hull nosed into a rock there could otherwise never turn away.
+        if (IsRefused(spec, field, start, start + intended, dest, t.Yaw, through))
+            dest = field.ClampToPlayable(Resolve(Footprint(spec, start, t.Yaw), field, obstacles, through));
+        (t.Position, t.Yaw) = SettleWithoutOverlap(spec, dest, t.Yaw, oldYaw, start, t.Speed * dt, field, obstacles, through);
 
         // Pushed almost straight back (head-on into a rock, a standing wall or fence, a tank or the map edge): stall.
         // A glancing contact keeps its speed so the hull slides along the obstacle.
@@ -230,35 +239,158 @@ public static class TankMotion
     }
 
     /// <summary>
-    /// A step is refused when the destination slope exceeds the climb limit and the step does not descend clearly:
-    /// the drop must be at least <see cref="DescentGrade"/> per metre and <see cref="DescentAlongFallLine"/> of the slope's own grade.
+    /// Whether the step from <paramref name="start"/>, sent to <paramref name="sent"/> by the throttle and pushed out of
+    /// what it met to <paramref name="dest"/>, is refused: when <see cref="IsTooSteepToEnter"/> refuses where it ends up,
+    /// unless the hull stands on ground too steep to climb (<see cref="IsOnSteepGround"/>) and the step it was sent on is
+    /// one it may take. A rock a hull on a cliff face slides along, its way down barred, pushes it a little up the slope
+    /// unless the face it meets lies square to the fall line, and that push made every step a climb: hulls sliding along
+    /// the riverland's rock-lined cliff faces (the plateau's east cliff, the north cliff) stuck at the first rock that
+    /// leaned into their way. A collision pushing a hull up is no climbing, as when it turns. Only a step refused before
+    /// can be allowed now, never the other way round.
     /// </summary>
-    private static bool IsTooSteepToEnter(TankSpec spec, HeightField terrain, Vector2 start, Vector2 dest)
+    private static bool IsRefused(TankSpec spec, Battlefield field, Vector2 start, Vector2 sent, Vector2 dest, float yaw, ReadOnlySpan<int> through)
     {
-        float slope = MathF.Acos(System.Math.Clamp(terrain.NormalAt(dest.X, dest.Y).Y, -1f, 1f));
-        if (slope <= spec.MaxClimb) return false;
-        float requiredDrop = MathF.Max(DescentGrade, DescentAlongFallLine * MathF.Tan(slope)) * Vector2.Distance(start, dest);
-        return terrain.HeightAt(dest.X, dest.Y) > terrain.HeightAt(start.X, start.Y) - requiredDrop;
+        if (!IsTooSteepToEnter(spec, field, start, dest, yaw, through)) return false;
+        return dest == sent || !IsOnSteepGround(spec, field.Terrain, start) || IsTooSteepToEnter(spec, field, start, field.ClampToPlayable(sent), yaw, through);
+    }
+
+    /// <summary>Whether the ground at <paramref name="p"/> is too steep to climb by both measures (see <see cref="IsTooSteepToEnter"/>).</summary>
+    public static bool IsOnSteepGround(TankSpec spec, HeightField terrain, Vector2 p) =>
+        IsTooSteep(spec, terrain.NormalAt(p.X, p.Y)) && IsTooSteep(spec, terrain.SurfaceNormalAt(p.X, p.Y));
+
+    /// <summary>
+    /// A step is refused when the ground at its destination is steeper than the climb limit and the step does not head
+    /// down it (<see cref="HeadsDown"/>), by both measures of that ground: the slope over a metre either side
+    /// (<see cref="HeightField.NormalAt"/>) and the surface's own slope there (<see cref="HeightField.SurfaceNormalAt"/>).
+    /// The first alone spreads a cliff a metre onto the flat ground at its foot and lip, where every step but one
+    /// straight off the cliff was refused: a hull pushed into the corner of the plateau's foot could never leave. Nor is
+    /// a step refused while a solid prop bars the hull's way down (<see cref="IsWayDownBarred"/>) if it climbs no steeper
+    /// than the hull can: across the slope is then the only way out. Nor, if it does not climb at all, while the hull,
+    /// turned down the slope, could not get down it to ground it may climb (<see cref="IsWayDownShut"/>): a rock further
+    /// below than that, with the gap between it and the slope's foot narrower than a hull, shuts the way down as surely
+    /// (rocks line the riverland's cliff feet so, and hulls halfway up a face above them could neither go down nor along).
+    /// Nor while the hull's centre has only slid over the slope's lip, its uphill side still on the ground above
+    /// (<see cref="IsHeldUpAbove"/>): it drives on along the lip, as it drove there. A step the first measure allows is
+    /// allowed as before, by the same sums.
+    /// </summary>
+    private static bool IsTooSteepToEnter(TankSpec spec, Battlefield field, Vector2 start, Vector2 dest, float yaw, ReadOnlySpan<int> through)
+    {
+        HeightField terrain = field.Terrain;
+        Vector3 smooth = terrain.NormalAt(dest.X, dest.Y);
+        if (!IsTooSteep(spec, smooth) || HeadsDown(terrain, smooth, start, dest)) return false;
+        Vector3 surface = terrain.SurfaceNormalAt(dest.X, dest.Y);
+        if (!IsTooSteep(spec, surface) || HeadsDown(terrain, surface, start, dest)) return false;
+        if (IsHeldUpAbove(spec, terrain, dest, surface)) return false;
+        float climb = terrain.HeightAt(dest.X, dest.Y) - terrain.HeightAt(start.X, start.Y);
+        if (climb <= MathF.Tan(spec.MaxClimb) * Vector2.Distance(start, dest) && IsWayDownBarred(spec, field, dest, yaw, surface, through)) return false;
+        return climb > 0f || !IsWayDownShut(spec, field, dest, surface, through);
+    }
+
+    private static float SlopeOf(Vector3 normal) => MathF.Acos(System.Math.Clamp(normal.Y, -1f, 1f));
+
+    private static bool IsTooSteep(TankSpec spec, Vector3 normal) => SlopeOf(normal) > spec.MaxClimb;
+
+    /// <summary>
+    /// Whether the step from <paramref name="start"/> to <paramref name="dest"/> heads down ground too steep to climb
+    /// whose normal is <paramref name="normal"/>: it drops at least <see cref="DescentGrade"/> per metre and
+    /// <see cref="DescentAlongFallLine"/> of the slope's grade, or it points within 60 degrees of the fall line (the
+    /// cosine at least <see cref="DescentAlongFallLine"/>) without climbing. On an even slope the two agree; they part
+    /// where the slope bends, as from a slope onto a steeper one below it, where the step still drops at the gentler grade.
+    /// </summary>
+    private static bool HeadsDown(HeightField terrain, Vector3 normal, Vector2 start, Vector2 dest)
+    {
+        float length = Vector2.Distance(start, dest);
+        float requiredDrop = MathF.Max(DescentGrade, DescentAlongFallLine * MathF.Tan(SlopeOf(normal))) * length;
+        float from = terrain.HeightAt(start.X, start.Y), to = terrain.HeightAt(dest.X, dest.Y);
+        if (!(to > from - requiredDrop)) return true;
+        var downhill = new Vector2(normal.X, normal.Z);   // the normal leans downhill; never upright on ground this steep
+        return to <= from && Vector2.Dot(dest - start, downhill) >= DescentAlongFallLine * length * downhill.Length();
+    }
+
+    /// <summary>
+    /// Whether a solid prop that holds hulls up (<see cref="Blocks"/>) stands within <see cref="WayDownProbe"/> of the
+    /// hull at <paramref name="at"/> down the fall line of the ground whose normal is <paramref name="normal"/>.
+    /// </summary>
+    private static bool IsWayDownBarred(TankSpec spec, Battlefield field, Vector2 at, float yaw, Vector3 normal, ReadOnlySpan<int> ignored)
+    {
+        Vector2 down = Vector2.Normalize(new Vector2(normal.X, normal.Z)) * WayDownProbe;
+        return PenetrationDepth(Footprint(spec, at + down, yaw), field, ReadOnlySpan<Obb2>.Empty, ignored) > 0f;
+    }
+
+    /// <summary>
+    /// Whether ground the hull may climb (by either measure) lies within half its width of <paramref name="at"/> up the
+    /// fall line of the ground whose normal is <paramref name="normal"/>: the hull's centre has slid over the lip of a
+    /// slope too steep to climb, its uphill side still on the ground above. (Entering a 2 m steep cell from below, the
+    /// ground above is further than that, so no cliff can be climbed this way.)
+    /// </summary>
+    private static bool IsHeldUpAbove(TankSpec spec, HeightField terrain, Vector2 at, Vector3 normal)
+    {
+        Vector2 up = -Vector2.Normalize(new Vector2(normal.X, normal.Z));
+        float reach = spec.HullWidth / 2;
+        for (float d = WayDownStep; ; d += WayDownStep)
+        {
+            float to = MathF.Min(d, reach);
+            if (!IsOnSteepGround(spec, terrain, at + up * to)) return true;
+            if (to >= reach) return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a hull at <paramref name="at"/>, turned to face down the fall line of the ground whose normal is
+    /// <paramref name="normal"/> and moved down it <see cref="WayDownStep"/> at a time, meets a solid prop that holds hulls
+    /// up (<see cref="Blocks"/>) before its centre reaches ground it may climb (by either measure), within
+    /// <see cref="WayDownReach"/>.
+    /// </summary>
+    private static bool IsWayDownShut(TankSpec spec, Battlefield field, Vector2 at, Vector3 normal, ReadOnlySpan<int> ignored)
+    {
+        HeightField terrain = field.Terrain;
+        Vector2 down = Vector2.Normalize(new Vector2(normal.X, normal.Z));
+        float yaw = Angles.YawOf(down);
+        for (int k = 0; k * WayDownStep <= WayDownReach; k++)
+        {
+            Vector2 p = at + down * (k * WayDownStep);
+            if (PenetrationDepth(Footprint(spec, p, yaw), field, ReadOnlySpan<Obb2>.Empty, ignored) > 0f) return true;
+            if (k > 0 && !IsOnSteepGround(spec, terrain, p)) return false;
+        }
+        return false;
     }
 
     /// <summary>
     /// Picks the first pose that is clear of every standing solid prop and obstacle: new heading at the resolved position,
-    /// old heading there, then the old pose. If none is clear (a wedged hull) the least-penetrating one wins, so the tank
-    /// can still drive out (ties go to the earlier candidate).
+    /// old heading there, the old heading where the hull gets to driving <paramref name="step"/> straight on (when it was
+    /// turning: <see cref="DriveStraight"/>), then the old pose. If none is clear (a wedged hull) the least-penetrating one
+    /// wins, so the tank can still drive out (ties go to the earlier candidate). Without the third a hull wedged so that it
+    /// can't turn one way went nowhere at all while steered that way, driving as well as turning on the spot: a bot
+    /// steering for its path between two rocks below the riverland plateau's east cliff sat there for good.
     /// </summary>
     private static (Vector2 Position, float Yaw) SettleWithoutOverlap(
-        TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
+        TankSpec spec, Vector2 dest, float yaw, float oldYaw, Vector2 oldPosition, float step, Battlefield field, ReadOnlySpan<Obb2> obstacles,
+        ReadOnlySpan<int> ignored)
     {
-        Span<(Vector2 Position, float Yaw)> candidates = stackalloc (Vector2, float)[3] { (dest, yaw), (dest, oldYaw), (oldPosition, oldYaw) };
+        Span<(Vector2 Position, float Yaw)> candidates = stackalloc (Vector2, float)[4] { (dest, yaw), (dest, oldYaw), (oldPosition, oldYaw), (oldPosition, oldYaw) };
         var best = candidates[0];
         float bestDepth = float.MaxValue;
-        foreach (var candidate in candidates)
+        for (int k = 0; k < candidates.Length; k++)
         {
+            if (k == 2)
+            {
+                if (yaw == oldYaw) continue;
+                candidates[2].Position = DriveStraight(spec, oldPosition, oldYaw, step, field, obstacles, ignored);
+            }
+            var candidate = candidates[k];
             float depth = PenetrationDepth(Footprint(spec, candidate.Position, candidate.Yaw), field, obstacles, ignored);
             if (depth <= Skin * 0.5f) return candidate;
             if (depth < bestDepth - TieDepth) (best, bestDepth) = (candidate, depth);
         }
         return best;
+    }
+
+    /// <summary>Where the hull at <paramref name="start"/> facing <paramref name="yaw"/> gets to driving <paramref name="step"/> straight on, by the same rules as any step.</summary>
+    private static Vector2 DriveStraight(TankSpec spec, Vector2 start, float yaw, float step, Battlefield field, ReadOnlySpan<Obb2> obstacles, ReadOnlySpan<int> ignored)
+    {
+        Vector2 sent = start + Angles.Forward(yaw) * step;
+        Vector2 dest = field.ClampToPlayable(Resolve(Footprint(spec, sent, yaw), field, obstacles, ignored));
+        return IsRefused(spec, field, start, sent, dest, yaw, ignored) ? field.ClampToPlayable(Resolve(Footprint(spec, start, yaw), field, obstacles, ignored)) : dest;
     }
 
     /// <summary>Deepest overlap of <paramref name="box"/> with any standing solid prop that <see cref="Blocks"/> or obstacle; 0 when clear.</summary>

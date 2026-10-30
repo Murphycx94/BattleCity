@@ -180,7 +180,7 @@ public class RoomMapModelTests
 
     private static LanRoomRow LanRow(int version, string map) =>
         LanRoomRow.From(new DiscoveredRoom(new IPEndPoint(IPAddress.Parse("192.168.1.20"), 47001),
-            new RoomInfoMessage(version, "Alpha", BattleMode.TeamBattle, 3, BattleProtocol.MaxPlayers, false, 47001, map), 7, 0));
+            new RoomInfoMessage(version, "Alpha", BattleMode.TeamBattle, 3, ModeRules.MaxPlayersFor(BattleMode.TeamBattle), false, 47001, map), 7, 0));
 
     [Fact]
     public void The_lan_row_shows_the_map()

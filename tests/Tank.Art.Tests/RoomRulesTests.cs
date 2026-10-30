@@ -24,10 +24,11 @@ public class RoomRulesTests
         private readonly List<BattleClient> _clients = new();
         private double _accumulator;
 
-        /// <param name="map">The room's only map; null for the server's default maps.</param>
-        public Room(int humans, MapDefinition? map = null)
+        /// <param name="map">The room's first map; null for the server's default (the sandbox).</param>
+        /// <param name="maps">The maps the room may switch to; null for <paramref name="map"/> alone (the server's default maps without a map).</param>
+        public Room(int humans, MapDefinition? map = null, IReadOnlyList<MapDefinition>? maps = null)
         {
-            Server = new BattleServer(_net.CreateServer(), map is null ? new BattleServerOptions { Seed = 5 } : new BattleServerOptions { Seed = 5, Map = map, Maps = new[] { map } });
+            Server = new BattleServer(_net.CreateServer(), map is null ? new BattleServerOptions { Seed = 5 } : new BattleServerOptions { Seed = 5, Map = map, Maps = maps ?? new[] { map } });
             for (int i = 0; i < humans; i++) _clients.Add(new BattleClient(_net.Connect(), $"P{i}", () => _net.Now));
             Run(0.5);
         }
@@ -56,10 +57,12 @@ public class RoomRulesTests
     private static readonly MapDefinition NoBases = new("nobases", "无基地", SandboxMap.Create, SandboxMap.Spawns, SandboxMap.Waypoints);
 
     /// <summary>Builds the room, lets the rules predict, then starts it for real; returns (predicted, actual, the reason).</summary>
-    /// <param name="map">The room's only map; null for the server's default maps.</param>
-    private static (bool Predicted, bool Actual, string? Reason) Try(BattleMode mode, int humans, int bots, byte[]? teams, MapDefinition? map = null)
+    /// <param name="map">The room's first map; null for the server's default maps.</param>
+    /// <param name="maps">The maps the room may switch to; null for <paramref name="map"/> alone.</param>
+    private static (bool Predicted, bool Actual, string? Reason) Try(BattleMode mode, int humans, int bots, byte[]? teams, MapDefinition? map = null,
+        IReadOnlyList<MapDefinition>? maps = null)
     {
-        var room = new Room(humans, map);
+        var room = new Room(humans, map, maps);
         room.Host.SetMode(mode);
         room.Host.SetBots(bots);
         if (teams is not null)
@@ -70,7 +73,7 @@ public class RoomRulesTests
         Assert.Equal(mode, state.Mode);
         Assert.Equal(bots, state.Bots);
         Assert.Equal(humans, state.Players.Count);
-        string? reason = map is null ? RoomRules.StartBlockReason(state) : RoomRules.StartBlockReason(state, new[] { map });
+        string? reason = map is null ? RoomRules.StartBlockReason(state) : RoomRules.StartBlockReason(state, maps ?? new[] { map });
 
         room.Host.StartMatch();
         room.Run(0.5);
@@ -78,31 +81,79 @@ public class RoomRulesTests
         return (reason is null, room.Server.MatchRunning, reason);
     }
 
+    /// <summary>
+    /// Every mode on both real maps (the room starts on the map, the catalogue's maps to switch to): a royale room asked for on the
+    /// sandbox moves to the riverland, as the server has it (<see cref="A_royale_on_another_map_is_blocked_with_the_reason"/> covers
+    /// the sandbox itself, which a server never holds a royale room on).
+    /// </summary>
     public static IEnumerable<object[]> Combinations()
     {
         byte[] split = { 0, 1 };
         byte[] together = { 0, 0 };
+        foreach (string map in new[] { SandboxMap.Id, RiverlandMap.Id })
         foreach (BattleMode mode in ModeRules.All)
         {
-            yield return new object[] { mode, 1, 0, null! };
-            yield return new object[] { mode, 1, 2, null! };
-            yield return new object[] { mode, 2, 0, split };
-            yield return new object[] { mode, 2, 2, split };
-            yield return new object[] { mode, 2, 0, together };
-            yield return new object[] { mode, 2, 1, together };
+            yield return new object[] { mode, 1, 0, null!, map };
+            yield return new object[] { mode, 1, 2, null!, map };
+            yield return new object[] { mode, 2, 0, split, map };
+            yield return new object[] { mode, 2, 2, split, map };
+            yield return new object[] { mode, 2, 0, together, map };
+            yield return new object[] { mode, 2, 1, together, map };
         }
-        yield return new object[] { BattleMode.TeamBattle, 1, 1, null! };
-        yield return new object[] { BattleMode.FreeForAll, 1, 1, null! };
-        yield return new object[] { BattleMode.TeamBattle, 2, 9, split };
+        yield return new object[] { BattleMode.TeamBattle, 1, 1, null!, SandboxMap.Id };
+        yield return new object[] { BattleMode.FreeForAll, 1, 1, null!, SandboxMap.Id };
+        yield return new object[] { BattleMode.TeamBattle, 2, 9, split, SandboxMap.Id };
+        yield return new object[] { BattleMode.Royale, 2, 14, null!, RiverlandMap.Id };
     }
 
     [Theory]
     [MemberData(nameof(Combinations))]
-    public void The_rules_agree_with_the_server_on_whether_the_match_starts(BattleMode mode, int humans, int bots, byte[]? teams)
+    public void The_rules_agree_with_the_server_on_whether_the_match_starts(BattleMode mode, int humans, int bots, byte[]? teams, string mapId)
     {
-        (bool predicted, bool actual, string? reason) = Try(mode, humans, bots, teams);
+        Assert.True(MapCatalog.TryGet(mapId, out MapDefinition? map));
+        (bool predicted, bool actual, string? reason) = Try(mode, humans, bots, teams, map, MapCatalog.All);
 
         Assert.True(predicted == actual, $"rules said {(predicted ? "can start" : $"blocked ({reason})")}, the server {(actual ? "started" : "refused")}");
+    }
+
+    [Fact]
+    public void A_royale_on_another_map_is_blocked_with_the_reason()
+    {
+        RoomPlayer[] two = { new(0, "P0", 0, 1, false, true, false), new(1, "P1", 1, 1, false, true, false) };
+        foreach (BattleMode mode in ModeRules.All)
+        {
+            var onSandbox = new RoomStateMessage(mode, 0, 0, false, two, SandboxMap.Id, MapState.Ready);
+            var onRiverland = onSandbox with { Map = RiverlandMap.Id };
+            Assert.Null(RoomRules.StartBlockReason(onRiverland));
+            if (mode == BattleMode.Royale) Assert.Equal("吃鸡只在河谷开：换到河谷。", RoomRules.StartBlockReason(onSandbox));
+            else Assert.Null(RoomRules.StartBlockReason(onSandbox));
+        }
+    }
+
+    [Fact]
+    public void A_royale_room_on_the_sandbox_moves_to_the_riverland_and_starts_there()
+    {
+        var room = new Room(1, MapCatalog.Sandbox, MapCatalog.All);
+        room.Host.SetMode(BattleMode.Royale);
+        room.Host.SetBots(15);
+        room.Run(0.5);
+
+        RoomStateMessage state = room.Host.Room!;
+        Assert.Equal((BattleMode.Royale, RiverlandMap.Id, (byte)15), (state.Mode, state.Map, state.Bots));
+        Assert.Null(RoomRules.StartBlockReason(state));
+        Assert.Equal(15, RoomRules.PlanFor(state).Bots);
+        room.Host.StartMatch();
+        room.Run(0.5);
+        Assert.True(room.Server.MatchRunning);
+        Assert.Equal(16, room.Server.Simulation!.TankCount);
+    }
+
+    [Fact]
+    public void The_plan_caps_the_bots_by_the_modes_seats()
+    {
+        RoomPlayer[] one = { new(0, "P0", 0, 1, false, true, false) };
+        Assert.Equal(15, RoomRules.PlanFor(new RoomStateMessage(BattleMode.Royale, 0, 15, false, one, RiverlandMap.Id, MapState.Ready)).Bots);
+        Assert.Equal(9, RoomRules.PlanFor(new RoomStateMessage(BattleMode.TeamBattle, 0, 15, false, one, RiverlandMap.Id, MapState.Ready)).Bots);   // an older room's 15
     }
 
     [Theory]

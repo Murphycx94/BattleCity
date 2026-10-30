@@ -94,6 +94,50 @@ public class MatchHudFrameTests
     }
 
     [Fact]
+    public void The_zone_is_handed_on_as_given_and_is_off_by_default()
+    {
+        var settings = new HostSettings("Tester", "Tester's room", Port: 47106, BattleMode.FreeForAll, Bots: 0, Seed: 7, MatchSeconds: null);
+        using BattleSession session = BattleSession.HostLoopback(settings, _ => { });
+        var names = new string?[BattleProtocol.MaxPlayers];
+        var zone = new ZoneHud(true, 3, ZonePhase.Shrinking, 30, true, 4);
+
+        MatchHudFrame given = MatchHudFrame.From(session.Client, session, 0, names, 60, zone: zone);
+        MatchHudFrame plain = MatchHudFrame.From(session.Client, session, 0, names, 60);
+
+        Assert.Equal(zone, given.Zone);
+        Assert.Equal(default, plain.Zone);
+        Assert.False(plain.Zone.On);
+        Assert.Equal(0, plain.Results.Entrants);
+    }
+
+    /// <summary>A royale on the riverland, the player and three bots: the frame's results carry the four entrants from the start (deviation 8).</summary>
+    [Fact]
+    public void A_royale_frame_counts_its_entrants()
+    {
+        var settings = new HostSettings("Tester", "Tester's room", Port: 47107, BattleMode.Royale, Bots: 3, Seed: 7, MatchSeconds: null, Map: Tank.Sim.Maps.RiverlandMap.Id);
+        using BattleSession session = BattleSession.HostLoopback(settings, _ => { });
+        var auto = new AutoRoom(null, BattleMode.Royale, 3, autoStart: true);
+        BattleClient client = session.Client;
+        double startedAt = -1;
+        for (int i = 0; i < 20 * 60 && (startedAt < 0 || session.Now - startedAt < 3); i++)
+        {
+            Step(session, auto);
+            if (startedAt < 0 && client.Phase == BattlePhase.InMatch && client.Latest is not null) startedAt = session.Now;
+        }
+        Assert.True(startedAt >= 0, "the match never started");
+
+        MatchHudFrame frame = MatchHudFrame.From(client, session, 0, new string?[BattleProtocol.MaxPlayers], fps: 60);
+
+        Assert.Equal(BattleMode.Royale, frame.Mode);
+        Assert.Equal(MatchPhase.Playing, frame.Phase);
+        Assert.Equal(4, frame.Players.Count(p => p.Active));
+        Assert.Equal(4, frame.Results.Entrants);
+        Assert.Equal(PlateKind.SoloKills, frame.Plate.Kind);
+        Assert.Equal((4, 4), (frame.Plate.Right, frame.Plate.RightOf));
+        Assert.True(client.HasZone, "the royale's match start carried its zone");
+    }
+
+    [Fact]
     public void A_tank_id_finds_its_slot_among_the_active_players_only()
     {
         var players = new PlayerStats[BattleProtocol.MaxPlayers];

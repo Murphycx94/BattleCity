@@ -101,17 +101,18 @@ public class LaunchOptionsTests
     }
 
     [Fact]
-    public void A_bad_mode_warning_lists_all_four_modes()
+    public void A_bad_mode_warning_lists_all_five_modes()
     {
         string warning = Assert.Single(LaunchOptions.Parse(new[] { "--mode", "nope" }).Warnings);
 
-        Assert.Contains("teambattle|annihilation|ffa|standard", warning);
+        Assert.Contains("teambattle|annihilation|ffa|standard|royale", warning);
     }
 
     [Theory]
     [InlineData("3", 3)]
     [InlineData("0", 0)]
     [InlineData("9", 9)]
+    [InlineData("15", 15)]
     public void Bots_in_range_pass_without_a_warning(string value, int expected)
     {
         LaunchOptions options = LaunchOptions.Parse(new[] { "--bots", value });
@@ -120,8 +121,8 @@ public class LaunchOptionsTests
     }
 
     [Theory]
-    [InlineData("10", 9)]
-    [InlineData("99", 9)]
+    [InlineData("16", 15)]
+    [InlineData("99", 15)]
     [InlineData("-2", 0)]
     public void Bots_out_of_range_are_clamped_with_a_warning(string value, int expected)
     {
@@ -255,9 +256,10 @@ public class LaunchOptionsTests
     public void Players_above_a_full_room_are_clamped_with_a_warning()
     {
         Assert.Equal(BattleProtocol.MaxPlayers, LaunchOptions.Parse(new[] { "--players", BattleProtocol.MaxPlayers.ToString() }).Players);
-        LaunchOptions options = LaunchOptions.Parse(new[] { "--players", "11" });
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--players", "17" });
         Assert.Equal(BattleProtocol.MaxPlayers, options.Players);
-        Assert.Contains("--players 11", Assert.Single(options.Warnings));
+        Assert.Equal(16, options.Players);
+        Assert.Contains("--players 17", Assert.Single(options.Warnings));
     }
 
     [Theory]
@@ -319,5 +321,47 @@ public class LaunchOptionsTests
         Assert.True(options.Host);
         Assert.Equal("riverland", options.Map);
         Assert.Empty(options.Warnings);
+    }
+
+    [Fact]
+    public void Hosting_a_royale_is_on_the_riverland_whatever_map_was_asked_for()
+    {
+        LaunchOptions sandbox = LaunchOptions.Parse(new[] { "--host", "--mode", "royale", "--map", "sandbox" });
+        LaunchOptions plain = LaunchOptions.Parse(new[] { "--host", "--mode", "royale" });
+        LaunchOptions riverland = LaunchOptions.Parse(new[] { "--host", "--map", "riverland", "--mode", "royale" });
+
+        Assert.Equal(BattleMode.Royale, sandbox.Mode);
+        Assert.Equal("riverland", sandbox.HostMap);
+        Assert.Equal("sandbox", sandbox.Map);   // what was asked for stays readable (the sandbox would use it)
+        Assert.Equal("--mode royale is played on the riverland only; hosting on the riverland.", Assert.Single(sandbox.Warnings));
+        Assert.Equal("riverland", plain.HostMap);
+        Assert.Empty(plain.Warnings);
+        Assert.Equal("riverland", riverland.HostMap);
+        Assert.Empty(riverland.Warnings);
+    }
+
+    [Fact]
+    public void The_host_map_is_the_one_asked_for_else_the_riverland()
+    {
+        LaunchOptions ffa = LaunchOptions.Parse(new[] { "--host", "--mode", "ffa", "--map", "sandbox" });
+        LaunchOptions none = LaunchOptions.Parse(new[] { "--host" });
+        LaunchOptions notHosting = LaunchOptions.Parse(new[] { "--mode", "royale", "--map", "sandbox" });
+
+        Assert.Equal("sandbox", ffa.HostMap);
+        Assert.Empty(ffa.Warnings);
+        Assert.Equal("riverland", none.HostMap);
+        Assert.Equal("riverland", LaunchOptions.Parse(Array.Empty<string>()).HostMap);
+        Assert.Empty(notHosting.Warnings);   // without --host the map is the sandbox's: nothing to warn about
+        Assert.Equal("sandbox", notHosting.Map);
+    }
+
+    [Fact]
+    public void Shot_after_waits_for_the_first_time_outside_the_zone()
+    {
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--shot-after", "outside:2" });
+
+        Assert.Equal(("outside", 2.0), (options.ShotAfterEvent, options.ShotAfterDelay));
+        Assert.Empty(options.Warnings);
+        Assert.Contains("outside", Assert.Single(LaunchOptions.Parse(new[] { "--shot-after", "wall:1" }).Warnings));
     }
 }

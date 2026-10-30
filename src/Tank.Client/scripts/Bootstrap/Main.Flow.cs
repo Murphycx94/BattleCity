@@ -6,7 +6,6 @@ using Tank.Client.Online;
 using Tank.Client.Sandbox;
 using Tank.Client.UI;
 using Tank.Net.Battle;
-using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 
 namespace Tank.Client.Bootstrap;
@@ -21,9 +20,9 @@ public partial class Main
     {
         LeaveOld();
         _joined = null;
-        // A room opens on --map when given, else on the riverland (stage 5 design §2).
+        // A room opens on the mode's own map when it has one (a royale: the riverland), else on --map when given, else on the riverland (stage 5 design §2).
         var settings = new HostSettings(name, $"{name}的房间", _options.Port, _options.Mode ?? BattleMode.TeamBattle, _options.Bots, _options.Seed,
-            _options.MatchSeconds, _options.Map ?? MapCatalog.Riverland.Id);
+            _options.MatchSeconds, _options.HostMap);
         try
         {
             BattleSession session = _options.Loopback

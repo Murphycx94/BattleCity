@@ -318,17 +318,18 @@ public sealed class BattleProtocolTests
         }
         // A map that claims a million samples but carries none: refused before the heights are allocated.
         w.Reset();
-        w.WriteByte((byte)BattleMessage.MatchStart); w.WriteBits(0, 2); w.WriteVarUInt(1); w.WriteVarUInt(1); w.WriteVarUInt(100);
+        w.WriteByte((byte)BattleMessage.MatchStart); w.WriteByte((byte)BattleMode.TeamBattle); w.WriteVarUInt(1); w.WriteVarUInt(1); w.WriteVarUInt(100);
+        w.WriteByte(1);   // the map follows
         w.WriteVarUInt(1000); w.WriteVarUInt(1000); BattleMessages.WriteFloat(w, 2f); BattleMessages.WriteFloat(w, 4f);
-        Assert.Throws<ProtocolException>(() => { BitReader r = ReaderFor(w, BattleMessage.MatchStart); BattleMessages.ReadMatchStart(ref r); });
+        Assert.Contains("shorter", Assert.Throws<ProtocolException>(() => { BitReader r = ReaderFor(w, BattleMessage.MatchStart); BattleMessages.ReadMatchStart(ref r); }).Message);
     }
 
     [Fact]
     public void The_protocol_constants_are_the_designs_numbers()
     {
-        Assert.Equal(4, BattleProtocol.Version);
+        Assert.Equal(5, BattleProtocol.Version);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
-        Assert.Equal(10, BattleProtocol.MaxPlayers);
+        Assert.Equal(16, BattleProtocol.MaxPlayers);
         Assert.Equal(64, BattleSeat.HistorySize);
         Assert.Equal(30.0, new BattleServerOptions().ReconnectGraceSeconds);
         Assert.Equal(8.0, new BattleServerOptions().ReturnToRoomSeconds);
@@ -383,13 +384,14 @@ public sealed class BattleProtocolTests
         w.WriteByte(0);   // the bases' progress
         w.WriteByte(0);
         w.WriteBits(0, 2);   // no end reason
+        w.WriteByte(0);      // no entrants
         w.WriteBool(own is not null);
         if (own is not null)
         {
             w.WriteBool(false);   // not "same as the baseline"
             own(w);
         }
-        w.WriteBool(false);   // the scoreboard, in full: ten empty lines
+        w.WriteBool(false);   // the scoreboard, in full: sixteen empty lines
         for (int i = 0; i < BattleProtocol.MaxPlayers; i++) w.WriteBool(false);
         if (entity is not null)
         {
@@ -519,6 +521,7 @@ public sealed class BattleProtocolTests
         w.WriteVarUInt(0);   // no props
         w.WriteVarUInt(tank);
         w.WriteByte(0);      // no bases
+        w.WriteByte(0);      // no zone
         return Bytes(w);
     }
 
@@ -587,8 +590,8 @@ public sealed class BattleProtocolTests
 
     [Theory]
     [InlineData(5, 3)]     // more players than the room holds
-    [InlineData(11, 11)]   // a room bigger than the protocol's ten seats
-    [InlineData(1, 11)]
+    [InlineData(17, 17)]   // a room bigger than the protocol's sixteen seats
+    [InlineData(1, 17)]
     [InlineData(300, 300)]
     [InlineData(0, 255)]
     public void A_room_info_with_impossible_counts_is_a_protocol_error(int players, int max)

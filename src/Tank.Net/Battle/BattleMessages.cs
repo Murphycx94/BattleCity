@@ -67,8 +67,19 @@ public readonly record struct PropState(int PropId, byte Durability);
 /// The teams' bases in a standard match (stage 5 design §3.3), for the rings on the ground and the minimap: null or empty
 /// for none, else one per team (<see cref="TeamBase.Check"/>). Never null once read: an empty array.
 /// </param>
+/// <param name="Zone">A royale's zone (stage 6 design §3.5): the match's start tick and the rings announced so far; null for none.</param>
 public sealed record MatchStartMessage(BattleMode Mode, int MatchNumber, int CurrentTick, int EndTick, MapData? Map, IReadOnlyList<PropState> Props, int MyTankId,
-    IReadOnlyList<TeamBase>? Bases = null);
+    IReadOnlyList<TeamBase>? Bases = null, ZoneSync? Zone = null);
+
+/// <summary>
+/// A royale's zone in a match start (stage 6 design §3.5): the simulation tick the match started at (what
+/// <see cref="ZoneState.At"/>'s elapsed ticks count from) and the rings announced so far, ring 0 first: 2 to
+/// <see cref="BattleMessages.MaxZoneRings"/> of them.
+/// </summary>
+public sealed record ZoneSync(int StartTick, IReadOnlyList<ZoneRing> Rings);
+
+/// <summary>Ring <paramref name="Ring"/> (1–5) of match <paramref name="MatchNumber"/>, sent reliably when its waiting begins (stage 6 design §3.5).</summary>
+public sealed record ZoneMessage(int MatchNumber, byte Ring, ZoneRing Circle);
 
 /// <summary>A client asks for the match state again (<see cref="BattleMessage.RequestMatchState"/>).</summary>
 /// <param name="NeedMap">
@@ -94,6 +105,12 @@ public static class BattleMessages
     /// <summary>The most bases a match start may carry: one per team of a standard match.</summary>
     public const int MaxBases = 2;
 
+    /// <summary>The most rings a match start may carry: ring 0 and rings 1–5.</summary>
+    public const int MaxZoneRings = 1 + ZoneSchedule.Rings;
+
+    /// <summary>The fewest rings a match start with a zone carries: ring 0 and ring 1, known from the start.</summary>
+    public const int MinZoneRings = 2;
+
     private const int MaxEventsPerBatch = 1024;
     private const int MaxPropsPerMessage = 4096;   // prop states in an event batch
     private const int MaxMapSamples = 1024 * 1024;
@@ -107,7 +124,9 @@ public static class BattleMessages
     private const int MaxMatchStartHeaderBytes = 3 + 3 * MaxVarUIntBytes;   // type, mode, flags and three numbers
     private const int MapInRoomInfoVersion = 3;   // a room's LAN answer names its map from this version on
     private const int BaseBytes = 1 + 3 * 4;      // a base in a match start: team, x, z, radius
-    private const float MaxBaseCoordinateMetres = BattleProtocol.MaxCoordinateCm * BattleProtocol.PositionUnit;   // a base centre, either axis: ±100 km
+    private const float MaxBaseCoordinateMetres = BattleProtocol.MaxCoordinateCm * BattleProtocol.PositionUnit;   // a base or ring centre, either axis, and a ring's radius: 100 km
+    private const int RingBytes = 3 * 4;          // a ring: centre x, z and radius
+    private const int KillCauseBits = 2;          // KillCause: at most 3
 
     // ---- Hello / Welcome / Reject ----
 
@@ -197,12 +216,16 @@ public static class BattleMessages
     /// <summary>
     /// The type byte, the mode, the match number, the tick and the end tick; a flags byte (bit 0: the map follows; the
     /// others 0); the map (<see cref="WriteMap"/>) when there is one; the props that aren't as new; the client's tank; the
-    /// number of bases (a byte, 0 or 2) and each base's team (a byte), centre x and z and radius (floats).
+    /// number of bases (a byte, 0 or 2) and each base's team (a byte), centre x and z and radius (floats); the number of
+    /// rings (a byte: 0 for no zone, else 2–6), and with a zone its start tick and each ring's centre x and z and radius (floats).
     /// </summary>
-    /// <exception cref="ArgumentException"><c>m.Bases</c> are ones the reader would refuse (<see cref="CheckedBases"/>).</exception>
+    /// <exception cref="ArgumentException">
+    /// <c>m.Bases</c> or <c>m.Zone</c> are ones the reader would refuse (<see cref="CheckedBases"/>, <see cref="CheckZone"/>).
+    /// </exception>
     public static void Write(BitWriter w, MatchStartMessage m)
     {
         IReadOnlyList<TeamBase> bases = CheckedBases(m);   // before a byte is written: a bad message writes nothing
+        CheckZone(m);
         WriteMatchStartHeader(w, m);
         if (m.Map is not null) WriteMap(w, m.Map);
         WriteMatchStartTail(w, m, bases);
@@ -215,14 +238,15 @@ public static class BattleMessages
     /// The writer is grown once, to all the message can take, before anything is written.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <c>m.Map</c> is null (a match start without the map has nothing to copy in), or <c>m.Bases</c> are ones the reader
-    /// would refuse (<see cref="CheckedBases"/>).
+    /// <c>m.Map</c> is null (a match start without the map has nothing to copy in), or <c>m.Bases</c> or <c>m.Zone</c> are
+    /// ones the reader would refuse (<see cref="CheckedBases"/>, <see cref="CheckZone"/>).
     /// </exception>
     public static void Write(BitWriter w, MatchStartMessage m, ReadOnlySpan<byte> encodedMap)
     {
         if (m.Map is null) throw new ArgumentException("A match start without its map takes no encoded map.", nameof(m));
         IReadOnlyList<TeamBase> bases = CheckedBases(m);   // before a byte is written: a bad message writes nothing
-        w.Reserve(MaxMatchStartHeaderBytes + encodedMap.Length + MaxMatchStartTailBytes(m.Props.Count));
+        CheckZone(m);
+        w.Reserve(MaxMatchStartHeaderBytes + encodedMap.Length + MaxMatchStartTailBytes(m.Props.Count, m.Zone?.Rings.Count ?? 0));
         WriteMatchStartHeader(w, m);
         w.WriteAligned(encodedMap);
         WriteMatchStartTail(w, m, bases);
@@ -240,6 +264,26 @@ public static class BattleMessages
                 throw new ArgumentException($"Team {b.Team}'s base centre {b.Centre} is beyond the wire's ±{MaxBaseCoordinateMetres} m.", nameof(m));
         return bases;
     }
+
+    /// <summary>
+    /// <c>m.Zone</c> as the reader takes it (<see cref="ReadZoneSync"/>): none, or a start tick within 0–<see cref="BattleProtocol.MaxTick"/>
+    /// and <see cref="MinZoneRings"/>–<see cref="MaxZoneRings"/> rings each within the wire's range (<see cref="RingFits"/>). ArgumentException otherwise.
+    /// </summary>
+    private static void CheckZone(MatchStartMessage m)
+    {
+        if (m.Zone is not { } zone) return;
+        if (zone.Rings is null || zone.Rings.Count is < MinZoneRings or > MaxZoneRings)
+            throw new ArgumentException($"A match start's zone has {MinZoneRings}–{MaxZoneRings} rings, not {zone.Rings?.Count ?? 0}.", nameof(m));
+        if (zone.StartTick is < 0 or > BattleProtocol.MaxTick)
+            throw new ArgumentException($"The zone's start tick {zone.StartTick} is beyond the wire's 0–{BattleProtocol.MaxTick}.", nameof(m));
+        for (int k = 0; k < zone.Rings.Count; k++)
+            if (!RingFits(zone.Rings[k])) throw new ArgumentException($"Ring {k} {zone.Rings[k]} is beyond the wire's range.", nameof(m));
+    }
+
+    /// <summary>A ring the wire carries: a finite centre within ±100 km on either axis, a finite radius from 0 to 100 km.</summary>
+    private static bool RingFits(in ZoneRing ring) =>
+        MathF.Abs(ring.Centre.X) <= MaxBaseCoordinateMetres && MathF.Abs(ring.Centre.Y) <= MaxBaseCoordinateMetres
+        && ring.Radius >= 0f && ring.Radius <= MaxBaseCoordinateMetres;   // NaN fails every comparison
 
     private static void WriteMatchStartHeader(BitWriter w, MatchStartMessage m)
     {
@@ -265,11 +309,22 @@ public static class BattleMessages
             WriteFloat(w, b.Centre.Y);
             WriteFloat(w, b.Radius);
         }
+        if (m.Zone is not { } zone)
+        {
+            w.WriteByte(0);
+            return;
+        }
+        w.WriteByte((byte)zone.Rings.Count);
+        w.WriteVarUInt((uint)zone.StartTick);
+        for (int k = 0; k < zone.Rings.Count; k++) WriteRing(w, zone.Rings[k]);
     }
 
-    /// <summary>The most bytes the tail can take: the prop count, each prop's id and hit points, the tank id, the bases.</summary>
-    private static int MaxMatchStartTailBytes(int props) =>
-        MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes + 1 + MaxBases * BaseBytes;
+    /// <summary>
+    /// The most bytes the tail can take: the prop count, each prop's id and hit points, the tank id, the bases, the ring
+    /// count, and with <paramref name="rings"/> rings (at most <see cref="MaxZoneRings"/>) the start tick and the rings.
+    /// </summary>
+    private static int MaxMatchStartTailBytes(int props, int rings) =>
+        MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes + 1 + MaxBases * BaseBytes + 1 + (rings > 0 ? MaxVarUIntBytes + rings * RingBytes : 0);
 
     public static MatchStartMessage ReadMatchStart(ref BitReader r)
     {
@@ -280,7 +335,20 @@ public static class BattleMessages
         MapData? map = (flags & MapIncludedFlag) != 0 ? ReadMap(ref r) : null;
         PropState[] props = ReadProps(ref r, map?.Props.Length ?? MaxMapProps);   // a prop that isn't on the map has no state (the client checks a map it keeps)
         int mine = ReadNonNegative(ref r);
-        return new MatchStartMessage(mode, number, tick, end, map, props, mine, ReadBases(ref r));
+        TeamBase[] bases = ReadBases(ref r);
+        return new MatchStartMessage(mode, number, tick, end, map, props, mine, bases, ReadZoneSync(ref r));
+    }
+
+    /// <summary>The zone of a match start: a ring count (0: none), then the start tick and 2–6 rings, each by <see cref="ReadRing"/>.</summary>
+    private static ZoneSync? ReadZoneSync(ref BitReader r)
+    {
+        byte count = r.ReadByte();
+        if (count == 0) return null;
+        if (count is < MinZoneRings or > MaxZoneRings) throw new ProtocolException("Bad zone ring count.");
+        int startTick = ReadTick(ref r);
+        var rings = new ZoneRing[count];
+        for (int k = 0; k < count; k++) rings[k] = ReadRing(ref r);
+        return new ZoneSync(startTick, rings);
     }
 
     /// <summary>The bases of a match start: at most <see cref="MaxBases"/>, by <see cref="TeamBase.Check"/>'s rules, within the coordinate limit.</summary>
@@ -306,6 +374,44 @@ public static class BattleMessages
             throw new ProtocolException($"Bad bases: {ex.Message}");
         }
         return bases;
+    }
+
+    // ---- Zone ----
+
+    /// <summary>The type byte, the match number, the ring (a byte, 1–5), its centre x and z and radius (floats).</summary>
+    /// <exception cref="ArgumentException">A ring the reader would refuse: not 1–5, or beyond the wire's range.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A negative match number (the reader takes none).</exception>
+    public static void Write(BitWriter w, ZoneMessage m)
+    {
+        if (m.MatchNumber < 0) throw new ArgumentOutOfRangeException(nameof(m), m.MatchNumber, "A match number is never negative.");
+        if (m.Ring is < 1 or > ZoneSchedule.Rings) throw new ArgumentException($"Rings run from 1 to {ZoneSchedule.Rings}, not {m.Ring}.", nameof(m));
+        if (!RingFits(m.Circle)) throw new ArgumentException($"Ring {m.Ring} {m.Circle} is beyond the wire's range.", nameof(m));
+        w.WriteByte((byte)BattleMessage.Zone);
+        w.WriteVarUInt((uint)m.MatchNumber);
+        w.WriteByte(m.Ring);
+        WriteRing(w, m.Circle);
+    }
+
+    public static ZoneMessage ReadZone(ref BitReader r)
+    {
+        int number = ReadNonNegative(ref r);
+        byte ring = r.ReadByte();
+        if (ring is < 1 or > ZoneSchedule.Rings) throw new ProtocolException("Zone ring out of range.");
+        return new ZoneMessage(number, ring, ReadRing(ref r));
+    }
+
+    private static void WriteRing(BitWriter w, in ZoneRing ring)
+    {
+        WriteFloat(w, ring.Centre.X);
+        WriteFloat(w, ring.Centre.Y);
+        WriteFloat(w, ring.Radius);
+    }
+
+    /// <summary>A ring: its centre x and z and radius, finite, the centre within ±100 km, the radius 0–100 km.</summary>
+    private static ZoneRing ReadRing(ref BitReader r)
+    {
+        var ring = new ZoneRing(new Vector2(ReadFloat(ref r), ReadFloat(ref r)), ReadFloat(ref r));
+        return RingFits(ring) ? ring : throw new ProtocolException("Zone ring out of range.");
     }
 
     // ---- Match state request ----
@@ -460,6 +566,7 @@ public static class BattleMessages
             w.WriteVarUInt((uint)e.Damage);
             w.WriteBits((uint)e.Ammo, 1);
             w.WriteVarUInt((uint)e.PropId);
+            w.WriteBits((uint)e.Cause, KillCauseBits);
         }
         WriteProps(w, batch.Props);
     }
@@ -481,7 +588,9 @@ public static class BattleMessages
             int damage = ReadNonNegative(ref r);
             var ammo = (AmmoType)r.ReadBits(1);
             int prop = ReadNonNegative(ref r);
-            events[i] = new GameEvent((GameEventType)type, tick, tank, shell, position, velocity, target, result, damage, ammo, prop);
+            uint cause = r.ReadBits(KillCauseBits);
+            if (cause > (byte)KillCause.Zone) throw new ProtocolException("Unknown kill cause.");
+            events[i] = new GameEvent((GameEventType)type, tick, tank, shell, position, velocity, target, result, damage, ammo, prop, (KillCause)cause);
         }
         return new EventBatch(tick, events, ReadProps(ref r, MaxPropsPerMessage));
     }

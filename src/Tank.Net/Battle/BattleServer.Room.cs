@@ -78,8 +78,15 @@ public sealed partial class BattleServer
         seat.DisconnectedAtFrame = _frame;
     }
 
+    /// <summary>
+    /// A new player's seat, or null with the room full: the server has <see cref="BattleProtocol.MaxPlayers"/> (16) seats, but a
+    /// room takes only <see cref="ModeRules.MaxPlayersFor"/> its mode (10 outside a royale, deviation 22). Every taken seat counts
+    /// — players connected or within the reconnect grace, and during a match the bots — so a 10-seat match never holds an 11th
+    /// tank; in the room, with no bots seated, that is the players alone.
+    /// </summary>
     private BattleSeat? AllocateSeat(uint? token = null)
     {
+        if (_seats.Count(s => s is not null) >= ModeRules.MaxPlayersFor(_mode)) return null;
         for (byte slot = 0; slot < _seats.Length; slot++)
         {
             if (_seats[slot] is not null) continue;
@@ -137,13 +144,13 @@ public sealed partial class BattleServer
                 seat.Ready = cmd.Arg == "1";
                 break;
             case RoomCommandKind.SetMode when isHost && _sim is null:
-                if (ModeRules.TryParse(cmd.Arg, out BattleMode mode)) _mode = mode;
+                if (ModeRules.TryParse(cmd.Arg, out BattleMode mode)) SwitchMode(mode);
                 break;
             case RoomCommandKind.SetBots when isHost && _sim is null:
-                if (int.TryParse(cmd.Arg, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int bots)) _bots = System.Math.Clamp(bots, 0, BattleProtocol.MaxPlayers - 1);
+                if (int.TryParse(cmd.Arg, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int bots)) _bots = System.Math.Clamp(bots, 0, ModeRules.MaxBotsFor(_mode));
                 break;
             case RoomCommandKind.SetMap when isHost && _sim is null:
-                if (FindMap(cmd.Arg) is { } map)
+                if (FindMap(cmd.Arg) is { } map && ModeRules.AllowsMap(_mode, map.Id))   // a royale stays on the riverland
                 {
                     // Prepared first: nothing if it was before; in the foreground a generator that throws leaves the map
                     // Failed (logged, never thrown here), and the room says so. In the background it says Generating until then.
@@ -161,6 +168,35 @@ public sealed partial class BattleServer
                 return;
         }
         _roomDirty = true;
+    }
+
+    /// <summary>
+    /// The host's switch to <paramref name="mode"/>, if the room can make it: no more players than the mode seats (a royale
+    /// room of 11 or more stays one), and for a mode with a map of its own (a royale: the riverland) that map among
+    /// <see cref="BattleServerOptions.Maps"/>, which the room then moves to (prepared first, as <c>SetMap</c> does). The
+    /// bots are cut to what the mode seats.
+    /// </summary>
+    private void SwitchMode(BattleMode mode)
+    {
+        string id = ModeRules.Id(mode);
+        int humans = _seats.Count(s => s is { IsBot: false });
+        if (humans > ModeRules.MaxPlayersFor(mode))
+        {
+            _log($"can't switch to {id}: {humans} players");
+            return;
+        }
+        if (ModeRules.OnlyMap(mode) is { } only)
+        {
+            if (FindMap(only) is not { } map)
+            {
+                _log($"can't switch to {id}: no map {only}");
+                return;
+            }
+            _maps.Prepare(map);
+            _roomMap = map;
+        }
+        _mode = mode;
+        _bots = System.Math.Min(_bots, ModeRules.MaxBotsFor(mode));
     }
 
     /// <summary>The map of <see cref="BattleServerOptions.Maps"/> with the id <paramref name="id"/> (ignoring case), or null.</summary>

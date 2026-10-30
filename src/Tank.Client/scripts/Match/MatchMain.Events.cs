@@ -97,7 +97,8 @@ public partial class MatchMain
 
     /// <summary>
     /// A kill for the feed (blueprint §3.3): names from the scoreboard's tank ids by room slot, sides from the teams as the
-    /// scene colours tanks. A shooter the server hid (id 0), or one that has since left, gives a line without a killer.
+    /// scene colours tanks. A shooter the server hid (id 0), or one that has since left, gives a line without a killer;
+    /// a tank the zone finished (<see cref="KillCause.Zone"/>) a "死于毒圈" line.
     /// </summary>
     private void FeedKill(in GameEvent e)
     {
@@ -105,6 +106,11 @@ public partial class MatchMain
         if (players is null) return;
         byte ownTeam = OwnTeam(_client.Own);
         (string victim, Side victimSide) = Describe(players, e.TargetTankId, ownTeam);
+        if (e.Cause == KillCause.Zone)
+        {
+            _hud.OnZoneKill(victim, victimSide, _time);   // "victim 死于毒圈": nobody's kill (the event's TankId is 0)
+            return;
+        }
         string? killer = null;
         Side killerSide = Side.Enemy;
         if (MatchHudFrame.SlotOf(players, e.TankId) >= 0) (killer, killerSide) = Describe(players, e.TankId, ownTeam);

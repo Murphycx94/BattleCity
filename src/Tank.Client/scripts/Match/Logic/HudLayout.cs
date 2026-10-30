@@ -17,10 +17,11 @@ public readonly record struct HudRect(float X, float Y, float Width, float Heigh
     public bool FitsIn(Vector2 screen) => X >= 0 && Y >= 0 && Right <= screen.X && Bottom <= screen.Y;
 }
 
-/// <summary>Where every HUD block goes on one screen size.</summary>
+/// <summary>Where every HUD block goes on one screen size. <c>ZoneLine</c> and <c>ZoneWarning</c> are a royale's (stage 6 design §3.3).</summary>
 public readonly record struct HudBoxes(
     HudRect ScorePlate, HudRect ModeLabel, HudRect KillFeed, HudRect NetPanel, HudRect Banner, HudRect SpectateBar,
-    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable, HudRect CaptureBars, HudRect Minimap, HudRect FullMap)
+    HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable, HudRect CaptureBars, HudRect Minimap, HudRect FullMap,
+    HudRect ZoneLine, HudRect ZoneWarning)
 {
     /// <summary>Row <paramref name="index"/> (0 = top) of the kill feed.</summary>
     public HudRect KillRow(int index) => new(KillFeed.X, KillFeed.Y + index * (HudLayout.KillRowHeight + HudLayout.KillRowGap), KillFeed.Width, HudLayout.KillRowHeight);
@@ -49,6 +50,12 @@ public static class HudLayout
     // The capture bars (stage 5 design §3.4) hang under the mode label (which ends at 116), as wide as the plate: two rows at most.
     public const float CaptureTop = 124f, CaptureBarHeight = 26f, CaptureBarGap = 6f;
     public const int CaptureRows = 2;
+
+    /// <summary>The zone line (stage 6 design §3.3) hangs under the mode label where a standard battle's capture bars go, as wide as the plate.</summary>
+    public const float ZoneLineHeight = 28f;
+
+    /// <summary>The outside warning: centred, this far down the screen (between the zone line and the banner's 0.28).</summary>
+    public const float ZoneWarningWidth = 600f, ZoneWarningHeight = 44f, ZoneWarningTopShare = 0.18f;
 
     public const float NetWidth = 500f, NetHeight = 280f;
 
@@ -100,6 +107,8 @@ public static class HudLayout
             new HudRect(cx - ScoreboardWidth / 2, results.Y + ResultsTableTop, ScoreboardWidth, ScoreboardHeight),
             new HudRect(plate.X, CaptureTop, PlateWidth, CaptureRows * CaptureBarHeight + (CaptureRows - 1) * CaptureBarGap),
             new HudRect(size.X - Margin - MinimapSize, size.Y - Margin - MinimapSize, MinimapSize, MinimapSize),
-            new HudRect(cx - fullSide / 2, FullMapMargin, fullSide, fullSide));
+            new HudRect(cx - fullSide / 2, FullMapMargin, fullSide, fullSide),
+            new HudRect(plate.X, CaptureTop, PlateWidth, ZoneLineHeight),
+            new HudRect(cx - ZoneWarningWidth / 2, size.Y * ZoneWarningTopShare, ZoneWarningWidth, ZoneWarningHeight));
     }
 }

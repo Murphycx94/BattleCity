@@ -11,15 +11,17 @@ namespace Tank.Server;
 
 /// <summary>
 /// Headless dedicated server: a room that runs <see cref="BattleServer"/> matches at 30 Hz.
-/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa|standard] [--map sandbox|riverland] [--bots N] [--name "Room"]
-/// With no --mode, team battle; with no --map, the riverland; the last of each given wins. The map is generated in the
+/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa|standard|royale] [--map sandbox|riverland] [--bots N] [--name "Room"]
+/// With no --mode, team battle; with no --map, the riverland; the last of each given wins. A royale is played on the riverland
+/// only (exit code 2 for --mode royale --map sandbox). The map is generated in the
 /// background: the room takes players at once and starts a match once the map is ready. If that first map can't be
 /// generated (a bug), the server says so and exits with code 3.
 /// </summary>
 public static class Program
 {
-    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa|standard] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
-        "  no --mode: teambattle; no --map: riverland (the last of each given wins); --bots: 0 to 9, added when a match starts";
+    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa|standard|royale] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
+        "  no --mode: teambattle; no --map: riverland (the last of each given wins); royale: riverland only;\n" +
+        "  --bots: 0 to 15, added when a match starts (at most 9 outside a royale)";
 
     private const int MapFailedExitCode = 3;
     private static readonly TimeSpan StopPollInterval = TimeSpan.FromMilliseconds(250);
@@ -52,7 +54,7 @@ public static class Program
 
         using var runner = new ServerRunner(server, log, SimConstants.TickRate);
         runner.Start();
-        log($"'{options.RoomName}' listening on UDP {options.Port}: {ModeRules.Id(options.Mode)}, map {options.Map.Id}, {options.Bots} bots. Ctrl+C to stop.");
+        log($"'{options.RoomName}' listening on UDP {options.Port}: {ModeRules.Id(options.Mode)}, map {options.Map.Id}, {server.Bots} bots. Ctrl+C to stop.");
         bool stopped = WaitForStop(
             () => log($"players {server.ConnectedCount}, {(server.MatchRunning ? "in a match" : "in the room")}, tick avg {runner.AverageTickMs:F3} ms, max {runner.MaxTickMs:F3} ms"),
             () => server.MapStateOf(options.Map) == MapState.Failed);
@@ -128,6 +130,8 @@ public static class Program
                     throw new ArgumentException($"unknown option '{args[i]}'");
             }
         }
+        if (!ModeRules.AllowsMap(options.Mode, options.Map.Id))
+            throw new ArgumentException($"--mode {ModeRules.Id(options.Mode)} is played on the {ModeRules.OnlyMap(options.Mode)} only (--map {ModeRules.OnlyMap(options.Mode)})");
         return options;
     }
 

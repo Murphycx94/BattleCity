@@ -8,7 +8,9 @@ namespace Tank.Client.Minimap;
 
 /// <summary>
 /// One map on the screen (stage 5 design §5): the corner map or the full-screen one, filling its own rectangle. Draws, in
-/// this order, a rounded dark box, the map's picture inset in it (nothing more until the ground is baked), the bases'
+/// this order, a rounded dark box, the map's picture inset in it (nothing more until the ground is baked), a royale's
+/// zone (the ground outside the safe circle darkened, the circle in the wall's blue, the next ring in white: stage 6
+/// design §3.3), the bases'
 /// tinted discs, rings and progress arcs (outside the ring), the view fan, the wrecks' crosses, the teammates, the enemies, the own wreck and the eye
 /// (an arrow, or a ring). A point on the ground (x, z) is at <c>inner.Position + area.ToUnit(ground) · inner.Size</c>;
 /// icons beyond the box are cut at its edge (<see cref="Control.ClipContents"/>). Click-through. Redraws every frame it
@@ -22,6 +24,10 @@ public partial class MinimapView : Control
     private const float PictureInset = 4f;
     private const int BaseRingSegments = 48;
     private const int EyeRingSegments = 32;
+    private const int ZoneSegments = 96;
+
+    /// <summary>A circle narrower than this on the map, pixels, is not drawn as a ring: the closed zone darkens the whole map, the last ring is a dot.</summary>
+    private const float MinZonePixels = 0.5f;
 
     private const int BufferPoints = MinimapGlyphs.ArcMaxPoints + 1;   // the longest polygon, and room to close an outline
 
@@ -31,6 +37,9 @@ public partial class MinimapView : Control
     private static readonly Color Outline = MinimapStyle.IconOutline.ToColor();
     private static readonly Color EyeColor = MinimapStyle.Eye.ToColor();
     private static readonly Color FanColor = MinimapStyle.Fan.ToColor(MinimapStyle.FanOpacity);
+    private static readonly Color ZoneShade = MinimapStyle.ZoneShade.ToColor(MinimapStyle.ZoneShadeOpacity);
+    private static readonly Color ZoneLine = MinimapStyle.ZoneLine.ToColor();
+    private static readonly Color NextZoneLine = MinimapStyle.NextZoneLine.ToColor();
 
     private StyleBoxFlat _box = null!;
     private MinimapIconSizes _sizes;
@@ -71,6 +80,7 @@ public partial class MinimapView : Control
         if (_texture is not null) DrawTextureRect(_texture, _inner, false);
         if (_frame is null || _area.Size <= 0) return;
 
+        if (_frame.Zone is { } zone) DrawZone(zone, rect);
         foreach (MinimapBase b in _frame.Bases) DrawBase(b);
         DrawFan(_frame.Eye);
         foreach (MinimapTank t in _frame.Tanks)
@@ -87,6 +97,37 @@ public partial class MinimapView : Control
     {
         SN.Vector2 unit = _area.ToUnit(ground);
         return new SN.Vector2(_inner.Position.X + unit.X * _inner.Size.X, _inner.Position.Y + unit.Y * _inner.Size.Y);
+    }
+
+    /// <summary>A ground radius, m, as pixels of the map.</summary>
+    private float ToPixels(float metres) => metres / _area.Size * _inner.Size.X;
+
+    /// <summary>
+    /// The zone: everything outside the safe circle under <see cref="ZoneShade"/> — one arc as wide as the box's diagonal,
+    /// drawn just outside the circle, covers the rest of the box (the box clips it); its ends meet without a seam, as Godot
+    /// joins a polyline whose first and last points coincide (<c>loop</c> in <c>canvas_item_add_polyline</c>, 4.7) — a
+    /// circle narrower than a pixel darkens the whole box instead — then the circle's line, and the next ring's when there
+    /// is one (a ring of no width, the last, is a dot at its centre).
+    /// </summary>
+    private void DrawZone(in MinimapZone zone, Rect2 box)
+    {
+        Vector2 centre = ToGodot(ToScreen(zone.Centre));
+        float radius = ToPixels(zone.Radius);
+        float diagonal = box.Size.Length();
+        if (radius >= MinZonePixels)
+        {
+            DrawArc(centre, radius + diagonal / 2, 0, Mathf.Tau, ZoneSegments, ZoneShade, diagonal);
+            DrawArc(centre, radius, 0, Mathf.Tau, ZoneSegments, ZoneLine, _sizes.ZoneWidth, true);
+        }
+        else
+        {
+            DrawRect(box, ZoneShade);
+        }
+        if (!zone.HasNext) return;
+        Vector2 next = ToGodot(ToScreen(zone.NextCentre));
+        float nextRadius = ToPixels(zone.NextRadius);
+        if (nextRadius >= MinZonePixels) DrawArc(next, nextRadius, 0, Mathf.Tau, ZoneSegments, NextZoneLine, _sizes.NextZoneWidth, true);
+        else DrawCircle(next, _sizes.NextZoneWidth, NextZoneLine, true, -1, true);
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ using Tank.Sim.Vision;
 namespace Tank.Net.Battle;
 
 /// <summary>
-/// The authoritative battle server (stage 4 design §5.8): a room of up to ten seats and, while a match runs, a
+/// The authoritative battle server (stage 4 design §5.8): a room of up to 16 seats (10 outside a royale) and, while a match runs, a
 /// <see cref="Simulation"/> with its <see cref="VisionTracker"/>, <see cref="MatchRules"/> and bots. Transport- and
 /// clock-agnostic: call <see cref="Tick"/> at exactly <see cref="SimConstants.TickRate"/> (see <see cref="ServerRunner"/>)
 /// or from a test with a virtual clock. Every client gets its own snapshots and events, holding only what it may see.
@@ -64,6 +64,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
     private VisionTracker? _vision;
     private MatchRules? _rules;
     private BotDirector? _director;   // drives the match's bot seats; null without bots and between matches
+    private int _zoneSent;            // rings of a royale the players have been sent, ring 0 included (MatchRules.KnownRings as of the last tick)
     private long _endedAtFrame = -1;
 
     /// <summary>
@@ -79,7 +80,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
         _log = log ?? (_ => { });
         CheckMaps(_options);
         _mode = _options.Mode;
-        _bots = System.Math.Clamp(_options.Bots, 0, BattleProtocol.MaxPlayers - 1);
+        _bots = System.Math.Clamp(_options.Bots, 0, ModeRules.MaxBotsFor(_mode));   // 9 in the 10-seat modes, 15 in a royale
         _roomMap = _options.Map;
         _maps = new ServerMaps(_options.PrepareMapsInBackground, _log);
         _maps.Prepare(_roomMap);
@@ -88,7 +89,8 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
     /// <summary>
     /// The maps must go on the wire and be found again by id: every id fits <see cref="BattleProtocol.MaxMapIdBytes"/>
     /// in UTF-8 (a longer one would be cut, and the cut id names no map), no two ids differ only in case
-    /// (<c>SetMap</c> ignores it), and the first map is one of them (the host could never switch back to it otherwise).
+    /// (<c>SetMap</c> ignores it), and the first map is one of them (the host could never switch back to it otherwise) and
+    /// may hold the mode (a royale only the riverland: <see cref="ModeRules.AllowsMap"/>).
     /// </summary>
     private static void CheckMaps(BattleServerOptions options)
     {
@@ -105,7 +107,11 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
             listed |= ReferenceEquals(map, options.Map);
         }
         if (!listed) throw new ArgumentException($"The room's first map '{options.Map.Id}' isn't one of its maps.", nameof(options));
+        if (!ModeRules.AllowsMap(options.Mode, options.Map.Id)) throw new ArgumentException(NotHereReason(options.Mode), nameof(options));
     }
+
+    /// <summary>Why a match of <paramref name="mode"/> can't be held on another map: "royale is played on the riverland only".</summary>
+    private static string NotHereReason(BattleMode mode) => $"{ModeRules.Id(mode)} is played on the {ModeRules.OnlyMap(mode)} only";
 
     public BattleMode Mode => _mode;
     public int Bots => _bots;
@@ -154,7 +160,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
     /// <summary>Writes the room's answer to a LAN discovery broadcast.</summary>
     public bool WriteRoomInfo(BitWriter w)
     {
-        BattleMessages.Write(w, new RoomInfoMessage(BattleProtocol.Version, _options.RoomName, _mode, ConnectedCount, BattleProtocol.MaxPlayers, MatchRunning, _options.Port, _roomMap.Id));
+        BattleMessages.Write(w, new RoomInfoMessage(BattleProtocol.Version, _options.RoomName, _mode, ConnectedCount, ModeRules.MaxPlayersFor(_mode), MatchRunning, _options.Port, _roomMap.Id));
         return true;
     }
 

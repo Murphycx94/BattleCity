@@ -10,10 +10,11 @@ public enum BannerKind : byte { None, Respawn, Spectate, Results }
 /// <summary>
 /// What the results screen needs besides the scoreboard: the server's verdict and why the match ended, the ticks left
 /// before the server sends everyone back to the room (counted by the scene from the moment it saw the match end) and
-/// whether the player may send them early.
+/// whether the player may send them early. <c>Entrants</c> is how many seats the match had (a royale's "共 N 名", from
+/// <see cref="MatchBlock.Entrants"/>; 0 in the other modes).
 /// </summary>
 public readonly record struct ResultsInfo(byte WinnerTeam, byte WinnerSlot, int TicksLeft, bool IsHost,
-    MatchEndReason Reason = MatchEndReason.None)
+    MatchEndReason Reason = MatchEndReason.None, int Entrants = 0)
 {
     /// <summary>No verdict: the match is on.</summary>
     public static readonly ResultsInfo None = new(MatchRules.NoTeam, MatchRules.NoSlot, 0, false);
@@ -23,7 +24,7 @@ public readonly record struct ResultsInfo(byte WinnerTeam, byte WinnerSlot, int 
 /// Everything the match HUD needs for one frame (blueprint §2.1): a plain value the scene fills from the client and the
 /// gallery from canned data. <c>Players</c> (indexed by room slot) and <c>Names</c> are the caller's arrays, handed on by
 /// reference for the scoreboard; nothing here is copied per frame. <c>Capture</c> is the bars under the plate (none
-/// outside a standard match).
+/// outside a standard match); <c>Zone</c> the zone line and the outside warning (off outside a royale).
 /// </summary>
 public readonly record struct MatchHudFrame(
     BattleMode Mode,
@@ -40,7 +41,8 @@ public readonly record struct MatchHudFrame(
     PlayerStats[] Players,
     string?[] Names,
     ResultsInfo Results,
-    CaptureBars Capture = default)
+    CaptureBars Capture = default,
+    ZoneHud Zone = default)
 {
     /// <summary>The slot that has <paramref name="tankId"/> on the scoreboard, or -1 for a tank nobody plays (or has left).</summary>
     public static int SlotOf(PlayerStats[] players, int tankId)
@@ -55,9 +57,11 @@ public readonly record struct MatchHudFrame(
     /// The frame from the client's newest snapshot. The results banner outranks everything; the respawn banner shows while
     /// the own tank is a wreck that is coming back (team battle only), and then <paramref name="spectateTarget"/> or
     /// <paramref name="spectateFree"/> still turn the bottom bar on under it. <paramref name="names"/> is the
-    /// room's names by slot, <paramref name="fps"/> the engine's frame rate, <paramref name="resultsLeft"/> the ticks left on the results screen. Reads only; allocates nothing.
+    /// room's names by slot, <paramref name="fps"/> the engine's frame rate, <paramref name="resultsLeft"/> the ticks left on the results screen,
+    /// <paramref name="zone"/> the scene's zone for the HUD (it knows whether the own tank is outside; off by default). Reads only; allocates nothing.
     /// </summary>
-    public static MatchHudFrame From(BattleClient client, BattleSession? session, byte ownTeam, string?[] names, int fps, string? spectateTarget = null, bool spectateFree = false, int resultsLeft = 0)
+    public static MatchHudFrame From(BattleClient client, BattleSession? session, byte ownTeam, string?[] names, int fps, string? spectateTarget = null, bool spectateFree = false, int resultsLeft = 0,
+        ZoneHud zone = default)
     {
         BattleMode mode = client.MatchInfo?.Mode ?? client.Room?.Mode ?? BattleMode.TeamBattle;
         MatchBlock match = client.Match;
@@ -71,8 +75,9 @@ public readonly record struct MatchHudFrame(
         (double avg, double max) = session?.ServerTick ?? default;
         var net = new NetSample(client.Stats, client.Resyncs, session?.ServerTick is not null, avg, max, fps);
         return new MatchHudFrame(mode, match.Phase, match.TicksLeft, slot, ownTeam, plate, banner, match.RespawnIn, spectateTarget, spectateFree, net, players, names,
-            new ResultsInfo(match.WinnerTeam, match.WinnerSlot, resultsLeft, client.IsHost, match.EndReason),
-            CaptureText.Bars(mode, ownTeam, match));
+            new ResultsInfo(match.WinnerTeam, match.WinnerSlot, resultsLeft, client.IsHost, match.EndReason, match.Entrants),
+            CaptureText.Bars(mode, ownTeam, match),
+            zone);
     }
 
     private static readonly PlayerStats[] NoPlayers = new PlayerStats[BattleProtocol.MaxPlayers];

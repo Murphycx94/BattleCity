@@ -68,6 +68,90 @@ public sealed class BotLoadTests
         Assert.True(p99 < Limit, $"p99 {p99:F3} ms (limit {Limit} ms)");
     }
 
+    /// <summary>
+    /// A royale's sixteen tanks (stage 6 design §3.5; stage 6A plan, task 6): an idle player and fifteen bots on the
+    /// riverland, the server's tick timed from a few seconds in to the match's end (or <see cref="MaxWindowSeconds"/>);
+    /// the player's snapshots (size, mean and largest) and bytes in a second (the largest) printed beside it, apart while
+    /// it is alive (it sees what it sees) and once it is destroyed (a free-for-all's dead watch everything: all sixteen
+    /// tanks, the most any seat is sent; batch C review follow-up).
+    /// </summary>
+    [Fact]
+    public void Fifteen_bots_in_a_royale_on_the_riverland_keep_the_server_tick_p99_under_2_ms()
+    {
+        var log = new List<string>();
+        var h = new BattleHarness(new BattleServerOptions { Seed = 3, Map = MapCatalog.Riverland, Maps = new[] { MapCatalog.Riverland } }, log: log.Add);
+        BattleClient player = h.AddClient("A");
+        h.StartMatch(BattleMode.Royale, bots: 15);
+        Assert.True(h.Server.MatchRunning, "the match didn't start");
+        Assert.Equal(BattleMode.Royale, h.Server.Rules!.Mode);
+        Assert.Equal(15, h.Server.Director!.Bots.Count);
+
+        h.Run(3);   // warm-up, the player idle throughout (LocalCommand.None)
+        int hits = 0, wrecksBefore = Wrecks(h.Server.Simulation!);
+        var alive = new SnapshotSizes();
+        var watching = new SnapshotSizes();
+        h.TickTimes = new List<double>(MaxWindowSeconds * Tps + 1);
+        h.AfterServerTick = server =>
+        {
+            if (server.Simulation is not { } sim) return;
+            foreach (ref readonly GameEvent e in sim.Events)
+                if (e.Type == GameEventType.TankHit) hits++;
+        };
+        while (h.Server.Rules is { Phase: MatchPhase.Playing } && h.TickTimes.Count < MaxWindowSeconds * Tps)
+        {
+            h.Run(Step);
+            BattleStats stats = player.Stats;
+            if (stats.SnapshotBytes <= 0) continue;
+            (IsDestroyed(h.Server.Simulation!, player.OwnTankId) ? watching : alive).Add(stats);
+        }
+        h.AfterServerTick = null;
+
+        Simulation simulation = h.Server.Simulation!;
+        int wrecks = Wrecks(simulation) - wrecksBefore;
+        double[] sorted = h.TickTimes.Order().ToArray();
+        double p50 = sorted[sorted.Length / 2], p99 = sorted[(int)(sorted.Length * 0.99)], max = sorted[^1];
+        _output.WriteLine($"server tick with an idle player and fifteen bots in a royale on the riverland over {sorted.Length} ticks ({sorted.Length / (double)Tps:F0} s, " +
+                          $"{(h.Server.Rules!.Phase == MatchPhase.Ended ? $"to the match's end, {h.Server.Rules.EndReason}" : "the match still on")}): " +
+                          $"p50 {p50:F3} ms, p99 {p99:F3} ms, max {max:F3} ms; {hits} hits, {wrecks} wrecks; bots: {h.Server.Director!.Summary()}");
+        _output.WriteLine($"the player's snapshots, alive (the tanks it sees): {alive}");
+        _output.WriteLine($"the player's snapshots, destroyed and watching (a free-for-all's dead see all sixteen: the busiest seat): {watching}");
+        Assert.True(alive.Samples > 0, "the player got no snapshots");
+        Assert.True(watching.Samples > 0, "the player was never destroyed: no snapshots of all sixteen");
+        Assert.True(hits >= 10, $"only {hits} hits in the window: hardly any fighting");
+        Assert.True(wrecks >= 2, $"only {wrecks} tanks destroyed in the window");
+#if DEBUG
+        const double Limit = 10.0;
+#else
+        const double Limit = 2.0;
+#endif
+        Assert.True(p99 < Limit, $"p99 {p99:F3} ms (limit {Limit} ms)");
+    }
+
+    private static bool IsDestroyed(Simulation sim, int tankId)
+    {
+        int slot = sim.SlotOf(tankId);
+        return slot >= 0 && sim.Tanks[slot].IsDestroyed;
+    }
+
+    /// <summary>A client's snapshot sizes, sampled: mean and largest, and the most bytes in a second.</summary>
+    private sealed class SnapshotSizes
+    {
+        private long _bytes;
+        private int _biggest;
+        private double _mostIn;
+
+        public int Samples { get; private set; }
+
+        public void Add(BattleStats stats)
+        {
+            (Samples, _bytes, _biggest) = (Samples + 1, _bytes + stats.SnapshotBytes, Math.Max(_biggest, stats.SnapshotBytes));
+            _mostIn = Math.Max(_mostIn, stats.BytesInPerSecond);
+        }
+
+        public override string ToString() =>
+            Samples == 0 ? "none" : $"{_bytes / (double)Samples:F0} bytes on average, {_biggest} at most ({Samples} samples); at most {_mostIn / 1024:F1} KB/s in";
+    }
+
     private static int Wrecks(Simulation sim)
     {
         int n = 0;

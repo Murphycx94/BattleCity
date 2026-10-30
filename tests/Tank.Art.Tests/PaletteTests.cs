@@ -84,6 +84,19 @@ public class PaletteTests
         Assert.Equal(Palette.Hex("D8344A"), Palette.EnemyBody);
     }
 
+    [Fact]
+    public void The_zone_wall_is_a_light_blue_apart_from_the_sky_the_water_and_both_sides_tanks()
+    {
+        Assert.Equal(Palette.Hex("7CCBFF"), Palette.ZoneWall);
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.SkyTop) >= 0.2f, "the wall shows against the sky");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.SkyHorizon) >= 0.3f, "the wall shows against the horizon");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.WaterShallow) >= 0.12f, "the wall is not the shallows' turquoise");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.WaterDeep) >= 0.3f, "the wall is not the deep water");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.AllyBody) >= 0.3f, "the wall is not a teammate's blue-grey");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.EnemyBody) >= 0.5f, "the wall is not an enemy's red");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.TankBody) >= 0.5f, "the wall is not the player's orange");
+    }
+
     /// <summary>Relative luminance (Rec. 709 weights on the linear colour) of an sRGB palette entry.</summary>
     private static float Luminance(Vector3 srgb) => Vector3.Dot(Palette.Linear(srgb), new Vector3(0.2126f, 0.7152f, 0.0722f));
 

@@ -71,16 +71,17 @@ public struct MatchBlock : IEquatable<MatchBlock>
     public byte BaseProgress0;         // how far team 1 has taken team 0's base, 0–100 (0 outside a standard match)
     public byte BaseProgress1;         // how far team 0 has taken team 1's base
     public MatchEndReason EndReason;   // the rules' EndReason: None while playing
+    public byte Entrants;              // a royale: MatchRules.Entrants, the seats that joined the match ("共 N 名"), at most BattleProtocol.MaxPlayers; 0 in the other modes
 
     public readonly bool Equals(MatchBlock o) =>
         Phase == o.Phase && TicksLeft == o.TicksLeft && Spotted == o.Spotted && WinnerTeam == o.WinnerTeam && WinnerSlot == o.WinnerSlot
         && RespawnIn == o.RespawnIn && TeamScore0 == o.TeamScore0 && TeamScore1 == o.TeamScore1
-        && BaseProgress0 == o.BaseProgress0 && BaseProgress1 == o.BaseProgress1 && EndReason == o.EndReason;
+        && BaseProgress0 == o.BaseProgress0 && BaseProgress1 == o.BaseProgress1 && EndReason == o.EndReason && Entrants == o.Entrants;
 
     public override readonly bool Equals(object? obj) => obj is MatchBlock m && Equals(m);
 
     public override readonly int GetHashCode() => HashCode.Combine(
-        HashCode.Combine(Phase, TicksLeft, Spotted, WinnerTeam, WinnerSlot, RespawnIn, TeamScore0, TeamScore1), BaseProgress0, BaseProgress1, EndReason);
+        HashCode.Combine(Phase, TicksLeft, Spotted, WinnerTeam, WinnerSlot, RespawnIn, TeamScore0, TeamScore1), BaseProgress0, BaseProgress1, EndReason, Entrants);
 }
 
 /// <summary>One player's line on the scoreboard.</summary>
@@ -93,16 +94,18 @@ public struct PlayerStats : IEquatable<PlayerStats>
     public int Kills;
     public int Deaths;
     public bool Alive;
-    public byte Rank;
+    public byte Rank;      // 0: none yet; 1–16 once a free-for-all or a royale has ended (5 bits on the wire, 17–31 refused both ways)
     public byte Capture;   // MatchRules.CaptureBest(slot): the most points the player's tank held at once this match, 0–100
+    public int Damage;     // Standing.Damage: damage dealt to other sides' tanks
+    public int Lasted;     // MatchRules.LastedTicks(slot) in whole seconds
 
     public readonly bool Equals(PlayerStats o) =>
         Active == o.Active && Team == o.Team && Spec == o.Spec && TankId == o.TankId && Kills == o.Kills && Deaths == o.Deaths && Alive == o.Alive && Rank == o.Rank
-        && Capture == o.Capture;
+        && Capture == o.Capture && Damage == o.Damage && Lasted == o.Lasted;
 
     public override readonly bool Equals(object? obj) => obj is PlayerStats p && Equals(p);
 
-    public override readonly int GetHashCode() => HashCode.Combine(Active, Team, TankId, Kills, Deaths, Alive, Rank, Capture);
+    public override readonly int GetHashCode() => HashCode.Combine(HashCode.Combine(Active, Team, TankId, Kills, Deaths, Alive, Rank, Capture), Damage, Lasted);
 }
 
 /// <summary>

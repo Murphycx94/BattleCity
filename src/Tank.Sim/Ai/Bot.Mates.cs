@@ -51,7 +51,7 @@ public sealed partial class Bot
         for (int i = 0; i < tanks.Length; i++)
         {
             ref readonly TankState t = ref tanks[i];
-            if (t.Id == TankId || t.Team != me.Team || t.IsDestroyed) continue;
+            if (!KeepsOff(me, t)) continue;
             Vector2 its = Angles.Forward(t.Yaw) * t.Speed, rel = t.Position - me.Position, closing = its - velocity;
             float reach = mine + NavDisc.RadiusOf(t.Spec), far = reach + BotDirector.MateGap + horizon * closing.Length();
             if (rel.LengthSquared() > far * far) continue;

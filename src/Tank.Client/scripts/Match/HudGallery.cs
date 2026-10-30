@@ -34,7 +34,11 @@ public partial class HudGallery : Node
         AddChild(back);
         _hud = new MatchHud();
         AddChild(_hud);
-        foreach (FeedLine k in _demo.Kills) _hud.OnKill(k.Killer, k.KillerSide, k.Victim, k.VictimSide, k.Friendly, now: 0);
+        foreach (FeedLine k in _demo.Kills)
+        {
+            if (k.Zone) _hud.OnZoneKill(k.Victim, k.VictimSide, now: 0);
+            else _hud.OnKill(k.Killer, k.KillerSide, k.Victim, k.VictimSide, k.Friendly, now: 0);
+        }
         _hud.SetScoreboardOpen(_demo.ScoreboardOpen);
         if (_demo.Minimap is { } m) AddMinimap(m);
         GetWindow().Title = $"坦克 3D · HUD · {_demo.Name}";

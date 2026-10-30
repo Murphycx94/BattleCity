@@ -18,11 +18,22 @@ public sealed class BattleSnapshotCodec
     private const int EndReasonBits = 2;   // MatchEndReason: at most 3
     private const int CaptureBits = 7;     // a player's capture: 0–100
 
+    /// <summary>
+    /// A player's rank: 0 (none: every line while the match is on, and every line of a team mode) or 1–<see cref="BattleProtocol.MaxPlayers"/>
+    /// (a free-for-all's or royale's place once it has ended); v5's 5 bits (4 held only ten seats' ranks), 17–31 refused.
+    /// </summary>
+    public const int RankBits = 5;
+
     private readonly BattleEntity[] _changed = new BattleEntity[BattleSnapshot.MaxEntities];
     private readonly int[] _removed = new int[BattleSnapshot.MaxEntities];
 
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A scoreboard line the reader would refuse (a rank past <see cref="BattleProtocol.MaxPlayers"/>, negative damage or time
+    /// lasted): checked before a bit is written.
+    /// </exception>
     public void Write(BitWriter w, BattleSnapshot current, BattleSnapshot? baseline, in ClientFeedback feedback)
     {
+        CheckStats(current.Players);
         w.WriteByte((byte)BattleMessage.Snapshot);
         w.WriteVarUInt((uint)current.Tick);
         w.WriteVarUInt(baseline is null ? 0u : (uint)baseline.Tick);
@@ -229,6 +240,7 @@ public sealed class BattleSnapshotCodec
         w.WriteByte(Points(m.BaseProgress0));
         w.WriteByte(Points(m.BaseProgress1));
         w.WriteBits((uint)m.EndReason, EndReasonBits);
+        w.WriteByte(m.Entrants);
     }
 
     /// <summary>A base's progress or a player's capture as the wire takes it: at most <see cref="BaseCapture.PointsToWin"/>, what the reader accepts.</summary>
@@ -247,7 +259,15 @@ public sealed class BattleSnapshotCodec
         BaseProgress0 = ReadBaseProgress(ref r),
         BaseProgress1 = ReadBaseProgress(ref r),
         EndReason = (MatchEndReason)r.ReadBits(EndReasonBits),   // every 2-bit value is a reason
+        Entrants = ReadEntrants(ref r),
     };
+
+    /// <summary>The players who joined the match: a byte, at most <see cref="BattleProtocol.MaxPlayers"/>; more is garbage.</summary>
+    private static byte ReadEntrants(ref BitReader r)
+    {
+        byte entrants = r.ReadByte();
+        return entrants <= BattleProtocol.MaxPlayers ? entrants : throw new ProtocolException("Entrants out of range.");
+    }
 
     /// <summary>A base's progress: a byte of points, 0–<see cref="BaseCapture.PointsToWin"/>; more is garbage.</summary>
     private static byte ReadBaseProgress(ref BitReader r)
@@ -314,6 +334,18 @@ public sealed class BattleSnapshotCodec
         Destroyed = r.ReadBool(),
     };
 
+    /// <summary>The active lines' rank, damage and time lasted are what <see cref="ReadStats"/> takes; no allocation unless one isn't.</summary>
+    private static void CheckStats(PlayerStats[] players)
+    {
+        foreach (ref readonly PlayerStats p in players.AsSpan())
+        {
+            if (!p.Active) continue;   // an empty line goes as one bit
+            if (p.Rank > BattleProtocol.MaxPlayers) throw new ArgumentOutOfRangeException(nameof(players), p.Rank, "A rank is 0 (none) or a place among the seats.");
+            if (p.Damage < 0) throw new ArgumentOutOfRangeException(nameof(players), p.Damage, "Damage dealt is never negative.");
+            if (p.Lasted < 0) throw new ArgumentOutOfRangeException(nameof(players), p.Lasted, "Time lasted is never negative.");
+        }
+    }
+
     private static void WriteStats(BitWriter w, PlayerStats[] players)
     {
         foreach (ref readonly PlayerStats p in players.AsSpan())
@@ -326,8 +358,10 @@ public sealed class BattleSnapshotCodec
             w.WriteVarUInt((uint)p.Kills);
             w.WriteVarUInt((uint)p.Deaths);
             w.WriteBool(p.Alive);
-            w.WriteBits(p.Rank, 4);
+            w.WriteBits(p.Rank, RankBits);
             w.WriteBits(Points(p.Capture), CaptureBits);   // never cut to 7 bits
+            w.WriteVarUInt((uint)p.Damage);
+            w.WriteVarUInt((uint)p.Lasted);
         }
     }
 
@@ -345,9 +379,12 @@ public sealed class BattleSnapshotCodec
             p.Kills = BattleMessages.ReadNonNegative(ref r);
             p.Deaths = BattleMessages.ReadNonNegative(ref r);
             p.Alive = r.ReadBool();
-            p.Rank = (byte)r.ReadBits(4);
+            uint rank = r.ReadBits(RankBits);
+            p.Rank = rank <= BattleProtocol.MaxPlayers ? (byte)rank : throw new ProtocolException("Rank out of range.");
             uint capture = r.ReadBits(CaptureBits);
             p.Capture = capture <= BaseCapture.PointsToWin ? (byte)capture : throw new ProtocolException("Capture out of range.");
+            p.Damage = BattleMessages.ReadNonNegative(ref r);
+            p.Lasted = BattleMessages.ReadNonNegative(ref r);
         }
     }
 }

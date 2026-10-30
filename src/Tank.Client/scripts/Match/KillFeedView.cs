@@ -7,7 +7,7 @@ namespace Tank.Client.Match;
 /// <summary>
 /// The kill feed at the top right (blueprint §4.2): up to five rows, oldest at the top, each a rounded plate right
 /// against the margin with "killer 击毁 victim" in the sides' colours (a hidden shooter gives "victim 被击毁", a kill
-/// within one side "killer 误伤 victim"). A row the player took part in gets a tint. Each name is cut to
+/// within one side "killer 误伤 victim", a tank the zone finished "victim 死于毒圈" with the tail in the wall's blue). A row the player took part in gets a tint. Each name is cut to
 /// <see cref="NameWidth"/> with "…", so even two 24-byte names keep a row inside <see cref="HudLayout.KillWidth"/>, clear
 /// of the score plate. Rows expire in <see cref="KillFeed"/>; this view redraws only when the feed's revision changes.
 /// </summary>
@@ -24,10 +24,12 @@ public partial class KillFeedView : HudPanel
 
     private static readonly Func<string, float> Measure = text => HudStyle.TextWidth(text, TextSize);   // cached: one delegate, not one per name
 
+    private static readonly Color ZoneColor = Palette.ZoneWall.ToColor();
+
     private struct Row
     {
         public string? Killer, Verb, Victim, Tail;
-        public Color KillerColor, VictimColor;
+        public Color KillerColor, VictimColor, TailColor;
         public RowKind Kind;
         public float Width, KillerWidth, VerbWidth, VictimWidth;
     }
@@ -57,18 +59,19 @@ public partial class KillFeedView : HudPanel
 
     private static void Fill(ref Row row, in FeedLine line)
     {
-        bool hidden = line.Killer is null;
+        bool hidden = line.Zone || line.Killer is null;   // no shooter to name: the zone's rows and the hidden shooter's alike
         row.Killer = hidden ? null : HudText.Fit(line.Killer!, NameWidth, Measure);
         row.Verb = hidden ? null : line.Friendly ? FeedLine.FriendlyVerb : FeedLine.KilledVerb;
         row.Victim = HudText.Fit(line.Victim, NameWidth, Measure);
-        row.Tail = hidden ? FeedLine.HiddenShooterTail : null;
+        row.Tail = line.Zone ? FeedLine.ZoneTail : hidden ? FeedLine.HiddenShooterTail : null;
         row.KillerColor = SideColor(line.KillerSide);
         row.VictimColor = SideColor(line.VictimSide);
+        row.TailColor = line.Zone ? ZoneColor : HudStyle.Text;
         row.KillerWidth = hidden ? 0f : HudStyle.TextWidth(row.Killer!, TextSize) + WordGap;
         row.VerbWidth = hidden ? 0f : HudStyle.TextWidth(row.Verb!, TextSize) + WordGap;
         row.VictimWidth = HudStyle.TextWidth(row.Victim, TextSize);
-        row.Width = 2 * PadX + row.KillerWidth + row.VerbWidth + row.VictimWidth + (hidden ? WordGap + HudStyle.TextWidth(FeedLine.HiddenShooterTail, TextSize) : 0f);
-        row.Kind = line.KillerSide == Side.Own ? RowKind.Mine : line.VictimSide == Side.Own ? RowKind.Died : RowKind.Plain;
+        row.Width = 2 * PadX + row.KillerWidth + row.VerbWidth + row.VictimWidth + (row.Tail is null ? 0f : WordGap + HudStyle.TextWidth(row.Tail, TextSize));
+        row.Kind = !line.Zone && line.KillerSide == Side.Own ? RowKind.Mine : line.VictimSide == Side.Own ? RowKind.Died : RowKind.Plain;
     }
 
     public override void _Draw()
@@ -91,7 +94,7 @@ public partial class KillFeedView : HudPanel
             HudStyle.DrawOutlined(this, new Vector2(x, baseline), row.Victim!, TextSize, row.VictimColor, TextOutline);
             if (row.Tail is null) continue;
             x += row.VictimWidth + WordGap;
-            HudStyle.DrawOutlined(this, new Vector2(x, baseline), row.Tail, TextSize, HudStyle.Text, TextOutline);
+            HudStyle.DrawOutlined(this, new Vector2(x, baseline), row.Tail, TextSize, row.TailColor, TextOutline);
         }
     }
 

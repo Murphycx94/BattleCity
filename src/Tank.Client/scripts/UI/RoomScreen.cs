@@ -8,9 +8,10 @@ using Tank.Sim.Vehicles;
 namespace Tank.Client.UI;
 
 /// <summary>
-/// The room: who is here (two columns seen from your seat, or one in a mode without teams), and on the right the controls
-/// — mode, map and bots for the host, tank for everyone, swap sides, ready, start, leave. What shows and what is enabled
-/// comes from <see cref="RoomModel"/>; this class only builds controls from it, and only when the model's signature changes.
+/// The room: who is here (two columns seen from your seat, or one in a mode without teams — two again past eight rows, a
+/// royale's 16), and on the right the controls — mode, map and bots for the host, tank for everyone, swap sides, ready,
+/// start, leave. What shows and what is enabled comes from <see cref="RoomModel"/>; this class only builds controls from
+/// it, and only when the model's signature changes. A mode the room can't switch to is greyed in its list, the reason on hover.
 /// </summary>
 public partial class RoomScreen : Control
 {
@@ -29,7 +30,8 @@ public partial class RoomScreen : Control
     private readonly HBoxContainer _columns = new() { SizeFlagsHorizontal = SizeFlags.ExpandFill };
     private readonly OptionButton _mode = new();
     private readonly OptionButton _map = new();   // item i is MapCatalog.All[i]
-    private readonly OptionButton _bots = new();
+    private readonly Label _mapHint = UiKit.Label("", 14, UiKit.Dim);
+    private readonly OptionButton _bots = new();   // item n is n bots
     private readonly GridContainer _tanks = new() { Columns = 2 };
     private readonly List<Button> _tankButtons = new();
     private readonly Button _switchTeam;
@@ -126,11 +128,20 @@ public partial class RoomScreen : Control
         _waitingBanner.Visible = m.WaitingText is not null;
         _waitingText.Text = m.WaitingText ?? "";
 
+        for (int i = 0; i < m.ModeChoices.Count; i++)   // the items are ModeRules.All's, as the choices are
+        {
+            ModeChoice choice = m.ModeChoices[i];
+            _mode.SetItemDisabled(i, choice.Blocked is not null);
+            _mode.SetItemTooltip(i, choice.Blocked ?? "");   // shown on a disabled item too: PopupMenu's item lookup skips only hidden items (Godot 4.7)
+        }
         _mode.Select(_mode.GetItemIndex((int)m.Mode));
         _mode.Disabled = !m.CanSetMode;
         _map.Select(MapIndex(m.MapId));   // -1 (nothing selected) for a map this build doesn't know
         _map.Disabled = !m.CanSetMap;
-        _bots.Select(Math.Clamp(m.Bots, 0, _bots.ItemCount - 1));
+        _mapHint.Visible = m.MapHint is not null;
+        _mapHint.Text = m.MapHint ?? "";
+        for (int n = 0; n < _bots.ItemCount; n++) _bots.SetItemDisabled(n, n > m.MaxBots);
+        _bots.Select(Math.Clamp(m.Bots, 0, Math.Min(m.MaxBots, _bots.ItemCount - 1)));
         _bots.Disabled = !m.CanSetBots;
         for (int i = 0; i < _tankButtons.Count; i++) _tankButtons[i].SetPressedNoSignal(i == m.MyTankIndex);
         _switchTeam.Visible = m.HasTeams;
@@ -145,7 +156,8 @@ public partial class RoomScreen : Control
         _updating = false;
 
         foreach (Node child in _columns.GetChildren()) child.QueueFree();
-        foreach (RoomColumnView column in m.Columns) _columns.AddChild(BuildColumn(column));
+        string firstTitle = m.Columns.Count > 0 ? m.Columns[0].Title : "";
+        foreach (RoomColumnView column in m.Columns) _columns.AddChild(BuildColumn(column, firstTitle));
     }
 
     private Control BuildSide()
@@ -156,7 +168,24 @@ public partial class RoomScreen : Control
         var side = new VBoxContainer();
         side.AddThemeConstantOverride("separation", 10);
         panel.AddChild(side);
+        AddHostPickers(side);
+        AddTankPicker(side);
+        side.AddChild(UiKit.Gap(6));
+        side.AddChild(_switchTeam);
+        side.AddChild(_ready);
+        side.AddChild(_start);
+        _hint.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        side.AddChild(_hint);
+        _addressLine.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        side.AddChild(_addressLine);
+        side.AddChild(UiKit.Gap(14));
+        side.AddChild(UiKit.Button("离开房间", () => LeaveRequested?.Invoke()));
+        return panel;
+    }
 
+    /// <summary>The host's pickers: the mode, the map with the hint under it (a mode that fixes the map), the bots.</summary>
+    private void AddHostPickers(VBoxContainer side)
+    {
         side.AddChild(UiKit.Label("模式（房主）", 14, UiKit.Dim));
         foreach (BattleMode mode in ModeRules.All) _mode.AddItem(ModeText.Name(mode), (int)mode);
         _mode.ItemSelected += i => { if (!_updating) _client?.SetMode((BattleMode)_mode.GetItemId((int)i)); };
@@ -166,12 +195,18 @@ public partial class RoomScreen : Control
         foreach (MapDefinition map in MapCatalog.All) _map.AddItem(map.Name);
         _map.ItemSelected += i => { if (!_updating) _client?.SetMap(MapCatalog.All[(int)i].Id); };
         side.AddChild(_map);
+        _mapHint.Visible = false;
+        side.AddChild(_mapHint);
 
         side.AddChild(UiKit.Label("机器人（房主）", 14, UiKit.Dim));
-        for (int n = 0; n <= BattleProtocol.MaxPlayers - 1; n++) _bots.AddItem(n == 0 ? "没有机器人" : $"{n} 个机器人", n);
+        for (int n = 0; n <= BattleProtocol.MaxPlayers - 1; n++) _bots.AddItem(n == 0 ? "没有机器人" : $"{n} 个机器人", n);   // 0–15; those past the mode's MaxBots are disabled in Apply
         _bots.ItemSelected += i => { if (!_updating) _client?.SetBots(_bots.GetItemId((int)i)); };
         side.AddChild(_bots);
+    }
 
+    /// <summary>The own tank's buttons: one toggle per tank in the catalogue, one group.</summary>
+    private void AddTankPicker(VBoxContainer side)
+    {
         side.AddChild(UiKit.Label("我的坦克", 14, UiKit.Dim));
         _tanks.AddThemeConstantOverride("h_separation", 8);
         _tanks.AddThemeConstantOverride("v_separation", 8);
@@ -187,18 +222,6 @@ public partial class RoomScreen : Control
             _tanks.AddChild(b);
         }
         side.AddChild(_tanks);
-
-        side.AddChild(UiKit.Gap(6));
-        side.AddChild(_switchTeam);
-        side.AddChild(_ready);
-        side.AddChild(_start);
-        _hint.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        side.AddChild(_hint);
-        _addressLine.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        side.AddChild(_addressLine);
-        side.AddChild(UiKit.Gap(14));
-        side.AddChild(UiKit.Button("离开房间", () => LeaveRequested?.Invoke()));
-        return panel;
     }
 
     private static int MapIndex(string mapId)
@@ -208,7 +231,8 @@ public partial class RoomScreen : Control
         return -1;
     }
 
-    private static Control BuildColumn(RoomColumnView column)
+    /// <param name="firstTitle">The first column's title: an untitled column (the second of a mode without teams) keeps its height, invisibly, so the two columns' rows line up.</param>
+    private static Control BuildColumn(RoomColumnView column, string firstTitle)
     {
         Color accent = column.Side switch { ColumnSide.Mine => MineColor, ColumnSide.Other => OtherColor, _ => UiKit.Accent };
         var panel = UiKit.Panel(pad: PanelPadding, border: new Color(accent, 0.7f));
@@ -218,7 +242,10 @@ public partial class RoomScreen : Control
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 10);
         panel.AddChild(col);
-        col.AddChild(UiKit.Label(column.Title, 22, accent));
+        bool untitled = column.Title.Length == 0;
+        Label title = UiKit.Label(untitled ? firstTitle : column.Title, 22, accent);
+        if (untitled) title.Modulate = Colors.Transparent;
+        col.AddChild(title);
         foreach (RoomRowView row in column.Rows) col.AddChild(BuildRow(row, column.Side));
         return panel;
     }

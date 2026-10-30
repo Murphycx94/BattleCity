@@ -25,7 +25,9 @@ namespace Tank.Client.Match;
 /// client's render position), the others from the interpolator as <see cref="TankActors"/>, the shells from
 /// <c>client.Shells</c>, the props as the field has them; events become effects (MatchMain.Events.cs); the camera and
 /// aim follow the sandbox's, a dead player's camera the spectate chain, and Esc the pause layer (MatchMain.Camera.cs);
-/// the map (<see cref="MinimapLayer"/>) sits in the corner, M opens it full-screen, and the results hide it.
+/// the map (<see cref="MinimapLayer"/>) sits in the corner, M opens it full-screen, and the results hide it. In a royale
+/// the zone is read once a frame from the client at the render tick (<see cref="ZoneWall"/> on its circle, the HUD's
+/// zone line and the tint while the own live tank is outside, the circles on the map); it stays up on the results.
 /// Nothing here reads <c>Simulation</c>. A loopback host runs on a
 /// virtual clock, so every frame then steps by <see cref="VirtualFrame"/>. <see cref="Finished"/> fires once when the
 /// phase leaves the match; the owner then frees the scene.
@@ -56,6 +58,8 @@ public partial class MatchMain : Node3D
     private Battlefield? _field;
     private Func<float, float, float> _groundAt = null!;   // the ground or the water over it, for the fixed cameras
     private BattleWorld? _world;   // null until the field is known
+    private ZoneWall? _zoneWall;   // a royale's light wall; null in the other modes
+    private ZoneState _zone;       // the zone at this frame's render tick (Phase None outside a royale)
     private TankActor? _tank;      // null until the own tank is known
     private TankSpec? _tankSpec;   // the spec it was built for
     private bool _tankFirstSight;
@@ -96,7 +100,7 @@ public partial class MatchMain : Node3D
     {
         (_session, _client, _options) = (session, session.Client, options);
         _site = MapSites.For(_client.Room?.Map);   // no room state yet (a mid-match join): the sandbox's, which only scripted shots use
-        _automation = new MatchAutomation(options, screenshotTaken, _site);
+        _automation = new MatchAutomation(options, screenshotTaken, _site, hasZone: ModeRules.HasZone(Mode));
     }
 
     /// <summary>Whether the run's screenshot is spent, this match's own or an earlier one; the owner reads it as the scene goes.</summary>
@@ -203,6 +207,7 @@ public partial class MatchMain : Node3D
             ShowOwn(own, pose, fdt);
             SyncDeath(own);
         }
+        bool outside = ReadZone(hasTank, in own);
         (TankState? focus, TankPose? focusPose) = UpdateView(hasTank, own, pose, field, fdt);
         Vector3 cameraPos = _camera.Camera.GlobalPosition;
         _world!.Update(focus, focusPose, cameraPos, fdt);   // only one tank flattens the grass: the own, or the one followed (R12)
@@ -215,8 +220,22 @@ public partial class MatchMain : Node3D
         bool boardOpen = _input.ScoreboardHeld && !Paused;   // Tab is polled, so the pause layer has to veto it here
         if (boardOpen) _minimap.CloseFull();   // the board shares the full map's layer and would sit under it: Tab wins
         _hud.SetScoreboardOpen(boardOpen);
-        _hud.Refresh(MatchHudFrame.From(_client, _session, OwnTeam(own), _names, (int)Engine.GetFramesPerSecond(), _spectateName, _spectateFree, resultsLeft), _input.NetPanelOpen, _time);
+        _hud.Refresh(MatchHudFrame.From(_client, _session, OwnTeam(own), _names, (int)Engine.GetFramesPerSecond(), _spectateName, _spectateFree, resultsLeft, ZoneHud.From(_zone, outside)), _input.NetPanelOpen, _time);
         ShowMinimap(hasTank, own, field);
+    }
+
+    /// <summary>
+    /// The zone as the render tick sees it (the server alone deals its damage), into <see cref="_zone"/>: the wall shows it,
+    /// then the camera (the zone preset looks at the wall), the HUD and the map read this frame's copy. Returns whether
+    /// the own tank, as drawn, is outside it; the first such frame goes to the automation (the plan keeps the first time).
+    /// </summary>
+    private bool ReadZone(bool hasTank, in TankState own)
+    {
+        _zone = _client.ZoneAt(_client.Interpolator.RenderTick);
+        _zoneWall?.Show(_zone.Current);
+        bool outside = hasTank && !own.IsDestroyed && _zone.IsOutside(own.Position);
+        if (outside) _automation.NotifyOutside(_time);
+        return outside;
     }
 
     /// <summary>
@@ -230,6 +249,7 @@ public partial class MatchMain : Node3D
         frame.Clear();
         byte team = OwnTeam(own);
         MinimapFeed.AddBases(frame, _client.MatchInfo?.Bases, team, _client.Match);
+        MinimapFeed.AddZone(frame, _zone);
         bool watching = _dead && !_automation.HasPreset;
         RemoteTank? followed = watching && _spectate.Current == SpectateState.Mode.Follow && TryFindRemote(_spectate.TargetId, out RemoteTank remote) ? remote : null;
         MinimapEyeChoice eye = MinimapEyes.Pick(hasTank, watching, _spectate.Current, followed, own.Position, own.Yaw, _focus, _camera.GroundHeading(), _camera.HalfFov());
@@ -312,6 +332,11 @@ public partial class MatchMain : Node3D
         _world = Add(new BattleWorld());
         // The room state names the map; joining a running match it may not have come yet, so its ground's grid does.
         _world.Build(field, focus, MapStyle.For(_client.Room?.Map ?? MapSites.IdOfGrid(field.Terrain)), CameraPresets.StreamsAroundCamera(_automation.Preset));
+        if (ModeRules.HasZone(Mode))
+        {
+            _zoneWall = Add(new ZoneWall());
+            _zoneWall.Build(field);
+        }
         _fx = Add(new BattleFx());
         _actors = Add(new TankActors());
         _actors.Build(field.Terrain, _fx);

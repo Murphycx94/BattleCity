@@ -44,6 +44,36 @@ public sealed class HeightFieldTests
     }
 
     [Fact]
+    public void SurfaceNormalAt_Ramp_MatchesNormalAt()
+    {
+        Vector3 n = TestWorld.RampNorth(1f).SurfaceNormalAt(51.3f, 47.9f);
+        Assert.Equal(MathF.Sqrt(0.5f), n.Y, 1e-4f);
+        Assert.Equal(MathF.Sqrt(0.5f), n.Z, 1e-4f);
+    }
+
+    [Fact]
+    public void SurfaceNormalAt_IsTheCellsOwnSlope()
+    {
+        // Small's cell (0, 0) rises 0.1 per metre along x and 0.3 along z throughout; on a sample line the cell after it counts.
+        Vector3 inCell = Small.SurfaceNormalAt(5, 5), onLine = Small.SurfaceNormalAt(10, 5);
+        Vector3 expected = Vector3.Normalize(new Vector3(-1, 10, -3));
+        Assert.Equal(expected.X, inCell.X, 1e-6f);
+        Assert.Equal(expected.Y, inCell.Y, 1e-6f);
+        Assert.Equal(expected.Z, inCell.Z, 1e-6f);
+        Assert.Equal(inCell, onLine);
+        Assert.Equal(Vector3.UnitY, Small.SurfaceNormalAt(-5, 25));   // flat outside the grid, as the ground is there
+    }
+
+    [Fact]
+    public void SurfaceNormalAt_KeepsAKinkWhereNormalAtSpreadsIt()
+    {
+        // Flat at 0 for z ≥ 100, rising steeply north of it: half a metre south of the kink the ground is flat.
+        HeightField cliff = TestWorld.CliffNorth(100, 2.75f);
+        Assert.Equal(Vector3.UnitY, cliff.SurfaceNormalAt(100, 100.5f));
+        Assert.True(cliff.NormalAt(100, 100.5f).Y < MathF.Cos(32 * MathF.PI / 180));
+    }
+
+    [Fact]
     public void Raycast_DownIntoFlatGround_HitsAtSurface()
     {
         Assert.True(TestWorld.Flat().Raycast(new Vector3(10, 10, 10), new Vector3(10, -10, 10), out float t));

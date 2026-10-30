@@ -74,6 +74,9 @@ public static class Palette
     public static readonly Vector3 WindowGlass = Hex("A9DDF2");  // a pale sky blue
     public static readonly Vector3 PlasterDust = Hex("EADBC0");  // the cloud of a house coming down
 
+    // The royale's zone (stage 6 design §3.3): a light blue apart from the sky, the water and both sides' tanks.
+    public static readonly Vector3 ZoneWall = Hex("7CCBFF");     // the wall, the safe circle on the map, the outside tint
+
     // Team colours in a match, seen from the player's seat (the player's own tank is TankBody). Declared after the
     // entries they alias: static initialisers run in textual order.
     public static readonly Vector3 AllyBody = TargetBody;        // a teammate: the same blue-grey as the practice targets

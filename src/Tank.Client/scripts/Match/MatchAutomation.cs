@@ -12,14 +12,15 @@ namespace Tank.Client.Match;
 /// <c>--camera-preset</c> (nobody drives), <c>--autodrive</c> (full throttle, steering right part of the time so it
 /// drives loops, firing whenever the gun is roughly level), and the shared capture pieces — the timetable is a
 /// <see cref="ShotPlan"/> (<c>--screenshot-at</c> counts from the match scene's creation, <c>--shot-after</c> waits for
-/// <c>fire|hit|kill|death|ended</c>, <c>--quit-after</c> quits) and a <see cref="CaptureRun"/> executes it, with
+/// <c>fire|hit|kill|death|ended|outside</c>, <c>--quit-after</c> quits) and a <see cref="CaptureRun"/> executes it, with
 /// <c>--fps-log</c>'s once-a-second line (a screenshot due while the map is still baking waits for its picture), and <c>--full-map</c> (the full-screen map opened once the scene is up); a
 /// screenshot Main or an earlier match already took is not taken again. Any of these makes the run ignore the mouse and
 /// keyboard. The moments come
 /// from the scene: the server's events (<see cref="OnEvent"/>), the predicted own shot (<see cref="NotifyFired"/>: an
 /// own shot never reaches the event queue), the own wreck state (<see cref="NotifyDeath"/>, which beats the late
-/// destroy event) and the results screen (<see cref="NotifyEnded"/>). Times are the match clock — wall seconds, or the
-/// virtual clock of a loopback run.
+/// destroy event), the results screen (<see cref="NotifyEnded"/>) and the own live tank outside the zone's safe circle
+/// (<see cref="NotifyOutside"/>, a royale). Times are the match clock — wall seconds, or the virtual clock of a loopback
+/// run. A royale match (<c>hasZone</c>) also knows the <see cref="ZoneCamera.Preset"/> camera, which no map lists.
 /// </summary>
 public sealed class MatchAutomation
 {
@@ -31,19 +32,22 @@ public sealed class MatchAutomation
 
     private readonly LaunchOptions _options;
     private readonly MapSite _site;
+    private readonly bool _hasZone;
     private readonly ShotPlan _plan;
     private CaptureRun? _capture;   // built in Start: the fps log needs the host's viewport, so the host must be in the tree
     private bool _fullMapPending;   // --full-map: not yet opened
 
     /// <param name="screenshotTaken">The run's screenshot is already taken (by Main in the room, or by an earlier match): none here.</param>
     /// <param name="site">The match's map site, whose presets <c>--camera-preset</c> may name; null for the sandbox's.</param>
-    public MatchAutomation(LaunchOptions options, bool screenshotTaken, MapSite? site = null)
+    /// <param name="hasZone">A royale: <c>--camera-preset zone</c> (<see cref="ZoneCamera.Preset"/>) is known too.</param>
+    public MatchAutomation(LaunchOptions options, bool screenshotTaken, MapSite? site = null, bool hasZone = false)
     {
         _options = options;
         _site = site ?? MapSites.Sandbox;
+        _hasZone = hasZone;
         _plan = ShotPlan.ForMatch(options);
         if (screenshotTaken) _plan.MarkScreenshotTaken();
-        HasPreset = CameraPresets.IsKnownFor(options.CameraPreset, _site);
+        HasPreset = CameraPresets.IsKnownFor(options.CameraPreset, _site) || (hasZone && options.CameraPreset == ZoneCamera.Preset);
         _fullMapPending = options.FullMap;
     }
 
@@ -69,7 +73,7 @@ public sealed class MatchAutomation
     {
         foreach (string warning in _plan.Warnings) GD.PushWarning(warning);
         if (_options.CameraPreset is { } preset && !HasPreset)
-            GD.PushWarning($"Unknown --camera-preset '{preset}' on {_site.Map.Name}; use {string.Join(", ", _site.PresetNames)}.");
+            GD.PushWarning($"Unknown --camera-preset '{preset}' on {_site.Map.Name}; use {string.Join(", ", _site.PresetNames)}{(_hasZone ? ", " + ZoneCamera.Preset : "")}.");
     }
 
     /// <summary>Notes the first server event of each kind by (or destroying) the own tank.</summary>
@@ -83,6 +87,9 @@ public sealed class MatchAutomation
 
     /// <summary>The results screen came up.</summary>
     public void NotifyEnded(double time) => _plan.OnMoment(ShotMoment.Ended, time);
+
+    /// <summary>The own live tank is outside the zone's safe circle this frame (the plan keeps the first time).</summary>
+    public void NotifyOutside(double time) => _plan.OnMoment(ShotMoment.Outside, time);
 
     /// <summary>The command for this frame: <paramref name="player"/>'s own, or the script's in its place.</summary>
     public LocalCommand Command(in LocalCommand player, double time)

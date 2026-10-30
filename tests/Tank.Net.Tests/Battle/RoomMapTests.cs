@@ -301,6 +301,8 @@ public sealed class RoomMapTests
         Assert.Equal(BattleProtocol.Version, before.ProtocolVersion);
         Assert.Equal(h.Server.RoomMap.Id, before.Map);
         Assert.Equal("a", before.Map);
+        Assert.Equal(ModeRules.MaxPlayersFor(before.Mode), before.MaxPlayers);   // the room's mode's seats, not the wire's sixteen
+        Assert.Equal(10, before.MaxPlayers);
 
         host.SetMap("b");
         h.Run(0.2);

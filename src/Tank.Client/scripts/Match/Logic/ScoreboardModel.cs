@@ -10,16 +10,18 @@ namespace Tank.Client.Match;
 /// in the field in a free-for-all (the server's own after the match, the standing while it runs). <c>Side</c> is the
 /// line's colour relative to the player; <c>Status</c> is the words of the last column. <c>Capture</c> is the most
 /// base points the player's tank held this match (<see cref="PlayerStats.Capture"/>; standard only, and the server
-/// sends 0 for enemies until the match has ended — see <see cref="ScoreboardModel.CaptureCell"/>).
+/// sends 0 for enemies until the match has ended — see <see cref="ScoreboardModel.CaptureCell"/>). <c>Damage</c> is the
+/// damage dealt to other sides' tanks and <c>Lasted</c> how long the tank lasted, in whole seconds (both shown in a
+/// royale; the server sends another player's damage as 0 until the end — <see cref="ScoreboardModel.DamageCell"/>).
 /// </summary>
 public readonly record struct ScoreRow(byte Slot, string Name, byte Team, string TankName, int Kills, int Deaths, bool Alive, int Rank, Side Side, string Status,
-    int Capture = 0);
+    int Capture = 0, int Damage = 0, int Lasted = 0);
 
 /// <summary>
 /// The scoreboard's lines and their order (blueprint §5 T7), none of it touching the engine. Team modes: the player's
-/// team first, each team by kills (most first), then deaths (fewest first), then slot. Free-for-all: while the match
-/// runs the living first, then kills and deaths as above; once it has ended the server's <c>Rank</c>. Players who have
-/// left are not listed.
+/// team first, each team by kills (most first), then deaths (fewest first), then slot. Free-for-all and royale: while
+/// the match runs the living first, then kills and deaths as above; once it has ended the server's <c>Rank</c>. Players
+/// who have left are not listed.
 /// </summary>
 public static class ScoreboardModel
 {
@@ -50,6 +52,19 @@ public static class ScoreboardModel
     }
 
     /// <summary>
+    /// The 伤害 cell of <paramref name="row"/>: the number, except another player's while the match is on (the server sends
+    /// 0 until the end, plan deviation 6), which is left blank. Allocates: a view calls it when it rebuilds its rows.
+    /// </summary>
+    public static string DamageCell(in ScoreRow row, bool ended)
+    {
+        if (row.Side != Side.Own && !ended) return string.Empty;
+        return row.Damage.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The 存活 cell once the match has ended: "m:ss" of <see cref="ScoreRow.Lasted"/>. Allocates, as <see cref="DamageCell"/>.</summary>
+    public static string LastedCell(in ScoreRow row) => HudText.Clock(row.Lasted);
+
+    /// <summary>
     /// Fills <paramref name="output"/> with the lines in display order and returns how many. Allocates nothing unless the
     /// own row's respawn status needs a new string; <paramref name="output"/> needs room for every slot of
     /// <paramref name="players"/>. <paramref name="ownRespawnIn"/> is the ticks until the own tank is back (0 when it isn't waiting).
@@ -68,7 +83,7 @@ public static class ScoreboardModel
             bool own = slot == ownSlot;
             string status = p.Alive ? AliveText : own && ownRespawnIn > 0 ? RespawnStatus(ownRespawnIn) : DestroyedText;
             output[count++] = new ScoreRow((byte)slot, PlayerName(nameOf((byte)slot), slot), p.Team, ModeText.TankName(p.Spec),
-                p.Kills, p.Deaths, p.Alive, p.Rank, MatchColors.SideOf(mode, ownTeam, p.Team, own), status, p.Capture);
+                p.Kills, p.Deaths, p.Alive, p.Rank, MatchColors.SideOf(mode, ownTeam, p.Team, own), status, p.Capture, p.Damage, p.Lasted);
         }
         Span<ScoreRow> rows = output[..count];
         for (int i = 1; i < count; i++)

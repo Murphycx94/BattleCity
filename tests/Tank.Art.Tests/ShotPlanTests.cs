@@ -77,6 +77,28 @@ public class ShotPlanTests
         Assert.Empty(plan.Warnings);
     }
 
+    [Fact]
+    public void Outside_the_zone_comes_straight_from_the_caller_in_a_match()
+    {
+        ShotPlan plan = Match("--shot-after", "outside:2");
+        Assert.False(plan.TakeScreenshot(100));
+        plan.OnMoment(ShotMoment.Outside, 95);
+        plan.OnMoment(ShotMoment.Outside, 96);   // every frame outside repeats it; the first counts
+        Assert.False(plan.TakeScreenshot(96.9));
+        Assert.True(plan.TakeScreenshot(97.0));
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Fact]
+    public void Outside_the_zone_never_happens_in_the_sandbox()
+    {
+        ShotPlan plan = Sandbox("--shot-after", "outside:2");
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("'outside'", warning);
+        Assert.Contains("the sandbox", warning);
+        Assert.False(plan.TakeScreenshot(100));   // nothing in the sandbox ever notes the moment
+    }
+
     [Theory]
     [InlineData(8.0)]    // the results stay 8 s: the scene is gone by then
     [InlineData(12.5)]

@@ -44,6 +44,16 @@ public class ModeTextTests
     }
 
     [Fact]
+    public void The_royale_is_called_chicken_dinner_and_its_rule_names_the_zone_and_the_numbers()
+    {
+        Assert.Equal("吃鸡", ModeText.Name(BattleMode.Royale));
+        Assert.Contains("毒圈", ModeText.Rule(BattleMode.Royale));
+        Assert.Contains("最多 16 辆车", ModeText.Rule(BattleMode.Royale));
+        Assert.Contains("缩小 5 次", ModeText.Rule(BattleMode.Royale));
+        Assert.Contains("10 分钟", ModeText.Rule(BattleMode.Royale));
+    }
+
+    [Fact]
     public void A_mode_from_another_version_has_a_name_and_no_rule()
     {
         var unknown = (BattleMode)200;

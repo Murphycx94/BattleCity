@@ -89,6 +89,24 @@ internal static class TestMaps
     /// </summary>
     public static MapDefinition StandardWalled(string id) => new(id, id, WalledField, Spawns, Waypoints, StandardBases);
 
+    /// <summary>
+    /// A royale's three solo spawns on the walled map: two west of the wall 30 m apart and facing east (one in the other's
+    /// sights), one east of it facing west, which the wall hides from both.
+    /// </summary>
+    public static readonly IReadOnlyList<SpawnPoint> RoyaleSoloSpawns = new SpawnPoint[]
+    {
+        new(new Vector2(40, 100), Angles.YawOf(Vector2.UnitX), 0),
+        new(new Vector2(70, 100), Angles.YawOf(Vector2.UnitX), 0),
+        new(new Vector2(170, 100), Angles.YawOf(-Vector2.UnitX), 0),
+    };
+
+    /// <summary>
+    /// A stand-in for the riverland in the server's royale tests: the walled small map under the riverland's id (a royale is
+    /// held there only), with <see cref="RoyaleSoloSpawns"/>. Quick to generate, and shots at 30 m hit.
+    /// </summary>
+    public static MapDefinition RoyaleStandIn() =>
+        new(RiverlandMap.Id, "河谷（测试）", WalledField, new SpawnLayout(TeamSpawns, RoyaleSoloSpawns), Waypoints);
+
     private static Battlefield WalledField()
     {
         HeightField terrain = TestWorld.Flat();

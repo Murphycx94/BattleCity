@@ -3,6 +3,7 @@ using Tank.Sim.Ai;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
 using Tank.Sim.Modes;
+using Tank.Sim.Navigation;
 using Tank.Sim.Terrain;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
@@ -66,14 +67,38 @@ internal sealed class BotArena
     private readonly int[] _longestStuck = new int[Simulation.MaxTanks + 1];
     private byte _nextSlot;
 
-    /// <summary>A match of <paramref name="mode"/> on <paramref name="map"/> (the flat arena when null).</summary>
-    public BotArena(BattleMode mode = BattleMode.TeamBattle, MapDefinition? map = null, int? durationTicks = null)
+    /// <summary>
+    /// A match of <paramref name="mode"/> on <paramref name="map"/> (the flat arena when null), with the match seed
+    /// <paramref name="seed"/> and a royale's rings <paramref name="zone"/> (both for <see cref="MatchRules"/>).
+    /// </summary>
+    public BotArena(BattleMode mode = BattleMode.TeamBattle, MapDefinition? map = null, int? durationTicks = null, uint seed = 0,
+        IReadOnlyList<ZoneRing>? zone = null)
+        : this(map ?? FlatMap(), null, null, mode, durationTicks, seed, zone)
     {
-        Map = map ?? FlatMap();
-        Sim = new Simulation(Map.NewBattlefield());
+    }
+
+    /// <summary>The match on <paramref name="field"/> and <paramref name="grid"/> when given (made from the map otherwise); the grid first, as the server has it.</summary>
+    private BotArena(MapDefinition map, Battlefield? field, NavGrid? grid, BattleMode mode, int? durationTicks, uint seed, IReadOnlyList<ZoneRing>? zone)
+    {
+        Map = map;
+        grid ??= map.NewNavGrid();
+        Sim = new Simulation(field ?? map.NewBattlefield());
         Vision = new VisionTracker(Sim);
-        Rules = new MatchRules(mode, Sim, Map.Spawns, durationTicks, Map.Bases);
-        Director = new BotDirector(Sim, Vision, Rules, Map, Map.NewNavGrid());
+        Rules = new MatchRules(mode, Sim, map.Spawns, durationTicks, map.Bases, seed, zone);
+        Director = new BotDirector(Sim, Vision, Rules, map, grid);
+    }
+
+    /// <summary>
+    /// A royale on <paramref name="map"/> as the server starts one (stage 6A plan, task 6): the battlefield and the grid,
+    /// the rings drawn on them from <paramref name="seed"/> (<see cref="ZonePicker"/>, with its salt) before any tank,
+    /// then the rules with the seed and the rings, and the director on the same grid.
+    /// </summary>
+    public static BotArena Royale(MapDefinition map, uint seed)
+    {
+        Battlefield field = map.NewBattlefield();
+        NavGrid grid = map.NewNavGrid();
+        ZoneRing[] rings = ZonePicker.Pick(field, grid, map.Spawns.Solo, seed ^ ZonePicker.SeedSalt);
+        return new BotArena(map, field, grid, BattleMode.Royale, null, seed, rings);
     }
 
     public MapDefinition Map { get; }
@@ -87,6 +112,9 @@ internal sealed class BotArena
 
     /// <summary>Whether <see cref="Events"/> and the stuck watch are kept (off for allocation tests).</summary>
     public bool Recording { get; set; } = true;
+
+    /// <summary>When set, each tick's <see cref="VisionTracker.Update"/> wall-clock time is added to it, ms (stage 6A plan, task 6: the cost of 16 tanks).</summary>
+    public List<double>? VisionTimes { get; set; }
 
     /// <summary>
     /// The flat 400 m arena (201 × 201 samples 2 m apart, a 10 m border), its spawns round (90, 200) and (310, 200), its
@@ -219,7 +247,13 @@ internal sealed class BotArena
             _inputs[k] = Director.Find(id) is not null ? Director.Command(id, tick) : _orders[id] with { Tick = tick };
         }
         Sim.Step(_inputs.AsSpan(0, n));
-        Vision.Update();
+        if (VisionTimes is { } times)
+        {
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            Vision.Update();
+            times.Add(System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+        }
+        else Vision.Update();
         Rules.Update();
         if (!Recording) return;
         foreach (GameEvent e in Sim.Events) Events.Add(e);

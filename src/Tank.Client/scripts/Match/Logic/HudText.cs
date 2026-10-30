@@ -37,6 +37,12 @@ public static class HudText
     /// <summary>What a name cut by <see cref="Fit"/> ends with.</summary>
     public const string Ellipsis = "…";
 
+    /// <summary>The results title of a royale's winner (stage 6 design §3.3).</summary>
+    public const string RoyaleWinTitle = "吃鸡！";
+
+    /// <summary>The results title of anyone the server didn't rank (never in a finished royale or free-for-all; a guard).</summary>
+    public const string MatchOverTitle = "对局结束";
+
     /// <summary>Whole seconds in <paramref name="ticks"/>, rounded up: the clock shows a second until it has all gone.</summary>
     public static int CeilSeconds(int ticks) => ticks <= 0 ? 0 : (ticks + SimConstants.TickRate - 1) / SimConstants.TickRate;
 
@@ -121,11 +127,13 @@ public static class HudText
     /// The results screen's words (allocates: call it when its inputs change). Team modes: 胜利 / 失败 / 平局 from the
     /// winning team against <paramref name="ownTeam"/>, with the kills, the wipe-out or (standard) why the match ended
     /// (<see cref="ResultsInfo.Reason"/>) under it. Free-for-all: the player's
-    /// place ("第 N 名", from the server's rank) and who was left. <paramref name="plate"/> and <paramref name="players"/>
+    /// place ("第 N 名", from the server's rank) and who was left. Royale: <see cref="RoyaleWinTitle"/> for the first place,
+    /// "第 N 名" otherwise, over "共 N 名" from <see cref="ResultsInfo.Entrants"/>. <paramref name="plate"/> and <paramref name="players"/>
     /// are the frame's; <paramref name="names"/> is by slot.
     /// </summary>
     public static ResultsParts Results(BattleMode mode, byte ownSlot, byte ownTeam, in ResultsInfo info, in PlateValues plate, ReadOnlySpan<PlayerStats> players, string?[] names)
     {
+        if (mode == BattleMode.Royale) return RoyaleResults(ownSlot, info, players);
         if (!ModeRules.HasTeams(mode)) return SoloResults(ownSlot, info, players, names);
         ResultTone tone = info.WinnerTeam == MatchRules.NoTeam ? ResultTone.Neutral : info.WinnerTeam == ownTeam ? ResultTone.Win : ResultTone.Lose;
         string title = tone switch { ResultTone.Win => "胜利", ResultTone.Lose => "失败", _ => "平局" };
@@ -156,10 +164,21 @@ public static class HudText
         _ => "时间到，平局",
     };
 
+    /// <summary>Rank 1: 吃鸡！ (a win); rank n: 第 n 名; none: 对局结束 — each over "共 N 名" (the entrants, plan deviation 8).</summary>
+    private static ResultsParts RoyaleResults(byte ownSlot, in ResultsInfo info, ReadOnlySpan<PlayerStats> players)
+    {
+        int rank = ownSlot < players.Length ? players[ownSlot].Rank : 0;
+        string title = rank == 1 ? RoyaleWinTitle : rank > 1 ? Place(rank) : MatchOverTitle;
+        string subtitle = string.Create(CultureInfo.InvariantCulture, $"共 {info.Entrants} 名");
+        return new ResultsParts(title, subtitle, rank == 1 ? ResultTone.Win : ResultTone.Neutral);
+    }
+
+    private static string Place(int rank) => string.Create(CultureInfo.InvariantCulture, $"第 {rank} 名");
+
     private static ResultsParts SoloResults(byte ownSlot, in ResultsInfo info, ReadOnlySpan<PlayerStats> players, string?[] names)
     {
         int rank = ownSlot < players.Length ? players[ownSlot].Rank : 0;
-        string title = rank > 0 ? string.Create(CultureInfo.InvariantCulture, $"第 {rank} 名") : "对局结束";
+        string title = rank > 0 ? Place(rank) : MatchOverTitle;
         ResultTone tone = rank == 1 ? ResultTone.Win : ResultTone.Neutral;
         int winner = info.WinnerSlot;
         if (winner >= players.Length || !players[winner].Alive) return new ResultsParts(title, "没有人活到最后", tone);

@@ -173,6 +173,15 @@ public sealed partial class Simulation
         _pending.Add(new GameEvent(GameEventType.TankRevived, Tick, tankId, 0, at, Vector3.Zero, TargetTankId: tankId));
     }
 
+    /// <summary>
+    /// Takes <paramref name="damage"/> off live tank <paramref name="tankId"/> whatever its protection (the royale's zone: stage 6
+    /// design §3.2). At 0 it becomes a wreck and a <see cref="GameEventType.TankDestroyed"/> event (<c>TankId</c> 0, <c>ShellId</c> 0,
+    /// <see cref="KillCause.Zone"/>, <c>Position</c> the wreck) joins this step's <see cref="Events"/>: call it after <see cref="Step"/>,
+    /// before the events are read. No <see cref="GameEventType.TankHit"/> event. A wreck, or <paramref name="damage"/> ≤ 0: nothing.
+    /// </summary>
+    /// <exception cref="ArgumentException">No such tank.</exception>
+    public void HurtByZone(int tankId, int damage) => Damage(ref TankRef(tankId), damage, 0, 0, KillCause.Zone);
+
     /// <summary>Refills both ammunition racks (sandbox only for now).</summary>
     public void Restock(int tankId)
     {

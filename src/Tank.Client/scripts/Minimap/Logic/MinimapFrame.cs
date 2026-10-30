@@ -27,11 +27,20 @@ public enum EyeKind : byte { None, Arrow, Ring }
 /// <param name="Position">Ground (x, z).</param>
 public readonly record struct MinimapEye(EyeKind Kind, Vector2 Position, float Yaw, float CameraYaw, float HalfFov);
 
+/// <summary>
+/// The zone on the map (stage 6 design §3.3): the safe circle now (its line light blue, the ground outside it darkened)
+/// and, when known, the next ring (white).
+/// </summary>
+/// <param name="Centre">Ground (x, z) of the safe circle now.</param>
+/// <param name="Radius">Metres; 0 once closed.</param>
+/// <param name="HasNext">Whether the next ring is known (waiting or shrinking; never once closed).</param>
+public readonly record struct MinimapZone(Vector2 Centre, float Radius, bool HasNext, Vector2 NextCentre, float NextRadius);
+
 /// <summary>One frame's icons, filled again every frame; nothing here allocates once built.</summary>
 public sealed class MinimapFrame
 {
     /// <summary>
-    /// Headroom over what any scene has: a match at most <c>BattleProtocol.MaxPlayers</c> (10) tanks, the sandbox its
+    /// Headroom over what any scene has: a match at most <c>BattleProtocol.MaxPlayers</c> (16) tanks, the sandbox its
     /// player and a handful of targets (<c>SandboxMap.TargetSpots</c>, <c>RiverlandMap.TargetSpots</c>). One more is a bug
     /// (asserted in Debug) and is left off the map.
     /// </summary>
@@ -55,13 +64,17 @@ public sealed class MinimapFrame
     /// <summary>The own wreck while the eye is elsewhere (dead, watching): an orange cross. Null otherwise.</summary>
     public Vector2? OwnWreck { get; set; }
 
-    /// <summary>Empties the tanks and bases, the eye (<see cref="EyeKind.None"/>) and the own wreck.</summary>
+    /// <summary>A royale's zone; null in the other modes (and before the match's zone is known).</summary>
+    public MinimapZone? Zone { get; set; }
+
+    /// <summary>Empties the tanks and bases, the eye (<see cref="EyeKind.None"/>), the own wreck and the zone.</summary>
     public void Clear()
     {
         _tankCount = 0;
         _baseCount = 0;
         Eye = default;
         OwnWreck = null;
+        Zone = null;
     }
 
     /// <summary>Adds <paramref name="tank"/>; ignored once <see cref="MaxTanks"/> are in (a Debug assertion says so).</summary>

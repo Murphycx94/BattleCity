@@ -23,6 +23,8 @@ public enum ShotMoment
     Death,
     /// <summary>The results came up (a match only).</summary>
     Ended,
+    /// <summary>The player's own live tank was first outside the zone's safe circle (a royale match only).</summary>
+    Outside,
 }
 
 /// <summary>What <see cref="ShotPlan.TakeScreenshot(double, bool)"/> says to do this frame.</summary>
@@ -61,7 +63,7 @@ public sealed class ShotPlan
     public const double MapWaitSeconds = 20;
 
     private static readonly ShotMoment[] SandboxMoments = { ShotMoment.Fire, ShotMoment.Hit, ShotMoment.Kill, ShotMoment.Prop, ShotMoment.Down };
-    private static readonly ShotMoment[] MatchMoments = { ShotMoment.Fire, ShotMoment.Hit, ShotMoment.Kill, ShotMoment.Death, ShotMoment.Ended };
+    private static readonly ShotMoment[] MatchMoments = { ShotMoment.Fire, ShotMoment.Hit, ShotMoment.Kill, ShotMoment.Death, ShotMoment.Ended, ShotMoment.Outside };
 
     private readonly double[] _firstSeen = NotSeenYet();   // per ShotMoment: when it first happened, s; -1 not yet
     private readonly double _countFrom;
@@ -172,7 +174,7 @@ public sealed class ShotPlan
                         $"--shot-after ended:{options.ShotAfterDelay} falls after the results have gone (they stay {ResultsStaySeconds} s); the screenshot will not be taken."));
                 return (moment, options.ShotAfterDelay);
             }
-            warnings.Add($"Unknown --shot-after moment '{awaited}'; use fire|hit|kill|prop|down|death|ended. Using --screenshot-at.");
+            warnings.Add($"Unknown --shot-after moment '{awaited}'; use fire|hit|kill|prop|down|death|ended|outside. Using --screenshot-at.");
         }
         if (options.FxShotDelay is { } fxDelay) return (ShotMoment.Fire, fxDelay);
         return (ShotMoment.Start, options.ScreenshotAt);
@@ -189,6 +191,7 @@ public sealed class ShotPlan
             "down" => (true, ShotMoment.Down),
             "death" => (true, ShotMoment.Death),
             "ended" => (true, ShotMoment.Ended),
+            "outside" => (true, ShotMoment.Outside),
             _ => (false, ShotMoment.Start),
         };
         return known;

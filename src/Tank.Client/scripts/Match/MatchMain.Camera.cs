@@ -7,6 +7,7 @@ using Tank.Net.Battle;
 using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
+using SN = System.Numerics;
 
 namespace Tank.Client.Match;
 
@@ -117,7 +118,12 @@ public partial class MatchMain
     /// </summary>
     private (TankState?, TankPose?) UpdateView(bool hasTank, in TankState own, TankPose pose, Battlefield field, float fdt)
     {
-        if (!hasTank) return (null, null);
+        if (!hasTank)
+        {
+            // The zone preset needs no tank: with none it looks at the wall from the side nearest the middle of the map.
+            if (_automation.HasPreset && _automation.Preset == ZoneCamera.Preset) LookAtZoneWall(new SN.Vector2(field.Terrain.SizeX / 2f, field.Terrain.SizeZ / 2f));
+            return (null, null);
+        }
         if (!_dead || _automation.HasPreset)
         {
             UpdateCamera(own, pose, field);
@@ -135,6 +141,11 @@ public partial class MatchMain
         if (_automation.HasPreset)
         {
             string preset = _automation.Preset!;
+            if (preset == ZoneCamera.Preset)
+            {
+                LookAtZoneWall(own.Position);
+                return;
+            }
             var (eye, target) = CameraPresets.Get(preset, pivot, own.Yaw, _time, _groundAt, targetIndex: 0, site: _site);
             _mapViewOn = CameraPresets.Look(_camera.Camera, preset, eye, target, _site, _world!, _mapViewOn);
         }
@@ -142,6 +153,13 @@ public partial class MatchMain
         {
             (_aimYaw, _aimPitch) = AimSolver.Solve(_camera, field, pose.Trunnion(own.Spec), _aimYaw);
         }
+    }
+
+    /// <summary>The zone preset (a royale only): from inside this frame's safe circle, on the side nearest <paramref name="near"/>, looking out at the wall (<see cref="ZoneCamera.Pose"/>).</summary>
+    private void LookAtZoneWall(SN.Vector2 near)
+    {
+        var (eye, target) = ZoneCamera.Pose(_zone.Current, near, _groundAt);
+        _mapViewOn = CameraPresets.Look(_camera.Camera, ZoneCamera.Preset, eye.ToGodot(), target.ToGodot(), _site, _world!, _mapViewOn);
     }
 
     /// <summary>
@@ -155,9 +173,9 @@ public partial class MatchMain
         ReadOnlySpan<int> candidates = CollectionsMarshal.AsSpan(_candidates);
         int step = _input.TakeSpectateStep() + (_input.TakeSpectateClick() ? 1 : 0);
         if (step != 0) _spectate.Step(step, candidates);
-        bool freeForAll = Mode == BattleMode.FreeForAll;
-        if (_input.TakeSpectateFree() && freeForAll) _spectate.GoFree();
-        _spectate.Update(fdt, candidates, freeWhenNone: freeForAll);
+        bool teamless = !ModeRules.HasTeams(Mode);   // free-for-all and royale: the dead may roam, and do when nobody is left to follow
+        if (_input.TakeSpectateFree() && teamless) _spectate.GoFree();
+        _spectate.Update(fdt, candidates, freeWhenNone: teamless);
 
         (_spectateName, _spectateFree) = (null, false);
         if (_spectate.Current == SpectateState.Mode.Follow && TryFindRemote(_spectate.TargetId, out RemoteTank remote))

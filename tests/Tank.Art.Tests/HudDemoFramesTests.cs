@@ -222,14 +222,18 @@ public class HudDemoFramesTests
 
     private static readonly string[] ScreensBeforeTheMap = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture" };
 
+    private static readonly string[] RoyaleScreens = { "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale" };
+
     [Fact]
     public void The_map_screens_come_last_and_leave_the_others_as_they_were()
     {
-        Assert.Equal(ScreensBeforeTheMap.Append("minimap").Append("map-full"), HudDemoFrames.Names);
+        Assert.Equal(ScreensBeforeTheMap.Append("minimap").Append("map-full").Concat(RoyaleScreens), HudDemoFrames.Names);
         foreach (string name in ScreensBeforeTheMap)
         {
             HudDemoFrames.TryGet(name, out HudDemo demo);
             Assert.Null(demo.Minimap);
+            Assert.False(demo.Frame.Zone.On);   // the zone is a royale's alone
+            Assert.Equal(0, demo.Frame.Results.Entrants);
         }
     }
 
@@ -297,5 +301,143 @@ public class HudDemoFramesTests
             Assert.InRange(p.X, RiverlandMap.Border, size - RiverlandMap.Border);
             Assert.InRange(p.Y, RiverlandMap.Border, size - RiverlandMap.Border);
         }
+    }
+
+    [Theory]
+    [InlineData("royale")]
+    [InlineData("royale-outside")]
+    [InlineData("royale-map")]
+    [InlineData("results-royale-win")]
+    [InlineData("results-royale")]
+    public void Every_royale_screen_is_a_sixteen_seat_royale_with_the_player_in_seat_zero(string name)
+    {
+        Assert.True(HudDemoFrames.TryGet(name, out HudDemo demo));
+        MatchHudFrame f = demo.Frame;
+
+        Assert.Equal(BattleMode.Royale, f.Mode);
+        Assert.Equal(0, f.OwnSlot);
+        Assert.Equal(16, f.Players.Count(p => p.Active));
+        Assert.Equal(16, f.Players.Where(p => p.Active).Select(p => p.Team).Distinct().Count());   // every seat its own side
+        Assert.Equal(PlateKind.SoloKills, f.Plate.Kind);
+        Assert.Equal(f.Phase == MatchPhase.Ended, f.Results.Entrants == 16);
+        Assert.Equal(f.Phase == MatchPhase.Playing, f.Zone.On);
+        Assert.Equal(Enumerable.Range(0, 16).Select(i => i < 10 ? ScreensRosterHead[i] : $"机器人 {i - 3}"), f.Names.Take(16));
+    }
+
+    private static readonly string[] ScreensRosterHead = { "阿成", "小林", "老周", "小雨", "机器人 1", "机器人 2", "机器人 3", "机器人 4", "机器人 5", "机器人 6" };
+
+    [Fact]
+    public void The_royale_screen_waits_for_ring_two_with_twelve_left_and_a_zone_kill_on_the_feed()
+    {
+        HudDemoFrames.TryGet("royale", out HudDemo demo);
+        MatchHudFrame f = demo.Frame;
+
+        Assert.Equal("6:15", HudText.Timer(f.TicksLeft));
+        Assert.Equal(("3", "12/16"), (HudText.Parts(f.Plate).LeftValue, HudText.Parts(f.Plate).RightValue));
+        Assert.Equal(new ZoneHud(true, 2, ZonePhase.Waiting, 45, false, 1), f.Zone);
+        Assert.Equal("毒圈 2/5 · 0:45 后缩小", ZoneText.Line(f.Zone));
+        Assert.Equal(3, demo.Kills.Length);
+        Assert.Single(demo.Kills, k => k.Zone && k.Text == "机器人 9 死于毒圈");
+        Assert.Equal(2, demo.Kills.Count(k => !k.Zone));
+        Assert.False(demo.ScoreboardOpen);
+
+        Assert.NotNull(demo.Minimap);
+        MinimapDemo map = demo.Minimap;
+        Assert.Equal(RiverlandMap.Id, map.MapId);
+        Assert.False(map.FullOpen);
+        MinimapZone zone = Assert.NotNull(map.Frame.Zone);
+        Assert.Equal(new MinimapZone(new Vector2(560, 640), 420, true, new Vector2(520, 610), 250), zone);
+        Vector2 arrow = map.Frame.Eye.Position;
+        Assert.Equal(EyeKind.Arrow, map.Frame.Eye.Kind);
+        Assert.True(Vector2.Distance(arrow, zone.Centre) < zone.Radius, "the arrow is inside the safe circle");
+        Assert.True(Vector2.Distance(arrow, zone.NextCentre) > zone.NextRadius, "the arrow is outside the next ring: it has to move");
+        Assert.Equal(3, map.Frame.Tanks.Length);
+        Assert.All(map.Frame.Tanks.ToArray(), t => Assert.Equal(Side.Enemy, t.Side));
+        Assert.Equal(0, map.Frame.Bases.Length);
+    }
+
+    [Fact]
+    public void The_outside_screen_shrinks_ring_three_with_the_player_out_of_the_circle()
+    {
+        HudDemoFrames.TryGet("royale-outside", out HudDemo demo);
+        MatchHudFrame f = demo.Frame;
+
+        Assert.Equal(new ZoneHud(true, 3, ZonePhase.Shrinking, 30, true, 4), f.Zone);
+        Assert.True(f.Zone.Outside);
+        Assert.Equal("在安全区外 −4%/秒", ZoneText.Outside(f.Zone.Percent));
+        Assert.True(f.Players[0].Alive);
+
+        Assert.NotNull(demo.Minimap);
+        MinimapDemo map = demo.Minimap;
+        Assert.False(map.FullOpen);
+        MinimapZone zone = Assert.NotNull(map.Frame.Zone);
+        Assert.Equal(new MinimapZone(new Vector2(520, 610), 180, true, new Vector2(500, 600), 140), zone);
+        Assert.True(Vector2.Distance(map.Frame.Eye.Position, zone.Centre) > zone.Radius, "the arrow is outside the safe circle");
+    }
+
+    [Fact]
+    public void The_royale_map_screen_is_the_royale_screen_with_the_full_map_open()
+    {
+        HudDemoFrames.TryGet("royale-map", out HudDemo full);
+        HudDemoFrames.TryGet("royale", out HudDemo corner);
+
+        Assert.True(full.Minimap!.FullOpen);
+        Assert.Equal(corner.Frame.Zone, full.Frame.Zone);
+        Assert.Equal(corner.Frame.Plate, full.Frame.Plate);
+        Assert.Equal(corner.Frame.TicksLeft, full.Frame.TicksLeft);
+        Assert.Equal(corner.Frame.Players, full.Frame.Players);
+        Assert.Equal(corner.Frame.Names, full.Frame.Names);
+        Assert.Equal(corner.Kills, full.Kills);
+        Assert.Equal(corner.Minimap!.Frame.Zone, full.Minimap.Frame.Zone);
+        Assert.Equal(corner.Minimap.Frame.Eye, full.Minimap.Frame.Eye);
+    }
+
+    [Theory]
+    [InlineData("royale")]
+    [InlineData("royale-outside")]
+    [InlineData("royale-map")]
+    public void Every_point_of_the_royale_map_frames_is_in_the_drivable_square(string name)
+    {
+        HudDemoFrames.TryGet(name, out HudDemo demo);
+        MinimapFrame frame = demo.Minimap!.Frame;
+        MinimapZone zone = frame.Zone!.Value;
+        float size = (RiverlandMap.Samples - 1) * RiverlandMap.CellSize;
+        var points = frame.Tanks.ToArray().Select(t => t.Position).Append(frame.Eye.Position).Append(zone.Centre).Append(zone.NextCentre);
+
+        foreach (Vector2 p in points)
+        {
+            Assert.InRange(p.X, RiverlandMap.Border, size - RiverlandMap.Border);
+            Assert.InRange(p.Y, RiverlandMap.Border, size - RiverlandMap.Border);
+        }
+    }
+
+    [Theory]
+    [InlineData("results-royale-win", 1, "吃鸡！", ResultTone.Win)]
+    [InlineData("results-royale", 7, "第 7 名", ResultTone.Neutral)]
+    public void The_royale_results_rank_all_sixteen_with_damage_and_time_lasted(string name, int ownRank, string title, ResultTone tone)
+    {
+        HudDemoFrames.TryGet(name, out HudDemo demo);
+        MatchHudFrame f = demo.Frame;
+        var rows = ScoreboardRows(f);
+        ResultsParts words = HudText.Results(f.Mode, f.OwnSlot, f.OwnTeam, f.Results, f.Plate, f.Players, f.Names);
+
+        Assert.Equal(MatchPhase.Ended, f.Phase);
+        Assert.Equal(BannerKind.Results, f.Banner);
+        Assert.Equal(16, f.Results.Entrants);
+        Assert.Equal((title, "共 16 名", tone), (words.Title, words.Subtitle, words.Tone));
+        Assert.Equal(16, rows.Count);
+        Assert.Equal(Enumerable.Range(1, 16), rows.Select(r => r.Rank));
+        Assert.Equal(Enumerable.Range(1, 16), f.Players.Where(p => p.Active).Select(p => (int)p.Rank).Order());   // from the server, unique
+        Assert.Equal(ownRank, rows.Single(r => r.Side == Side.Own).Rank);
+        Assert.Equal("9:12", ScoreboardModel.LastedCell(rows[0]));
+        Assert.Equal("0:48", ScoreboardModel.LastedCell(rows[15]));
+        for (int i = 1; i < rows.Count; i++) Assert.True(rows[i].Lasted < rows[i - 1].Lasted, "a better place lasted longer");
+        Assert.All(rows, r => Assert.True(r.Damage > 0 || r.Kills == 0));
+        Assert.Contains(rows, r => r.Damage > 0);
+        Assert.All(rows, r => Assert.Equal(r.Damage.ToString(System.Globalization.CultureInfo.InvariantCulture), ScoreboardModel.DamageCell(r, ended: true)));
+        Assert.Equal(rows[0].Slot, f.Results.WinnerSlot);
+        Assert.True(rows[0].Alive && rows.Skip(1).All(r => !r.Alive), "only the winner is left standing");
+        Assert.InRange(f.Results.TicksLeft, 1, ModeRules.ResultsTicks);
+        Assert.Null(demo.Minimap);
     }
 }

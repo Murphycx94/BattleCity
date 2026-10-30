@@ -191,6 +191,94 @@ public class MinimapFeedTests(ITestOutputHelper output)
         for (int i = 0; i < TankCatalog.All.Count; i++) Assert.Equal((MinimapShape)i, MinimapFeed.ShapeOf(TankCatalog.All[i]));
     }
 
+    private static readonly ZoneRing[] Rings =
+    {
+        new(new SN.Vector2(600, 600), 806.1f), new(new SN.Vector2(560, 640), 420), new(new SN.Vector2(520, 610), 250),
+        new(new SN.Vector2(500, 600), 140), new(new SN.Vector2(490, 590), 60), new(new SN.Vector2(485, 585), 0),
+    };
+
+    [Fact]
+    public void While_a_ring_waits_the_map_shows_the_safe_circle_and_the_ring_announced()
+    {
+        var frame = new MinimapFrame();
+        ZoneState state = ZoneState.At(Rings, ZoneSchedule.WaitStart(2) + 10);
+
+        MinimapFeed.AddZone(frame, state);
+
+        Assert.Equal(new MinimapZone(Rings[1].Centre, 420, true, Rings[2].Centre, 250), frame.Zone);
+    }
+
+    [Fact]
+    public void While_a_ring_shrinks_the_map_shows_the_circle_between_and_the_ring_shrunk_to()
+    {
+        var frame = new MinimapFrame();
+        ZoneState state = ZoneState.At(Rings, ZoneSchedule.ShrinkStart(2) + ZoneSchedule.Stage(2).ShrinkTicks / 2f);
+
+        MinimapFeed.AddZone(frame, state);
+
+        MinimapZone zone = Assert.NotNull(frame.Zone);
+        Assert.True(zone.HasNext);
+        Assert.Equal(Rings[2].Centre, zone.NextCentre);
+        Assert.Equal(250, zone.NextRadius);
+        Assert.Equal(335, zone.Radius, 0.01f);   // halfway from 420 to 250
+        Assert.Equal(state.Current.Centre, zone.Centre);
+    }
+
+    [Fact]
+    public void Once_closed_the_map_shows_the_point_and_no_next_ring()
+    {
+        var frame = new MinimapFrame();
+
+        MinimapFeed.AddZone(frame, ZoneState.At(Rings, ZoneSchedule.ClosedAt + 1));
+
+        MinimapZone zone = Assert.NotNull(frame.Zone);
+        Assert.False(zone.HasNext);
+        Assert.Equal(0, zone.Radius);
+        Assert.Equal(Rings[5].Centre, zone.Centre);
+    }
+
+    [Fact]
+    public void No_zone_leaves_the_map_without_one_and_clear_takes_it_off()
+    {
+        var frame = new MinimapFrame();
+        MinimapFeed.AddZone(frame, default);
+        Assert.Null(frame.Zone);
+
+        MinimapFeed.AddZone(frame, ZoneState.At(Rings, 0));
+        Assert.NotNull(frame.Zone);
+        frame.Clear();
+        Assert.Null(frame.Zone);
+    }
+
+    [Fact]
+    public void Adding_the_zone_allocates_nothing()
+    {
+        Allocation.AssertNone(() =>
+        {
+            var frame = new MinimapFrame();
+            ZoneState waiting = ZoneState.At(Rings, 10), shrinking = ZoneState.At(Rings, ZoneSchedule.ShrinkStart(1) + 5), closed = ZoneState.At(Rings, ZoneSchedule.ClosedAt);
+            for (int round = 0; round < 3; round++)   // warm-up
+            {
+                frame.Clear();
+                MinimapFeed.AddZone(frame, waiting);
+                MinimapFeed.AddZone(frame, shrinking);
+                MinimapFeed.AddZone(frame, closed);
+            }
+
+            var window = Allocation.Start();
+            for (int round = 0; round < 50; round++)
+            {
+                frame.Clear();
+                MinimapFeed.AddZone(frame, waiting);
+                MinimapFeed.AddZone(frame, shrinking);
+                MinimapFeed.AddZone(frame, closed);
+            }
+            var measured = window.Stop();
+            Assert.NotNull(frame.Zone);
+            return measured;
+        });
+    }
+
     [Fact]
     public void Filling_a_frame_allocates_nothing()
     {

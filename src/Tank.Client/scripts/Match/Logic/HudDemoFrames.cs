@@ -25,9 +25,18 @@ public sealed record MinimapDemo(string MapId, MinimapFrame Frame, bool FullOpen
 public static class HudDemoFrames
 {
     private const string LongName = "Sergeant_Wolfgang_Becker";   // as long as a name gets on the wire: 24 ASCII bytes
-    private static readonly string[] Roster = { "阿成", "小林", "老周", "小雨", "机器人 1", "机器人 2", "机器人 3", "机器人 4", "机器人 5", "机器人 6" };
+    /// <summary>Sixteen seats' names; the screens before the royale use the first ten.</summary>
+    private static readonly string[] Roster =
+    {
+        "阿成", "小林", "老周", "小雨", "机器人 1", "机器人 2", "机器人 3", "机器人 4", "机器人 5", "机器人 6",
+        "机器人 7", "机器人 8", "机器人 9", "机器人 10", "机器人 11", "机器人 12",
+    };
 
-    private static readonly string[] AllNames = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture", "minimap", "map-full" };
+    private static readonly string[] AllNames =
+    {
+        "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture", "minimap", "map-full",
+        "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale",
+    };
 
     /// <summary>The gallery's screen names, in a fixed order.</summary>
     public static IReadOnlyList<string> Names => AllNames;
@@ -54,6 +63,11 @@ public static class HudDemoFrames
             "capture" => CaptureWin(),
             "minimap" => MapScreen("minimap", fullOpen: false),
             "map-full" => MapScreen("map-full", fullOpen: true),
+            "royale" => Royale("royale", fullOpen: false),
+            "royale-outside" => RoyaleOutside(),
+            "royale-map" => Royale("royale-map", fullOpen: true),
+            "results-royale-win" => ResultsRoyale("results-royale-win", RoyaleWinRanks, winnerSlot: 0, isHost: true),
+            "results-royale" => ResultsRoyale("results-royale", RoyaleSeventhRanks, winnerSlot: 4, isHost: false),
             _ => null!,
         };
         return demo is not null;
@@ -224,6 +238,92 @@ public static class HudDemoFrames
         frame.Eye = new MinimapEye(EyeKind.Arrow, own.Centre + towards * EyeOutOfBase, yaw, Angles.Wrap(yaw - EyeCameraTurn), EyeHalfFov);
         return frame;
     }
+
+    // The royale screens (stage 6 design §3.3): sixteen seats, each its own side, the player in seat 0.
+
+    private const int RoyaleSeats = 16;
+
+    /// <summary>Who is down on the royale screen: 小雨, 机器人 2, 机器人 9 (the zone's) and 机器人 11 — 12 of 16 left.</summary>
+    private static bool RoyaleAlive(int slot) => slot is not (3 or 5 or 12 or 14);
+
+    private static readonly int[] RoyaleKills = { 3, 1, 2, 0, 3, 0, 2, 0, 1, 0, 0, 0, 1, 0, 0, 0 };   // 13 by shells; the zone took the other two
+
+    /// <summary>The ranks by slot on the two results screens: the player first, or seventh with 机器人 1 (slot 4) first.</summary>
+    private static readonly byte[] RoyaleWinRanks = { 1, 5, 3, 9, 2, 12, 7, 15, 4, 10, 6, 16, 8, 13, 11, 14 };
+    private static readonly byte[] RoyaleSeventhRanks = { 7, 5, 3, 9, 1, 12, 2, 15, 4, 10, 6, 16, 8, 13, 11, 14 };
+
+    /// <summary>
+    /// A royale at 6:15 with 12 of 16 left and the player on 3 kills, ring 2 announced and 45 s from shrinking: the zone line
+    /// under the mode label, three kills on the feed (one the zone's), and the riverland map with the safe circle ((560, 640),
+    /// 420 m) and the next ring ((520, 610), 250 m); the player's arrow stands inside the circle but outside the next ring
+    /// (it has to move), three enemies lie about the map. As the corner map, or with the full map open.
+    /// </summary>
+    private static HudDemo Royale(string name, bool fullOpen)
+    {
+        MatchHudFrame frame = RoyaleFrame(Ticks(6, 15)) with { Zone = new ZoneHud(true, 2, ZonePhase.Waiting, 45, false, 1) };
+        FeedLine[] kills =
+        {
+            Line("阿成", Side.Own, "机器人 2", Side.Enemy),
+            ZoneLine("机器人 9"),
+            Line("机器人 6", Side.Enemy, "小雨", Side.Enemy),
+        };
+        var zone = new MinimapZone(new Vector2(560, 640), 420, true, new Vector2(520, 610), 250);
+        MinimapFrame map = RoyaleMap(zone, eye: new Vector2(870, 700), new Vector2(480, 700), new Vector2(640, 520), new Vector2(700, 760));
+        return new HudDemo(name, frame, kills, NetPanelOpen: false, Minimap: new MinimapDemo(RiverlandMap.Id, map, fullOpen));
+    }
+
+    /// <summary>
+    /// The same royale later: ring 3 shrinking with 30 s to go and the player outside the safe circle ((520, 610), 180 m; the
+    /// next ring (500, 600), 140 m), losing 4 % a second — the screen tinted and the warning up; the arrow outside the circle.
+    /// </summary>
+    private static HudDemo RoyaleOutside()
+    {
+        MatchHudFrame frame = RoyaleFrame(Ticks(3, 55)) with { Zone = new ZoneHud(true, 3, ZonePhase.Shrinking, 30, true, 4) };   // 365 s in: ring 3's shrink ends at 395 s
+        var zone = new MinimapZone(new Vector2(520, 610), 180, true, new Vector2(500, 600), 140);
+        MinimapFrame map = RoyaleMap(zone, eye: new Vector2(760, 640), new Vector2(560, 560), new Vector2(470, 650), new Vector2(600, 700));
+        return new HudDemo("royale-outside", frame, new[] { ZoneLine("机器人 9") }, NetPanelOpen: false, Minimap: new MinimapDemo(RiverlandMap.Id, map, FullOpen: false));
+    }
+
+    private static MatchHudFrame RoyaleFrame(int ticksLeft)
+    {
+        PlayerStats[] players = Players(RoyaleSeats, i => (byte)i, RoyaleAlive, kills: i => RoyaleKills[i], deaths: i => RoyaleAlive(i) ? 0 : 1);
+        players[0].Damage = 1240;   // the own damage shows during the match; the others' comes as 0 until the end
+        return Frame(BattleMode.Royale, ticksLeft, players, RoyaleSeats);
+    }
+
+    /// <summary>The riverland map of a royale: no bases, <paramref name="zone"/>, three enemies, the player's arrow at <paramref name="eye"/> facing the next ring's centre.</summary>
+    private static MinimapFrame RoyaleMap(in MinimapZone zone, Vector2 eye, Vector2 enemyA, Vector2 enemyB, Vector2 enemyC)
+    {
+        var frame = new MinimapFrame { Zone = zone };
+        frame.AddTank(new MinimapTank(enemyA, Side.Enemy, MinimapShape.Medium, Destroyed: false));
+        frame.AddTank(new MinimapTank(enemyB, Side.Enemy, MinimapShape.Heavy, Destroyed: false));
+        frame.AddTank(new MinimapTank(enemyC, Side.Enemy, MinimapShape.Light, Destroyed: false));
+        float yaw = Angles.YawOf(Vector2.Normalize(zone.NextCentre - eye));
+        frame.Eye = new MinimapEye(EyeKind.Arrow, eye, yaw, yaw, EyeHalfFov);
+        return frame;
+    }
+
+    /// <summary>
+    /// A royale over: all sixteen ranked by <paramref name="ranks"/> (by slot), only the winner standing; each row's damage
+    /// and the time it lasted, 9:12 for the first down to 0:48 for the last. 吃鸡！ when the player won, 第 7 名 otherwise.
+    /// </summary>
+    private static HudDemo ResultsRoyale(string name, byte[] ranks, byte winnerSlot, bool isHost)
+    {
+        PlayerStats[] players = Players(RoyaleSeats, i => (byte)i, i => ranks[i] == 1, kills: i => RoyaleKills[i], deaths: i => ranks[i] == 1 ? 0 : 1);
+        for (int i = 0; i < RoyaleSeats; i++)
+        {
+            players[i].Rank = ranks[i];
+            players[i].Damage = RoyaleKills[i] * 380 + (RoyaleSeats - ranks[i]) * 25;
+            players[i].Lasted = RoyaleLasted(ranks[i]);
+        }
+        var info = new ResultsInfo(MatchRules.NoTeam, winnerSlot, 6 * SimConstants.TickRate, isHost, MatchEndReason.Eliminated, Entrants: RoyaleSeats);
+        return Make(name, Ended(BattleMode.Royale, players, RoyaleSeats, 0, 0, info));
+    }
+
+    /// <summary>Seconds a tank of rank <paramref name="rank"/> lasted: 552 (9:12) for the first, 33.6 fewer a place, 48 (0:48) for the sixteenth.</summary>
+    private static int RoyaleLasted(int rank) => 552 - (rank - 1) * 336 / 10;
+
+    private static FeedLine ZoneLine(string victim) => new(null, Side.Enemy, victim, Side.Enemy, Friendly: false, ExpiresAt: 0, Zone: true);
 
     /// <summary>The match over: the plate and the results banner for <paramref name="info"/>, the clock at 0.</summary>
     private static MatchHudFrame Ended(BattleMode mode, PlayerStats[] players, int count, int score0, int score1, ResultsInfo info, byte progress0 = 0, byte progress1 = 0)

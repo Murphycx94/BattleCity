@@ -15,7 +15,8 @@ namespace Tank.Sim.Ai;
 /// gives each bot its command every tick (<see cref="Bot"/>). In a standard battle the bots attack, defend, come back
 /// when their base falls, retreat when badly hurt and all go forward once their team has no attacker left
 /// (BotDirector.Roles.cs); outside one every bot wanders between the
-/// map's waypoints along searched paths (design §4.2), retreating to a team mate when badly hurt.
+/// map's waypoints along searched paths (design §4.2), retreating to a team mate when badly hurt; in a royale they run
+/// into the ring they must be in and wander inside it (stage 6 design §3.4: BotDirector.Zone.cs, Bot.Zone.cs).
 /// </summary>
 /// <remarks>
 /// The server's tick: <see cref="Update"/> once, then <see cref="Command"/> for each bot's tank, then the step. Everything
@@ -125,6 +126,7 @@ public sealed partial class BotDirector
         Paths = new PathService(grid, sim.Field);   // grid and field bound together from here on
         Bots = new ReadOnlyCollection<Bot>(_bots);
         SetUpStandard();
+        SetUpZone();
     }
 
     /// <summary>The bots, in ascending tank id.</summary>
@@ -192,7 +194,8 @@ public sealed partial class BotDirector
     /// <summary>
     /// Once a tick, before the commands (a second call in the same tick does nothing). The step's events: props that
     /// fell reach the grid (all props down are re-read when ticks went unheard, and on the first call), hits on a bot
-    /// reach its target picker, a revived bot starts its leg afresh. Then the roles if nobody gave them out, the team
+    /// reach its target picker, a revived bot starts its leg afresh. Then the match's zone (a royale: <see cref="Zone"/>),
+    /// the roles if nobody gave them out, the team
     /// watch (a standard battle: calling bots back to a falling base and letting them go, sending a team with no attacker
     /// left forward), the tanks for the searches to
     /// steer round (wrecks, and tanks standing still: <see cref="PathService.Observe"/>) and the searches' budget for
@@ -215,6 +218,7 @@ public sealed partial class BotDirector
             Hear();
         }
         (_started, _heardTick) = (true, tick);
+        ReadZone();
         AssignRoles();
         if (_standard) WatchTeams(tick);
         Paths.Observe(Sim.Tanks, tick);
@@ -271,12 +275,13 @@ public sealed partial class BotDirector
 
     /// <summary>
     /// What the bots did, for the log at the end of the match (allocates): "team 0 fell back 2 times, team 1 0 times;
-    /// 3 stucks; 412 paths, 2 not found" (the fall-backs in a standard battle only, of the teams that have bots).
+    /// 3 stucks; 412 paths, 2 not found" (the fall-backs in a standard battle only, of the teams that have bots; a royale
+    /// starts with the zone runs: "31 zone runs; 3 stucks; …").
     /// </summary>
     public string Summary()
     {
         int stucks = 0;
         foreach (Bot bot in _bots) stucks += bot.Stucks;
-        return $"{(_standard ? FallBacksText() : "")}{stucks} stucks; {Paths.Searches} paths, {Paths.Failures} not found";
+        return $"{ZoneRunsText()}{(_standard ? FallBacksText() : "")}{stucks} stucks; {Paths.Searches} paths, {Paths.Failures} not found";
     }
 }

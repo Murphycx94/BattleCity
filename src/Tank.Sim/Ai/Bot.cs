@@ -68,6 +68,9 @@ public enum BotActivity : byte
 /// way, then the other. Holding before, it then drives back to where it held. One coming back or retreating keeps to
 /// its path. A wreck holds still and forgets its target; revived, it starts its leg afresh from where it is, its retreat
 /// over.</para>
+/// <para>In a royale (stage 6 design §3.4) every bot wanders, inside the zone's ring, and runs into the ring when out of
+/// it, dropping the fight only when time is short (Bot.Zone.cs); everyone being an enemy there, it keeps off every tank,
+/// makes room when holding, and handles getting stuck in its own ways (Bot.Crowd.cs).</para>
 /// <para>Allocation-free after construction; deterministic (its own random numbers and the simulation's state).</para>
 /// </remarks>
 public sealed partial class Bot
@@ -90,8 +93,10 @@ public sealed partial class Bot
         End,
         /// <summary>At the end point (or as near as it got, where that will do), holding.</summary>
         Arrived,
-        /// <summary>Gave its end up for now: holding until <see cref="_retryAt"/>, then driving for <see cref="Goal"/> (another point) again.</summary>
+        /// <summary>Gave its end up for now: holding until <see cref="_retryAt"/>, then driving for <see cref="Goal"/> (another point) again (a royale's run: a <see cref="Zone"/> leg).</summary>
         Paused,
+        /// <summary>A royale: driving to a point in the zone's ring, to stop there (a run, or a wander point inside the ring: Bot.Zone.cs).</summary>
+        Zone,
     }
 
     private readonly BotDirector _director;
@@ -298,7 +303,7 @@ public sealed partial class Bot
         }
         Retreating = false;
         if (_leg == Leg.Arrived) _leg = Leg.End;
-        _needPath = _leg is Leg.Waypoint or Leg.Via or Leg.End;
+        _needPath = _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
     }
 
     /// <summary>After ticks went unheard: a wreck whose tank is alive again was revived meanwhile.</summary>
@@ -334,11 +339,12 @@ public sealed partial class Bot
         PathService paths = director.Paths;
         TakeAnswer(paths, me, tick);
         WatchHealth(director, me, tick);
-        if (_leg == Leg.Paused && tick >= _retryAt) Begin(Leg.End, Goal, keepPath: false);
-        CheckArrival(me);
+        if (_leg == Leg.Paused && tick >= _retryAt) Begin(RunningToZone ? Leg.Zone : Leg.End, Goal, keepPath: false);
+        if (director.ZoneOn) WatchZone(director, me);
+        CheckArrival(me, tick);
         int target = Picker.Pick(sim, director.Vision, tick);
         HeightField terrain = sim.Field.Terrain;
-        bool onTheWay = (FallingBack || Retreating) && _leg is Leg.Waypoint or Leg.Via or Leg.End;
+        bool onTheWay = (FallingBack || Retreating || ZoneUrgent) && _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
         InputCmd cmd;
         if (target != 0)
         {
@@ -428,19 +434,23 @@ public sealed partial class Bot
         if (_leg is Leg.None or Leg.Arrived or Leg.Paused)
         {
             Stand(BotActivity.Holding);
+            if (_director.ZoneOn && MakeRoom(me, out sbyte roll)) return still with { Throttle = roll };
             return _leg != Leg.Paused && Role == BotRole.Defend && !FallingBack && !Retreating ? Face(me, still) : still;
         }
         AdvancePath(me);
         if (_pathIndex >= _pathCount)
         {
             Stand(BotActivity.Waiting);
+            if (_director.ZoneOn && MakeRoom(me, out sbyte roll)) return still with { Throttle = roll };
             return still;
         }
         Vector2 point = _path[_pathIndex];
         bool last = _pathIndex == _pathCount - 1;
-        var (throttle, steer) = Steering.Toward(me, AroundMates(me, point, out bool yield), stopThere: last && _leg == Leg.End && _pathGoal == Goal);
+        var (throttle, steer) = Steering.Toward(me, AroundMates(me, point, out bool yield), stopThere: last && (_leg is Leg.End or Leg.Zone) && _pathGoal == Goal);
         if (yield) throttle = 0;
+        else if (_director.ZoneOn && DropAhead(me, throttle, me.Yaw)) (throttle, steer) = (0, AwayFromDrop(me, steer));
         Activity = BotActivity.Driving;
+        _lastSteer = steer;
         if (IsStuck(me, tick))
         {
             OnStuck(me, tick);
@@ -488,12 +498,16 @@ public sealed partial class Bot
     /// Whether the leg is over: the goal (or the end of a whole path to it) is reached. A final leg that stopped at the
     /// end of its path outside the circle its point lies in (the end moved off a wreck, say) draws another point at once.
     /// </summary>
-    private void CheckArrival(in TankState me)
+    private void CheckArrival(in TankState me, int tick)
     {
         switch (_leg)
         {
             case Leg.Waypoint when Reached(me, BotDirector.WaypointRadius):
-                NextWaypoint();
+                NextWaypoint(me);
+                break;
+            case Leg.Zone when Reached(me, BotDirector.WaypointRadius) || Steering.StoppedAt(me, Goal) ||
+                               (WholePath && Steering.StoppedAt(me, _path[_pathCount - 1])):
+                ZoneReached(me, tick);
                 break;
             case Leg.Via when Reached(me, BotDirector.ViaRadius):
                 NextVia(keepPath: true);
@@ -529,8 +543,14 @@ public sealed partial class Bot
     /// <summary>The path held runs all the way to the current goal.</summary>
     private bool WholePath => _pathCount > 0 && !_pathCut && _pathGoal == Goal;
 
-    private void NextWaypoint()
+    /// <summary>The next waypoint: another one drawn (never the same twice running); a royale's are drawn inside the zone's ring (Bot.Zone.cs).</summary>
+    private void NextWaypoint(in TankState me)
     {
+        if (_director.ZoneOn)
+        {
+            NextWaypointInZone(me);
+            return;
+        }
         if (_waypoints.Count < 2)
         {
             Begin(Leg.Arrived, Goal, keepPath: false);
@@ -553,7 +573,7 @@ public sealed partial class Bot
     private void Begin(Leg leg, Vector2 goal, bool keepPath)
     {
         (_leg, Goal, _legStucks, _askAfter) = (leg, goal, 0, 0);
-        _needPath = leg is Leg.Waypoint or Leg.Via or Leg.End;
+        _needPath = leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
         if (!keepPath) _pathCount = 0;
     }
 
@@ -573,10 +593,16 @@ public sealed partial class Bot
         switch (_leg)
         {
             case Leg.Waypoint:
-                NextWaypoint();
+                NextWaypoint(me);
                 break;
             case Leg.Via:
                 NextVia(keepPath: false);
+                break;
+            case Leg.Zone when RunningToZone:
+                NextZonePoint(tick, noWay: false);
+                break;
+            case Leg.Zone:
+                NextWaypoint(me);
                 break;
             case Leg.End when FallingBack || (Role == BotRole.Attack && !Retreating):
                 EndMissed(me, pause: true, tick);
@@ -639,34 +665,50 @@ public sealed partial class Bot
                 (_pathGoal, _pathFrom) = (_askedGoal, _askedFrom);
                 _pathCut = _pathCount == BotDirector.MaxPathPoints && _path[_pathCount - 1] != _askedGoal;
                 _asked = false;
+                if (WanderLeavesRing()) WanderElsewhere(me, tick);
+                else _wanderOut = 0;
                 break;
             case PathStatus.NoPath:
                 _asked = false;
-                if (_leg is Leg.Waypoint or Leg.Via or Leg.End) NotFound(me, tick);
+                if (_leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone) NotFound(me, tick);
                 break;
         }
     }
 
     /// <summary>
     /// A search found no path: a stuck without backing off (there is nothing to back away from), asked again after
-    /// <see cref="BotDirector.ReplanTicks"/>; the third on one leg gives the leg up.
+    /// <see cref="BotDirector.ReplanTicks"/>; the third on one leg gives the leg up. In a royale a point in the ring, or a
+    /// waypoint in it, is given up at once for another (any will do, and the zone doesn't wait), asked for after
+    /// <see cref="BotDirector.ZoneRetryTicks"/> (a run holds that long: Bot.Zone.cs); off open ground it first drives
+    /// for some (<see cref="LeaveClosedGround"/>).
     /// </summary>
     private void NotFound(in TankState me, int tick)
     {
         Stucks++;
         _legStucks++;
         (_askAfter, _needPath) = (tick + BotDirector.ReplanTicks, true);
-        if (_legStucks >= BotDirector.StuckRetries) GiveUpLeg(me, tick);
+        if (_director.ZoneOn && LeaveClosedGround(me, tick)) return;
+        if (_director.ZoneOn && _leg == Leg.Zone && RunningToZone) NextZonePoint(tick, noWay: true);
+        else if (_director.ZoneOn && _leg is Leg.Zone or Leg.Waypoint)
+        {
+            GiveUpLeg(me, tick);
+            _askAfter = tick + BotDirector.ZoneRetryTicks;
+        }
+        else if (_legStucks >= BotDirector.StuckRetries) GiveUpLeg(me, tick);
     }
 
-    /// <summary>Asks for a path from where the tank is: a new leg, a path used up, backed off, or every few seconds while driving.</summary>
+    /// <summary>
+    /// Asks for a path from where the tank is (a royale's from its own level on a closed cell: <see cref="SearchStart"/>):
+    /// a new leg, a path used up, backed off, or every few seconds while driving.
+    /// </summary>
     private void Ask(PathService paths, in TankState me, int tick)
     {
         if (_leg is Leg.None or Leg.Arrived or Leg.Paused || tick < _reverseUntil || tick < _askAfter) return;
         bool due = _needPath || (_pathCount == 0 && !_asked) || (Activity == BotActivity.Driving && !_asked && tick >= _replanAt);
         if (!due) return;
-        paths.Request(TankId, me.Position, Goal);
-        (_asked, _askedGoal, _askedFrom, _needPath, _replanAt) = (true, Goal, me.Position, false, tick + BotDirector.ReplanTicks);
+        Vector2 from = _director.ZoneOn ? SearchStart(me.Position) : me.Position;
+        paths.Request(TankId, from, Goal);
+        (_asked, _askedGoal, _askedFrom, _needPath, _replanAt) = (true, Goal, from, false, tick + BotDirector.ReplanTicks);
         PathRequests++;
     }
 
@@ -683,12 +725,12 @@ public sealed partial class Bot
         return false;
     }
 
-    /// <summary>Backs off, the hull turning each time the other way, then asks again; the third time on one leg gives the leg up.</summary>
+    /// <summary>Backs off, the hull turning each time the other way (a royale's: <see cref="ReverseSteer"/>), then asks again; the third time on one leg gives the leg up.</summary>
     private void OnStuck(in TankState me, int tick)
     {
         Stucks++;
         _legStucks++;
-        _reverseSteer = (sbyte)(Stucks % 2 == 1 ? 1 : -1);
+        _reverseSteer = ReverseSteer();
         (_reverseUntil, _checkAt, _needPath) = (tick + BotDirector.ReverseTicks, -1, true);
         if (_legStucks >= BotDirector.StuckRetries) GiveUpLeg(me, tick);
     }

@@ -185,8 +185,11 @@ public sealed partial class Simulation
         return new Vector3(box.Width / 2, MathF.Max(MathF.Abs(box.Bottom), MathF.Abs(box.Top)), box.Length / 2).Length();
     }
 
-    /// <summary>Takes <paramref name="damage"/> off a live tank. At zero it becomes a wreck and stops where it is.</summary>
-    private void Damage(ref TankState target, int damage, int attackerId, int shellId)
+    /// <summary>
+    /// Takes <paramref name="damage"/> off a live tank. At zero it becomes a wreck and stops where it is, and a
+    /// <see cref="GameEventType.TankDestroyed"/> event carrying <paramref name="cause"/> is reported.
+    /// </summary>
+    private void Damage(ref TankState target, int damage, int attackerId, int shellId, KillCause cause = KillCause.Shell)
     {
         if (damage <= 0 || target.IsDestroyed) return;
         target.Health -= damage;
@@ -195,6 +198,6 @@ public sealed partial class Simulation
         target.IsDestroyed = true;
         target.Speed = 0f;
         Vector3 wreck = TankPose.Compute(target, Field.Terrain).Position;
-        _events.Add(new GameEvent(GameEventType.TankDestroyed, Tick, attackerId, shellId, wreck, Vector3.Zero, TargetTankId: target.Id));
+        _events.Add(new GameEvent(GameEventType.TankDestroyed, Tick, attackerId, shellId, wreck, Vector3.Zero, TargetTankId: target.Id, Cause: cause));
     }
 }

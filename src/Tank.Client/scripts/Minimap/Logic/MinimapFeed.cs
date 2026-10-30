@@ -60,4 +60,15 @@ public static class MinimapFeed
             frame.AddBase(new MinimapBase(b.Centre, b.Radius, b.Team == ownTeam, points));
         }
     }
+
+    /// <summary>
+    /// The zone of <paramref name="state"/> (the client's <c>ZoneAt</c> for the frame): nothing for Phase None; the safe circle
+    /// now, with the next ring while waiting or shrinking (when known), none once closed.
+    /// </summary>
+    public static void AddZone(MinimapFrame frame, in ZoneState state)
+    {
+        if (state.Phase == ZonePhase.None) return;
+        // HasNext alone decides: ZoneState.At gives no Next once closed (the last ring is all there is), nor while a ring is still unannounced.
+        frame.Zone = new MinimapZone(state.Current.Centre, state.Current.Radius, state.HasNext, state.Next.Centre, state.Next.Radius);
+    }
 }

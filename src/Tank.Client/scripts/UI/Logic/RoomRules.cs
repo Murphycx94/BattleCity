@@ -33,6 +33,7 @@ public static class RoomRules
             case MapState.Generating: return "地图生成中…";
             case MapState.Failed: return "地图生成失败，换一张图。";
         }
+        if (!ModeRules.AllowsMap(room.Mode, room.Map)) return NotHereReason;   // "royale is played on the riverland only"
         if (ModeRules.HasBases(room.Mode) && Find(maps ?? MapCatalog.All, room.Map) is { Bases.Count: 0 })   // "the map has no bases"
             return "这张图没有基地，打不了标准战：换一张图，或换个模式。";
         StartPlan plan = PlanFor(room);
@@ -41,6 +42,9 @@ public static class RoomRules
             return "有一队没有坦克：让人换到对面，或加几个机器人。";
         return null;
     }
+
+    /// <summary>The one reason a mode bound to a map gives (the royale and the riverland are the only pair).</summary>
+    public const string NotHereReason = "吃鸡只在河谷开：换到河谷。";
 
     private static MapDefinition? Find(IReadOnlyList<MapDefinition> maps, string id)
     {
@@ -56,7 +60,7 @@ public static class RoomRules
     public static StartPlan PlanFor(RoomStateMessage room)
     {
         int humans = room.Players.Count(p => !p.IsBot);
-        int bots = Math.Min(room.Bots, Math.Max(0, BattleProtocol.MaxPlayers - humans));
+        int bots = Math.Min(room.Bots, Math.Max(0, ModeRules.MaxPlayersFor(room.Mode) - humans));
         if (!ModeRules.HasTeams(room.Mode)) return new StartPlan(humans, bots, 0, 0, 0, 0);
 
         int team0 = room.Players.Count(p => !p.IsBot && p.Team == 0);

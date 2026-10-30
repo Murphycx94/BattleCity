@@ -9,10 +9,10 @@ namespace Tank.Client.Minimap;
 /// One map's icon sizes in base pixels of the map view: a tank shape's and a wreck cross's extent (see
 /// <see cref="MinimapGlyphs"/>), the eye arrow's length, the view fan's radius, and the smallest radius a base's ring is
 /// drawn with (a base smaller than that on the map is drawn at it); then the line widths: a wreck cross's strokes, a
-/// base's ring and its progress arc, the dark rim round every icon, the eye's ring.
+/// base's ring and its progress arc, the dark rim round every icon, the eye's ring, the zone's safe circle and its next ring.
 /// </summary>
 public readonly record struct MinimapIconSizes(float Tank, float Arrow, float Cross, float FanLength, float BaseMinRadius,
-    float CrossWidth, float RingWidth, float ArcWidth, float OutlineWidth, float EyeRingWidth)
+    float CrossWidth, float RingWidth, float ArcWidth, float OutlineWidth, float EyeRingWidth, float ZoneWidth = 2f, float NextZoneWidth = 1.5f)
 {
     /// <summary>The gap between a base's ring and its progress arc, pixels.</summary>
     public const float ArcGap = 0.5f;
@@ -111,7 +111,7 @@ public static class MinimapStyle
 
     /// <summary>The full-screen map's icons.</summary>
     public static readonly MinimapIconSizes FullIcons = new(Tank: 15, Arrow: 22, Cross: 13, FanLength: 90, BaseMinRadius: 12,
-        CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f);
+        CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f, ZoneWidth: 3, NextZoneWidth: 2);
 
     public static MinimapIconSizes Icons(bool full) => full ? FullIcons : CornerIcons;
 
@@ -143,6 +143,18 @@ public static class MinimapStyle
         float opacity = destroyed && side == Side.Enemy ? EnemyWreckOpacity : 1f;
         return new Vector4(rgb, opacity);
     }
+
+    // The zone (stage 6 design §3.3): the safe circle's line in the wall's blue, the next ring in white, the ground outside darkened.
+
+    /// <summary>The safe circle's line: the wall's colour.</summary>
+    public static readonly Vector3 ZoneLine = Palette.ZoneWall;
+
+    /// <summary>The next ring's line.</summary>
+    public static readonly Vector3 NextZoneLine = Palette.UiText;
+
+    /// <summary>The ground outside the safe circle: this colour over it at <see cref="ZoneShadeOpacity"/>.</summary>
+    public static readonly Vector3 ZoneShade = Palette.UiBackground;
+    public const float ZoneShadeOpacity = 0.35f;
 
     /// <summary>A base's ring: the own team's in the ally blue-grey, the other's in the enemy red, as on the ground.</summary>
     public static Vector3 BaseRing(bool own) => MatchColors.Body(own ? Side.Ally : Side.Enemy);

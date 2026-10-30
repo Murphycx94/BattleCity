@@ -1,4 +1,5 @@
 using Godot;
+using Tank.Client.Match;
 using Tank.Client.Sandbox;
 using Tank.Client.World;
 using SandboxMap = Tank.Sim.Maps.SandboxMap;
@@ -22,7 +23,9 @@ namespace Tank.Client.Cameras;
 /// maps, looking at a base from its own team's side for match screenshots of the rings, and base0near, base1near,
 /// base0far and base1far looking the same way from a tank's height and from the follow camera at the spawn distance) look from the anchor's eye
 /// at its focus, spin turns at the site's <see cref="MapSite.SpinEye"/>, target looks at the site's targets; the ones
-/// that follow the tank work anywhere. With no site, or the sandbox's, every preset is as it always was.
+/// that follow the tank work anywhere. With no site, or the sandbox's, every preset is as it always was. A royale match
+/// alone knows one more, <see cref="ZoneCamera.Preset"/> (the wall up close, posed by the match scene from the zone's
+/// circle, not here); it is no map's preset, so the test drive refuses it like any unknown name.
 /// </summary>
 public static class CameraPresets
 {
@@ -53,7 +56,7 @@ public static class CameraPresets
 
     /// <summary>Presets whose eye is far from the tank: world detail (grass) should then stream around the eye, not the tank.</summary>
     public static bool StreamsAroundCamera(string? name) =>
-        name is "hill" or "spin" or "patrol" or "overview" or "town" or "ford" or "forest" or "plateau" or "dunes" or "base0" or "base1" or "base0near" or "base1near" or "base0far" or "base1far" or MapView;
+        name is "hill" or "spin" or "patrol" or "overview" or "town" or "ford" or "forest" or "plateau" or "dunes" or "base0" or "base1" or "base0near" or "base1near" or "base0far" or "base1far" or MapView or ZoneCamera.Preset;
 
     /// <summary>Every preset's name on some map (each <see cref="MapSite.PresetNames"/>, the sandbox's first).</summary>
     public static IReadOnlyList<string> Names { get; } = MapSites.All.SelectMany(site => site.PresetNames).Distinct().ToArray();

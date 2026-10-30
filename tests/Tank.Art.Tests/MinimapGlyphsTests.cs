@@ -172,7 +172,12 @@ public class MinimapGlyphsTests
         Assert.Equal(new MinimapIconSizes(Tank: 10, Arrow: 15, Cross: 9, FanLength: 40, BaseMinRadius: 9,
             CrossWidth: 2.5f, RingWidth: 2.5f, ArcWidth: 3, OutlineWidth: 1.5f, EyeRingWidth: 2), MinimapStyle.Icons(full: false));
         Assert.Equal(new MinimapIconSizes(Tank: 15, Arrow: 22, Cross: 13, FanLength: 90, BaseMinRadius: 12,
-            CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f), MinimapStyle.Icons(full: true));
+            CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f, ZoneWidth: 3, NextZoneWidth: 2), MinimapStyle.Icons(full: true));
+        Assert.Equal((2f, 1.5f), (MinimapStyle.CornerIcons.ZoneWidth, MinimapStyle.CornerIcons.NextZoneWidth));
+        Assert.Equal(Palette.ZoneWall, MinimapStyle.ZoneLine);
+        Assert.Equal(Palette.UiText, MinimapStyle.NextZoneLine);
+        Assert.Equal(Palette.UiBackground, MinimapStyle.ZoneShade);
+        Assert.Equal(0.35f, MinimapStyle.ZoneShadeOpacity);
         Assert.Equal(0.5f, MinimapStyle.EyeRingShare);
         Assert.Equal(0.25f, MinimapStyle.BaseFillOpacity);
 

@@ -27,6 +27,8 @@ public class HudLayoutTests
         yield return ("capture bars", b.CaptureBars);
         yield return ("minimap", b.Minimap);
         yield return ("full map", b.FullMap);
+        yield return ("zone line", b.ZoneLine);
+        yield return ("zone warning", b.ZoneWarning);
     }
 
     [Theory]
@@ -249,6 +251,54 @@ public class HudLayoutTests
         Assert.Equal(0, tiny.Width);
         Assert.Equal(0, tiny.Height);
         Assert.Equal(50, tiny.CenterX, precision: 3);
+    }
+
+    [Fact]
+    public void The_zone_line_and_warning_sit_where_the_design_puts_them_at_the_base_size()
+    {
+        HudBoxes b = HudLayout.For(new Vector2(1600, 900));
+        Assert.Equal(new HudRect(620, 124, 360, 28), b.ZoneLine);
+        Assert.Equal(new HudRect(500, 162, 600, 44), b.ZoneWarning);
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimapScreens))]
+    public void The_zone_line_hangs_under_the_mode_label_as_wide_as_the_plate_clear_of_the_corner_blocks(float w, float h)
+    {
+        var screen = new Vector2(w, h);
+        HudBoxes b = HudLayout.For(screen);
+        Assert.True(b.ZoneLine.FitsIn(screen));
+        Assert.Equal(b.ScorePlate.X, b.ZoneLine.X, precision: 3);
+        Assert.Equal(HudLayout.PlateWidth, b.ZoneLine.Width);
+        Assert.Equal(HudLayout.CaptureTop, b.ZoneLine.Y);
+        Assert.Equal(HudLayout.ZoneLineHeight, b.ZoneLine.Height);
+        Assert.True(b.ZoneLine.Y >= b.ModeLabel.Bottom);
+        (string Name, HudRect Rect)[] others =
+        {
+            ("score plate", b.ScorePlate), ("mode label", b.ModeLabel), ("kill feed", b.KillFeed), ("net panel", b.NetPanel),
+            ("status panel", b.StatusPanel), ("minimap", b.Minimap),
+        };
+        foreach ((string name, HudRect rect) in others) Assert.False(b.ZoneLine.Intersects(rect), $"the zone line {b.ZoneLine} overlaps the {name} {rect} at {w}x{h}");
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimapScreens))]
+    public void The_zone_warning_is_centred_under_the_zone_line_above_the_banner(float w, float h)
+    {
+        var screen = new Vector2(w, h);
+        HudBoxes b = HudLayout.For(screen);
+        Assert.True(b.ZoneWarning.FitsIn(screen));
+        Assert.Equal(w / 2, b.ZoneWarning.CenterX, precision: 3);
+        Assert.Equal(HudLayout.ZoneWarningWidth, b.ZoneWarning.Width);
+        Assert.Equal(HudLayout.ZoneWarningHeight, b.ZoneWarning.Height);
+        Assert.Equal(h * HudLayout.ZoneWarningTopShare, b.ZoneWarning.Y, precision: 3);
+        Assert.True(b.ZoneWarning.Y >= b.ZoneLine.Bottom);
+        Assert.True(b.ZoneWarning.Bottom <= b.Banner.Y);
+        (string Name, HudRect Rect)[] others =
+        {
+            ("score plate", b.ScorePlate), ("mode label", b.ModeLabel), ("zone line", b.ZoneLine), ("kill feed", b.KillFeed), ("banner", b.Banner),
+        };
+        foreach ((string name, HudRect rect) in others) Assert.False(b.ZoneWarning.Intersects(rect), $"the zone warning {b.ZoneWarning} overlaps the {name} {rect} at {w}x{h}");
     }
 
     private static void AssertNoOverlaps((string Name, HudRect Rect)[] blocks)
