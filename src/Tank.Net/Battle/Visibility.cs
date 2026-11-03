@@ -26,10 +26,16 @@ public readonly record struct Viewer(byte Team, int OwnTankId, bool OwnDestroyed
     /// <summary>
     /// Whether this viewer should get <paramref name="e"/>, and how (design §5.6): shots and bursts always (a shot by a
     /// tank out of sight with the shooter's id blanked), hits and kills when the viewer fired or sees the target,
-    /// revivals when it sees the tank, prop changes always.
+    /// revivals when it sees the tank, prop changes always; a crate picked never (stage 6 design §4.4: nobody is told of
+    /// another's pickup, and the one who ate it gets a <see cref="CrateMessage"/> instead).
     /// </summary>
     public bool Wants(in GameEvent e, Simulation sim, VisionTracker vision, out GameEvent sent)
     {
+        if (e.Type == GameEventType.CratePicked)
+        {
+            sent = default;
+            return false;
+        }
         // Whoever fired is named only when the viewer may know: own shots, or a tank the viewer sees (design §5.6).
         sent = e.TankId == 0 || e.TankId == OwnTankId || SeesTank(e.TankId, sim, vision) ? e : e with { TankId = 0 };
         switch (e.Type)

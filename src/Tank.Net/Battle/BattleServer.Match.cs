@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Numerics;
 using Tank.Net.Protocol;
 using Tank.Sim;
 using Tank.Sim.Ai;
@@ -16,9 +18,10 @@ public sealed partial class BattleServer
     /// random tanks, put on the thinner team: <see cref="BotSeating"/>), if the map is ready and may hold the mode (a royale:
     /// the riverland only) and, for a standard battle, has bases, there are at least two tanks and, in a team mode, both teams
     /// have one. The match is built whole — battlefield, a royale's rings (drawn from the match seed on the map's navigation
-    /// grid, which <see cref="ServerMaps"/> built before calling the map ready), rules, tanks, the bots' director — before any
-    /// of it becomes the server's: if the grid copy, the rings, the rules (which check the rings) or the bots fail (a bug),
-    /// that is logged, the bot seats are taken away again and the room stays as it was.
+    /// grid, which <see cref="ServerMaps"/> built before calling the map ready) and its crates (laid from the seed on the same
+    /// grid: <see cref="PlaceCrates"/>), rules, tanks, the bots' director — before any of it becomes the server's: if the grid
+    /// copy, the rings, the crates, the rules (which check the rings) or the bots fail (a bug), that is logged, the bot seats
+    /// are taken away again and the room stays as it was.
     /// </summary>
     public bool TryStartMatch(out string? reason)
     {
@@ -69,18 +72,25 @@ public sealed partial class BattleServer
         // every client builds): about 0.1 ms even for the riverland, so the tick thread never builds a map.
         var sim = new Simulation(map.Definition.NewBattlefield());
         var vision = new VisionTracker(sim);
-        bool zone = ModeRules.HasZone(_mode), bots = _seats.Any(s => s is { IsBot: true });
+        bool zone = ModeRules.HasZone(_mode), crated = ModeRules.HasCrates(_mode), bots = _seats.Any(s => s is { IsBot: true });
         NavGrid? grid;
         MatchRules rules;
+        Crate[]? crates = null;
         string step = "the navigation grid";
         try
         {
-            // One copy of the grid ServerMaps built while preparing the map (ready means built): the rings read it, the bots keep it.
-            grid = zone || bots ? map.Definition.NewNavGrid() : null;
-            step = zone ? "the zone" : "the rules";   // in a royale the rules check the rings: a refusal there is the zone's
+            // One copy of the grid ServerMaps built while preparing the map (ready means built): the rings and the crates read it, the bots keep it.
+            grid = zone || crated || bots ? map.Definition.NewNavGrid() : null;
+            step = "the zone";
             ZoneRing[]? rings = zone ? PickZone(sim.Field, grid!, map.Definition.Spawns.Solo, seating.MatchSeed ^ ZonePicker.SeedSalt) : null;   // before any tank
+            if (crated)
+            {
+                step = "the crates";
+                crates = PlaceCrates(sim.Field, grid!, map.Definition.Spawns.Solo, seating.MatchSeed ^ CratePlacer.SeedSalt);
+            }
+            step = zone ? "the zone" : "the rules";   // in a royale the rules check the rings: a refusal there is the zone's
             rules = new MatchRules(_mode, sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null,
-                bases: map.Definition.Bases, seed: seating.MatchSeed, zone: rings);
+                bases: map.Definition.Bases, seed: seating.MatchSeed, zone: rings, crates: crates);
         }
         catch (Exception ex)
         {
@@ -109,6 +119,7 @@ public sealed partial class BattleServer
         _matchNumber++;
         _endedAtFrame = -1;
         _hadTank.Clear();
+        ForgetCrates();
         foreach (BattleSeat? seat in _seats)
         {
             if (seat is null) continue;
@@ -118,6 +129,7 @@ public sealed partial class BattleServer
         _log($"match started: {ModeRules.Id(_mode)}, map {map.Definition.Id}, {humans} players, {seated - humans} bots, seed {seating.MatchSeed}");
         if (director is not null) _log($"bots: {director.Describe()}");
         if (rules.ZoneRings.Count > 0) _log($"zone: {DescribeRings(rules.ZoneRings)}");
+        if (rules.Crates is { } set) LogCratesPlaced(set, sim.Field, map.Definition.Id);
         foreach (BattleSeat seat in _byPeer.Values) SendMatchStart(seat, withMap: true);
         _roomDirty = true;
         reason = null;
@@ -193,7 +205,12 @@ public sealed partial class BattleServer
     {
         if (_sim is null) return;
         _log("match over, back to the room");
-        if (_director is not null && _endedAtFrame < 0) _log($"bots: {_director.Summary()}");
+        if (_endedAtFrame < 0)
+        {
+            if (_director is not null) _log($"bots: {_director.Summary()}");
+            if (_rules?.Crates is { } crates) LogCratesTaken(crates);
+        }
+        ForgetCrates();
         _sim = null;
         _vision = null;
         _rules = null;
@@ -239,8 +256,11 @@ public sealed partial class BattleServer
         }
         sim.Step(_tickInputs.AsSpan(0, tanks.Length));
         vision.Update();
+        CrateSet? crates = rules.Crates;
+        if (crates is not null && sim.Tick != _crateSightTick && (_crateSightTick < 0 || sim.Tick % VisionTracker.UpdateInterval == 0)) RefreshCrateSight(sim, rules, crates);   // as VisionTracker: the first tick, then 5 Hz, once a tick
         rules.Update();
         AnnounceRings(rules);
+        if (crates is not null) TellPickups(crates);
 
         CollectPropChanges(sim);
         foreach (BattleSeat seat in _byPeer.Values)
@@ -257,6 +277,7 @@ public sealed partial class BattleServer
                 _endedAtFrame = _frame;
                 _log($"match ended: {ModeRules.Id(_mode)}, {WinnerText(rules)}, {ReasonText(rules.EndReason)}");
                 if (_director is not null) _log($"bots: {_director.Summary()}");
+                if (crates is not null) LogCratesTaken(crates);
             }
             if (_frame - _endedAtFrame >= _options.ReturnToRoomSeconds * SimConstants.TickRate) EndMatch();
         }
@@ -369,11 +390,18 @@ public sealed partial class BattleServer
         Send(seat, _writer.Data, ChannelFor(_writer.ByteLength));
     }
 
-    /// <summary>What <paramref name="seat"/> may know of tick <paramref name="sim"/>.Tick (design §5.5).</summary>
+    /// <summary>What <paramref name="seat"/> may know of tick <paramref name="sim"/>.Tick (design §5.5; the crates it sees, stage 6 design §4.4).</summary>
     private void Build(BattleSnapshot s, BattleSeat seat, Simulation sim, VisionTracker vision, MatchRules rules)
     {
         Viewer viewer = ViewerOf(seat, sim);
         s.Tick = sim.Tick;
+        s.CrateCount = 0;
+        if (rules.Crates is { } crates)
+        {
+            ulong seen = _crateVisible[seat.Slot];
+            s.CrateCount = BuildCrateRows(s.Crates, seen, crates);
+            _crateGone[seat.Slot] |= seen & ~crates.StandingMask;   // a row down tells the seat the crate is gone: a resync leaves it out from now on
+        }
         int n = 0;
         s.HasOwn = false;
         foreach (ref readonly TankState t in sim.Tanks)
@@ -457,12 +485,13 @@ public sealed partial class BattleServer
         Id = t.Id, X = t.Position.X, Z = t.Position.Y, Yaw = t.Yaw, TurretYaw = t.TurretYaw, GunPitch = t.GunPitch, Speed = t.Speed,
         Reload = t.Reload, Bloom = t.Bloom, Ammo = t.Ammo, ApLeft = t.ApLeft, HeLeft = t.HeLeft, ShotCount = t.ShotCount, Health = t.Health,
         ProtectedUntil = t.ProtectedUntil, LastFired = t.LastFired, Destroyed = t.IsDestroyed,
+        ArmorLayers = t.ArmorLayers, ReloadLayers = t.ReloadLayers, OpticsLayers = t.OpticsLayers,
     };
 
     /// <summary>
-    /// The match as it stands (with the bases in a standard battle, the known rings in a royale), for a seat that joins, rejoins or resyncs: with the
-    /// map's prepared bytes copied in (not encoded again), or without the map for a connection that has it
-    /// (<paramref name="withMap"/> false).
+    /// The match as it stands (with the bases in a standard battle, the known rings and the crates the seat believes still stand in a
+    /// royale), for a seat that joins, rejoins or resyncs: with the map's prepared bytes copied in (not encoded again), or without
+    /// the map for a connection that has it (<paramref name="withMap"/> false). Allocates: a start or a resync, not a tick.
     /// </summary>
     private void SendMatchStart(BattleSeat seat, bool withMap)
     {
@@ -479,7 +508,9 @@ public sealed partial class BattleServer
         IReadOnlyList<TeamBase>? bases = ModeRules.HasBases(_mode) ? map.Definition.Bases : null;
         // a royale's zone: the start tick and the rings known so far, ring 0 first (the later ones follow as ZoneMessages)
         ZoneSync? zone = _rules!.KnownRings > 0 ? new ZoneSync(_rules.StartTick, _rules.AnnouncedRings.ToArray()) : null;
-        var start = new MatchStartMessage(_mode, _matchNumber, sim.Tick, _rules.EndTick, withMap ? map.Data : null, props, TankOf(seat.Slot), bases, zone);
+        // a royale's crates: the ones this seat has seen and not been told are gone (a fresh seat has seen none; the other modes have none)
+        List<Crate>? crates = _rules.Crates is { } set ? KnownStanding(seat.Slot, set) : null;
+        var start = new MatchStartMessage(_mode, _matchNumber, sim.Tick, _rules.EndTick, withMap ? map.Data : null, props, TankOf(seat.Slot), bases, zone, crates);
         _mapWriter.Reset();
         if (withMap) BattleMessages.Write(_mapWriter, start, map.EncodedMap);
         else BattleMessages.Write(_mapWriter, start);

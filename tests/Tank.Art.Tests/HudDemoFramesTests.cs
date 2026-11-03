@@ -222,7 +222,7 @@ public class HudDemoFramesTests
 
     private static readonly string[] ScreensBeforeTheMap = { "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture" };
 
-    private static readonly string[] RoyaleScreens = { "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale" };
+    private static readonly string[] RoyaleScreens = { "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale", "royale-crates" };
 
     [Fact]
     public void The_map_screens_come_last_and_leave_the_others_as_they_were()
@@ -234,6 +234,13 @@ public class HudDemoFramesTests
             Assert.Null(demo.Minimap);
             Assert.False(demo.Frame.Zone.On);   // the zone is a royale's alone
             Assert.Equal(0, demo.Frame.Results.Entrants);
+        }
+        foreach (string name in HudDemoFrames.Names.Where(n => n != "royale-crates"))
+        {
+            HudDemoFrames.TryGet(name, out HudDemo demo);
+            Assert.Null(demo.Pickups);                 // the crates' screen alone shows toasts, buffs and crate squares:
+            Assert.False(demo.Frame.Buffs.Any);        // every older screen draws as it did
+            Assert.Equal(0, demo.Minimap?.Frame.Crates.Length ?? 0);
         }
     }
 
@@ -309,6 +316,7 @@ public class HudDemoFramesTests
     [InlineData("royale-map")]
     [InlineData("results-royale-win")]
     [InlineData("results-royale")]
+    [InlineData("royale-crates")]
     public void Every_royale_screen_is_a_sixteen_seat_royale_with_the_player_in_seat_zero(string name)
     {
         Assert.True(HudDemoFrames.TryGet(name, out HudDemo demo));
@@ -396,13 +404,15 @@ public class HudDemoFramesTests
     [InlineData("royale")]
     [InlineData("royale-outside")]
     [InlineData("royale-map")]
+    [InlineData("royale-crates")]
     public void Every_point_of_the_royale_map_frames_is_in_the_drivable_square(string name)
     {
         HudDemoFrames.TryGet(name, out HudDemo demo);
         MinimapFrame frame = demo.Minimap!.Frame;
         MinimapZone zone = frame.Zone!.Value;
         float size = (RiverlandMap.Samples - 1) * RiverlandMap.CellSize;
-        var points = frame.Tanks.ToArray().Select(t => t.Position).Append(frame.Eye.Position).Append(zone.Centre).Append(zone.NextCentre);
+        var points = frame.Tanks.ToArray().Select(t => t.Position).Append(frame.Eye.Position).Append(zone.Centre).Append(zone.NextCentre)
+            .Concat(frame.Crates.ToArray().Select(c => c.Position));
 
         foreach (Vector2 p in points)
         {
@@ -439,5 +449,47 @@ public class HudDemoFramesTests
         Assert.True(rows[0].Alive && rows.Skip(1).All(r => !r.Alive), "only the winner is left standing");
         Assert.InRange(f.Results.TicksLeft, 1, ModeRules.ResultsTicks);
         Assert.Null(demo.Minimap);
+    }
+
+    [Fact]
+    public void The_crates_screen_is_the_royale_screen_with_three_toasts_two_buffs_and_six_crates_on_the_map()
+    {
+        Assert.True(HudDemoFrames.TryGet("royale-crates", out HudDemo demo));
+        HudDemoFrames.TryGet("royale", out HudDemo royale);
+        MatchHudFrame f = demo.Frame;
+
+        Assert.Equal(royale.Frame.Zone, f.Zone);
+        Assert.Equal(new ZoneHud(true, 2, ZonePhase.Waiting, 45, false, 1), f.Zone);
+        Assert.Equal(royale.Frame.Plate, f.Plate);
+        Assert.Equal(new BuffHud(1, 2, 0), f.Buffs);
+        Assert.True(f.Buffs.Any);
+
+        PickupLine[] toasts = Assert.IsType<PickupLine[]>(demo.Pickups);
+        Assert.Equal(new[] { "+ 快速装填 2/3", "+ 维修 270", "光学设备已满" }, toasts.Select(t => t.Text));
+        Assert.True(toasts.Length <= PickupFeed.Capacity);
+        Assert.All(toasts, t => Assert.Equal(10, t.ExpiresAt));
+        Assert.Equal(f.Buffs.Reload, toasts[0].Layers);   // the reload toast is the layer the row shows
+
+        MinimapDemo map = Assert.IsType<MinimapDemo>(demo.Minimap);
+        Assert.False(map.FullOpen);
+        Assert.Equal(royale.Minimap!.Frame.Zone, map.Frame.Zone);
+        Assert.Equal(royale.Minimap.Frame.Eye, map.Frame.Eye);
+        MinimapCrate[] crates = map.Frame.Crates.ToArray();
+        Assert.Equal(6, crates.Length);
+        Assert.Equal(Enum.GetValues<CrateKind>(), crates.Select(c => c.Kind).Distinct().Order());   // every kind at least once
+        Assert.Equal(6, crates.Select(c => c.Position).Distinct().Count());
+    }
+
+    [Fact]
+    public void The_crates_on_the_gallery_map_stand_on_dry_riverland_ground_apart_from_each_other()
+    {
+        HudDemoFrames.TryGet("royale-crates", out HudDemo demo);
+        Tank.Sim.Maps.Battlefield field = MapCatalog.Riverland.NewBattlefield();
+        MinimapCrate[] crates = demo.Minimap!.Frame.Crates.ToArray();
+
+        foreach (MinimapCrate c in crates) Assert.Equal(0f, field.WaterDepthAt(c.Position));
+        for (int i = 0; i < crates.Length; i++)
+            for (int j = i + 1; j < crates.Length; j++)
+                Assert.True(Vector2.Distance(crates[i].Position, crates[j].Position) >= CratePlacer.Spacing, "the gallery's crates keep the placer's spacing");
     }
 }

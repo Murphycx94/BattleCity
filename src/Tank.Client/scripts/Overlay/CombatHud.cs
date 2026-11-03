@@ -5,6 +5,7 @@ using Tank.Client.World;
 using Tank.Sim;
 using Tank.Sim.Combat;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 using SN = System.Numerics;
 
@@ -197,7 +198,7 @@ public partial class CombatHud : CanvasLayer
             screen = cam.UnprojectPosition(point);
             circle = AimCirclePixels(player, launch.Origin, point, screen.Value);
         }
-        _reticle.UpdateState(screen, 1f - player.Reload / player.Spec.ReloadTime, Cam.Sniper ? Cam.Zoom : 0f, circle);
+        _reticle.UpdateState(screen, 1f - player.Reload / CrateRules.ReloadTime(player.Spec, player.ReloadLayers), Cam.Sniper ? Cam.Zoom : 0f, circle);
     }
 
     /// <summary>

@@ -120,8 +120,10 @@ public partial class MatchMain
     {
         if (!hasTank)
         {
-            // The zone preset needs no tank: with none it looks at the wall from the side nearest the middle of the map.
-            if (_automation.HasPreset && _automation.Preset == ZoneCamera.Preset) LookAtZoneWall(new SN.Vector2(field.Terrain.SizeX / 2f, field.Terrain.SizeZ / 2f));
+            // The zone and crate presets need no tank: with none they look from the side of the wall, or at the crate, nearest the middle of the map.
+            var middle = new SN.Vector2(field.Terrain.SizeX / 2f, field.Terrain.SizeZ / 2f);
+            if (_automation.HasPreset && _automation.Preset == ZoneCamera.Preset) LookAtZoneWall(middle);
+            else if (_automation.HasPreset && _automation.Preset == CrateCamera.Preset) LookAtCrate(middle);
             return (null, null);
         }
         if (!_dead || _automation.HasPreset)
@@ -146,6 +148,11 @@ public partial class MatchMain
                 LookAtZoneWall(own.Position);
                 return;
             }
+            if (preset == CrateCamera.Preset)
+            {
+                LookAtCrate(own.Position);   // nothing known yet: the follow camera above stays
+                return;
+            }
             var (eye, target) = CameraPresets.Get(preset, pivot, own.Yaw, _time, _groundAt, targetIndex: 0, site: _site);
             _mapViewOn = CameraPresets.Look(_camera.Camera, preset, eye, target, _site, _world!, _mapViewOn);
         }
@@ -160,6 +167,13 @@ public partial class MatchMain
     {
         var (eye, target) = ZoneCamera.Pose(_zone.Current, near, _groundAt);
         _mapViewOn = CameraPresets.Look(_camera.Camera, ZoneCamera.Preset, eye.ToGodot(), target.ToGodot(), _site, _world!, _mapViewOn);
+    }
+
+    /// <summary>The crate preset (a royale only): the known, standing crate nearest <paramref name="near"/> up close (<see cref="CrateCamera.TryPose"/>); none known, the camera is left as it is.</summary>
+    private void LookAtCrate(SN.Vector2 near)
+    {
+        if (!CrateCamera.TryPose(_client.Crates, near, _groundAt, out SN.Vector3 eye, out SN.Vector3 focus)) return;
+        _mapViewOn = CameraPresets.Look(_camera.Camera, CrateCamera.Preset, eye.ToGodot(), focus.ToGodot(), _site, _world!, _mapViewOn);
     }
 
     /// <summary>

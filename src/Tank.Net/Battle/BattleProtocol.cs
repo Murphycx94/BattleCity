@@ -25,6 +25,9 @@ public enum BattleMessage : byte
     /// <summary>A ring announced (v5): <see cref="ZoneMessage"/>, sent reliably when the ring's waiting begins.</summary>
     Zone = 26,
 
+    /// <summary>A crate eaten (v6): <see cref="CrateMessage"/>, sent reliably to the one player who ate it (stage 6 design §4.4).</summary>
+    Crate = 27,
+
     // unconnected (LAN discovery)
     /// <summary>A broadcast asking rooms to answer. A room only reads this byte, so 4B clients (which send 40 then version 1) still find it.</summary>
     Discover = 40,
@@ -35,13 +38,16 @@ public enum BattleMessage : byte
 public static class BattleProtocol
 {
     /// <summary>
-    /// 5: the royale (stage 6 design §3.5) — 16 seats on the scoreboard with 5-bit ranks, each player's damage dealt and
-    /// time lasted, the entrants in the match block, the kill cause on events, ring announcements (<see cref="BattleMessage.Zone"/>),
-    /// the rings announced so far in the match start. 4: the standard battle (stage 5 design §3.3) — the match block carries both bases' progress and why the match
+    /// 6: the supply crates (stage 6 design §4.4) — the crates a viewer sees in its snapshot (never the crate table), its
+    /// own buff layers in its own tank, the pickup message (<see cref="BattleMessage.Crate"/>) to the one player who ate a
+    /// crate, the crates a seat knows in the match start (a resync). 5: the royale (stage 6 design §3.5) — 16 seats on the
+    /// scoreboard with 5-bit ranks, each player's damage dealt and time lasted, the entrants in the match block, the kill
+    /// cause on events, ring announcements (<see cref="BattleMessage.Zone"/>), the rings announced so far in the match
+    /// start. 4: the standard battle (stage 5 design §3.3) — the match block carries both bases' progress and why the match
     /// ended, the scoreboard each player's capture, the match start the bases. 3: maps carry their ground kinds and water
     /// level, houses and trees, up to 16384 props (riverland design §5.1).
     /// </summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>The UDP port a room listens on unless told otherwise; discovery broadcasts only reach rooms on it.</summary>
     public const int DefaultPort = 27015;

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Sim;
@@ -188,6 +189,63 @@ public sealed partial class Simulation
         ref TankState tank = ref TankRef(tankId);
         tank.ApLeft = tank.Spec.Ap.Capacity;
         tank.HeLeft = tank.Spec.He.Capacity;
+    }
+
+    /// <summary>
+    /// Applies <paramref name="crate"/> to the live tank <paramref name="tankId"/> (stage 6 design §4.2) and emits a
+    /// <see cref="GameEventType.CratePicked"/> event (<c>TankId</c> = tankId, <c>PropId</c> = crate.Id, <c>Damage</c> = the take's
+    /// <see cref="CrateTake.Amount"/>, <c>Position</c> = the crate on the ground). The event joins this step's <see cref="Events"/>
+    /// (as <see cref="HurtByZone"/>'s does): call it after <see cref="Step"/>, before the events are read. A wreck takes nothing
+    /// (a take with Amount 0, no event).
+    /// </summary>
+    /// <exception cref="ArgumentException">No such tank.</exception>
+    public CrateTake TakeCrate(int tankId, in Crate crate)
+    {
+        ref TankState tank = ref TankRef(tankId);
+        if (tank.IsDestroyed) return new CrateTake(crate.Kind, 0, 0, 0);
+        CrateTake take = ApplyCrate(ref tank, crate.Kind);
+        Vector2 p = crate.Position;
+        var at = new Vector3(p.X, Field.Terrain.HeightAt(p.X, p.Y), p.Y);
+        _events.Add(new GameEvent(GameEventType.CratePicked, Tick, tankId, 0, at, Vector3.Zero, Damage: take.Amount, PropId: crate.Id));
+        return take;
+    }
+
+    /// <summary>
+    /// What a crate of <paramref name="kind"/> does for a live tank: repair tops health up by <see cref="CrateRules.RepairAmount"/>
+    /// (to full at most), ammo tops both racks up by <see cref="CrateRules.AmmoAmount"/> of each, the other three add a layer up to
+    /// <see cref="CrateRules.MaxLayers"/>.
+    /// </summary>
+    private static CrateTake ApplyCrate(ref TankState tank, CrateKind kind)
+    {
+        switch (kind)
+        {
+            case CrateKind.Repair:
+                int gain = Math.Min(CrateRules.RepairAmount(tank.Spec.MaxHealth), tank.Spec.MaxHealth - tank.Health);
+                tank.Health += gain;
+                return new CrateTake(kind, gain, 0, 0);
+            case CrateKind.Ammo:
+                int ap = Math.Min(CrateRules.AmmoAmount(tank.Spec.Ap.Capacity), tank.Spec.Ap.Capacity - tank.ApLeft);
+                int he = Math.Min(CrateRules.AmmoAmount(tank.Spec.He.Capacity), tank.Spec.He.Capacity - tank.HeLeft);
+                tank.ApLeft += ap;
+                tank.HeLeft += he;
+                return new CrateTake(kind, ap, he, 0);
+            case CrateKind.Armor:
+                return new CrateTake(kind, AddLayer(ref tank.ArmorLayers), 0, tank.ArmorLayers);
+            case CrateKind.Reload:
+                return new CrateTake(kind, AddLayer(ref tank.ReloadLayers), 0, tank.ReloadLayers);
+            case CrateKind.Optics:
+                return new CrateTake(kind, AddLayer(ref tank.OpticsLayers), 0, tank.OpticsLayers);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown crate kind.");
+        }
+    }
+
+    /// <summary>Adds a layer below <see cref="CrateRules.MaxLayers"/>: 1 when it did, 0 when the tank had them all.</summary>
+    private static int AddLayer(ref byte layers)
+    {
+        if (layers >= CrateRules.MaxLayers) return 0;
+        layers++;
+        return 1;
     }
 
     internal ref TankState TankRef(int tankId)

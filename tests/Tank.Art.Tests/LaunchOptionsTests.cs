@@ -364,4 +364,13 @@ public class LaunchOptionsTests
         Assert.Empty(options.Warnings);
         Assert.Contains("outside", Assert.Single(LaunchOptions.Parse(new[] { "--shot-after", "wall:1" }).Warnings));
     }
+
+    [Fact]
+    public void Shot_after_waits_for_the_first_pickup()
+    {
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--shot-after", "pickup:2" });
+
+        Assert.Equal(("pickup", 2.0), (options.ShotAfterEvent, options.ShotAfterDelay));
+        Assert.Empty(options.Warnings);
+    }
 }

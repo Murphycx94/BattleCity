@@ -2,6 +2,7 @@ using System.Numerics;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Sim;
@@ -124,8 +125,8 @@ public sealed partial class Simulation
 
     /// <summary>
     /// A shell meets a tank's armour. A live tank takes the rolled result (AP may bounce; HE never does, and bursts on the
-    /// plate); one under spawn protection takes the hit as 0 damage. A wreck just stops the shell: AP is spent, HE still
-    /// bursts and splashes the tanks around it.
+    /// plate), less its armour layers (<see cref="CrateRules.ScaleShellDamage"/>); one under spawn protection takes the hit as
+    /// 0 damage. A wreck just stops the shell: AP is spent, HE still bursts and splashes the tanks around it.
     /// </summary>
     private void StrikeTank(in Shell shell, int slot, in ArmorHit hit, Vector3 direction)
     {
@@ -139,7 +140,7 @@ public sealed partial class Simulation
         Impact impact = shell.Ammo == AmmoType.HE
             ? Penetration.HeDirect(shell.Round, hit.Thickness, angle, shell.Seed)
             : Penetration.Ap(shell.Round, shell.Caliber, hit.Thickness, angle, shell.Seed);
-        int dealt = IsProtected(target) ? 0 : impact.Damage;
+        int dealt = IsProtected(target) ? 0 : CrateRules.ScaleShellDamage(impact.Damage, target.ArmorLayers);
         _events.Add(new GameEvent(GameEventType.TankHit, Tick, shell.OwnerTankId, shell.Id, hit.Point, hit.Normal,
             target.Id, impact.Result, dealt, shell.Ammo));
         Damage(ref target, dealt, shell.OwnerTankId, shell.Id);
@@ -148,8 +149,8 @@ public sealed partial class Simulation
 
     /// <summary>
     /// The shell bursts at <paramref name="at"/>. A round with a splash radius (HE) hurts every other live tank in range,
-    /// except the shooter and <paramref name="directSlot"/> (the tank it struck directly, already dealt with); a tank
-    /// under spawn protection is reported hit for no damage. Then the props around it (<see cref="SplashProps"/>; <paramref name="directProp"/> is the wall
+    /// except the shooter and <paramref name="directSlot"/> (the tank it struck directly, already dealt with), less its armour
+    /// layers; a tank under spawn protection is reported hit for no damage. Then the props around it (<see cref="SplashProps"/>; <paramref name="directProp"/> is the wall
     /// it struck, if any).
     /// </summary>
     private void Explode(in Shell shell, Vector3 at, int directSlot, int directProp = -1)
@@ -166,6 +167,7 @@ public sealed partial class Simulation
             float distance = TankPose.Compute(target, Field.Terrain).HullBox(target.Spec).DistanceTo(at);
             int damage = Penetration.Splash(shell.Round, distance, target.Spec.HullArmor.Armor.Thinnest);
             if (damage <= 0) continue;
+            damage = CrateRules.ScaleShellDamage(damage, target.ArmorLayers);
             if (IsProtected(target)) damage = 0;
             _events.Add(new GameEvent(GameEventType.SplashDamage, Tick, shell.OwnerTankId, shell.Id, at, Vector3.Zero,
                 target.Id, HitResult.None, damage, shell.Ammo));

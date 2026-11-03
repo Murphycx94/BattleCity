@@ -71,4 +71,18 @@ public static class MinimapFeed
         // HasNext alone decides: ZoneState.At gives no Next once closed (the last ring is all there is), nor while a ring is still unannounced.
         frame.Zone = new MinimapZone(state.Current.Centre, state.Current.Radius, state.HasNext, state.Next.Centre, state.Next.Radius);
     }
+
+    /// <summary>
+    /// The crates <paramref name="crates"/> knows and believes standing (stage 6 design §4.3: seen, and not yet seen gone or
+    /// eaten by the player), in id order. Nothing in a mode without crates (the knowledge is empty there).
+    /// </summary>
+    public static void AddCrates(MinimapFrame frame, CrateKnowledge crates)
+    {
+        ReadOnlySpan<CrateKnowledge.Entry> all = crates.All;
+        for (int id = 0; id < all.Length; id++)
+        {
+            ref readonly CrateKnowledge.Entry e = ref all[id];
+            if (e.Known && e.Standing) frame.AddCrate(new MinimapCrate(e.Position, e.Kind));
+        }
+    }
 }

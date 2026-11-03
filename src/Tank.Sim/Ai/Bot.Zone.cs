@@ -15,7 +15,8 @@ namespace Tank.Sim.Ai;
 /// <see cref="WanderLeavesRing"/>). A point it can't reach is given up for the next (with no way to
 /// it, after holding <see cref="BotDirector.ZoneRetryTicks"/>), and after <see cref="BotDirector.ZoneTries"/> it starts
 /// over, holding first. A new
-/// ring sends a running bot to its point in the new one, and a wandering bot whose waypoint lies outside it to another.
+/// ring sends a running bot to its point in the new one, a wandering bot whose waypoint lies outside it to another, and
+/// one fetching a crate outside it (<see cref="BotDirector.InRing"/>) to a waypoint (stage 6B: Bot.Crates.cs).
 /// Running and out of time (reckoned to where the run stops), or outside the safe circle, it is <see cref="ZoneUrgent"/>,
 /// and a run stays so to its end: it keeps driving with the gun on any target (firing once laid and loaded) and doesn't
 /// back away from enemies too close; otherwise it stops to fight as ever and runs on afterwards.
@@ -39,10 +40,11 @@ public sealed partial class Bot
     public int ZoneRuns { get; private set; }
 
     /// <summary>
-    /// Once a command, before the arrival check (a royale with its rings only): a new ring changes where it heads; out of
-    /// the ring a run starts, well inside one it ends; then whether it must hurry (a run that had to stays urgent).
+    /// Once a command, before the arrival check (a royale with its rings only): a new ring changes where it heads (and the
+    /// crates it shunned are forgotten: one boxed in by parked tanks may be free now); out of the ring a run starts (a
+    /// crate leg dropped for it), well inside one it ends; then whether it must hurry (a run that had to stays urgent).
     /// </summary>
-    private void WatchZone(BotDirector director, in TankState me)
+    private void WatchZone(BotDirector director, in TankState me, int tick)
     {
         ZoneState zone = director.Zone;
         ZoneRing target = zone.Target;
@@ -50,8 +52,10 @@ public sealed partial class Bot
         {
             (_zoneRing, _zoneAttempt) = (zone.Ring, 0);
             _wanderOut = 0;
+            _cratesShunned = 0;
             if (RunningToZone) Begin(Leg.Zone, director.ZonePoint(this, target, 0), keepPath: false);
             else if ((_leg is Leg.Waypoint or Leg.Zone) && !BotDirector.WellInside(Goal, target)) NextWaypoint(me);
+            else if (_leg == Leg.Crate && !BotDirector.InRing(Goal, target)) EndCrateRun(me, tick);
             else if (_leg == Leg.Arrived && target.Radius >= BotDirector.ZoneWanderRadius) NextWaypoint(me);
         }
         if (!RunningToZone)
@@ -59,6 +63,7 @@ public sealed partial class Bot
             if (!BotDirector.InRing(me.Position, target))
             {
                 (RunningToZone, ZoneRuns) = (true, ZoneRuns + 1);
+                if (_leg == Leg.Crate) DropCrate();
                 Begin(Leg.Zone, director.ZonePoint(this, target, _zoneAttempt), keepPath: false);
             }
         }
@@ -140,7 +145,9 @@ public sealed partial class Bot
     /// <summary>
     /// Wandering in a royale, whether the path just come leaves the ring (<see cref="BotDirector.InRing"/>) it wanders in:
     /// a waypoint well inside it may be reached only the long way round, outside (round a cliff), and the ring may be
-    /// shrinking (batch C review follow-up). The ring being convex, the points are all there is to look at.
+    /// shrinking (batch C review follow-up). The ring being convex, the points are all there is to look at. A crate run
+    /// (<see cref="Leg.Crate"/>) isn't looked at: the crate lies in the ring and the way is short, and the run's own timing
+    /// (<see cref="BotDirector.CrateFor"/>, <see cref="BotDirector.CrateGiveUpTicks"/>) bounds it.
     /// </summary>
     private bool WanderLeavesRing()
     {

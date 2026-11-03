@@ -87,6 +87,20 @@ public static class MinimapGlyphs
         }
     }
 
+    /// <summary>
+    /// A crate's square (stage 6 design §4.3): axis-aligned, <paramref name="size"/> on a side, centred on
+    /// <paramref name="centre"/>; top left, top right, bottom right, bottom left (<see cref="SquarePoints"/> points).
+    /// </summary>
+    public static int Square(Vector2 centre, float size, Span<Vector2> into)
+    {
+        float h = size / 2;
+        into[0] = centre + new Vector2(-h, -h);
+        into[1] = centre + new Vector2(h, -h);
+        into[2] = centre + new Vector2(h, h);
+        into[3] = centre + new Vector2(-h, h);
+        return SquarePoints;
+    }
+
     /// <summary>A wreck's cross: two strokes, A–B and C–D, along the diagonals, each end <paramref name="size"/>/2 from the centre.</summary>
     public static (Vector2 A, Vector2 B, Vector2 C, Vector2 D) Cross(Vector2 centre, float size)
     {

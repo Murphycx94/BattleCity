@@ -10,7 +10,8 @@ namespace Tank.Client.Match;
 /// <summary>
 /// <c>--hud-demo NAME</c>: one screen of the match HUD drawn from canned data (<see cref="HudDemoFrames"/>) over a flat
 /// dark background, with no session, so a screenshot shows the layout and is the same every time. The clock the feed
-/// reads is frozen at 0, so its lines never expire. A screen with a map (<see cref="HudDemo.Minimap"/>) builds that
+/// reads is frozen at 0, so its lines never expire (nor do the canned pickup toasts, which say when they go). A screen
+/// with a map (<see cref="HudDemo.Minimap"/>) builds that
 /// catalog map's battlefield and bakes its ground in <see cref="_Ready"/> (a long first frame), then shows the canned icons
 /// over it, as the corner map or the full one.
 /// </summary>
@@ -39,6 +40,8 @@ public partial class HudGallery : Node
             if (k.Zone) _hud.OnZoneKill(k.Victim, k.VictimSide, now: 0);
             else _hud.OnKill(k.Killer, k.KillerSide, k.Victim, k.VictimSide, k.Friendly, now: 0);
         }
+        if (_demo.Pickups is { } pickups)
+            foreach (PickupLine line in pickups) _hud.AddPickup(line);   // added ExpiresAt − Lifetime in: the frozen clock 0 is before they go
         _hud.SetScoreboardOpen(_demo.ScoreboardOpen);
         if (_demo.Minimap is { } m) AddMinimap(m);
         GetWindow().Title = $"坦克 3D · HUD · {_demo.Name}";

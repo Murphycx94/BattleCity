@@ -58,6 +58,9 @@ public static class ModeRules
     /// <summary>Whether the match has a zone closing in on it (stage 6 design §3).</summary>
     public static bool HasZone(BattleMode mode) => mode == BattleMode.Royale;
 
+    /// <summary>Whether supply crates lie about the map (stage 6 design §4): the modes with a zone (a royale; 6C's duos).</summary>
+    public static bool HasCrates(BattleMode mode) => HasZone(mode);
+
     /// <summary>The one map the mode is played on (a <see cref="MapCatalog"/> id), or null for any: royale → <see cref="RiverlandMap.Id"/>.</summary>
     public static string? OnlyMap(BattleMode mode) => mode == BattleMode.Royale ? RiverlandMap.Id : null;
 

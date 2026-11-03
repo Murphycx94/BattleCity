@@ -136,11 +136,13 @@ public class MinimapFeedTests(ITestOutputHelper output)
         };
         frame.AddTank(new MinimapTank(SN.Vector2.Zero, Side.Ally, MinimapShape.Td, false));
         frame.AddBase(new MinimapBase(SN.Vector2.Zero, 25, true, 10));
+        frame.AddCrate(new MinimapCrate(new SN.Vector2(5, 6), CrateKind.Optics));
 
         frame.Clear();
 
         Assert.Equal(0, frame.Tanks.Length);
         Assert.Equal(0, frame.Bases.Length);
+        Assert.Equal(0, frame.Crates.Length);
         Assert.Equal(EyeKind.None, frame.Eye.Kind);
         Assert.Null(frame.OwnWreck);
     }
@@ -289,24 +291,76 @@ public class MinimapFeedTests(ITestOutputHelper output)
             IReadOnlyList<RemoteTank> view = others;
             IReadOnlyList<TeamBase> bases = new TeamBase[] { new(0, new SN.Vector2(100, 900), 25), new(1, new SN.Vector2(900, 100), 25) };
             var match = new MatchBlock { BaseProgress0 = 12, BaseProgress1 = 40 };
+            var crates = new CrateKnowledge();
+            crates.Reset(Enumerable.Range(0, 20).Select(i => new Crate((byte)(i * 3), new SN.Vector2(40 + i * 30, 60), (CrateKind)(i % CrateRules.Kinds))).ToArray());
+            crates.Take(3);
             for (int round = 0; round < 2; round++)   // warm-up
             {
                 frame.Clear();
                 MinimapFeed.AddOthers(frame, view, BattleMode.Standard, 0, 3);
                 MinimapFeed.AddBases(frame, bases, 0, match);
+                MinimapFeed.AddCrates(frame, crates);
             }
 
             var window = Allocation.Start();
             frame.Clear();
             MinimapFeed.AddOthers(frame, view, BattleMode.Standard, 0, 3);
             MinimapFeed.AddBases(frame, bases, 0, match);
+            MinimapFeed.AddCrates(frame, crates);
             frame.Eye = new MinimapEye(EyeKind.Ring, new SN.Vector2(5, 5), 0f, 1f, 0.8f);
             frame.OwnWreck = new SN.Vector2(5, 5);
             var measured = window.Stop();
             Assert.Equal(9, frame.Tanks.Length);
             Assert.Equal(2, frame.Bases.Length);
+            Assert.Equal(19, frame.Crates.Length);
             return measured;
         });
+    }
+
+    [Fact]
+    public void Only_the_crates_known_and_standing_go_on_the_map_in_id_order()
+    {
+        var crates = new CrateKnowledge();
+        crates.Reset(new[]
+        {
+            new Crate(9, new SN.Vector2(900, 90), CrateKind.Optics),
+            new Crate(2, new SN.Vector2(200, 20), CrateKind.Ammo),
+            new Crate(5, new SN.Vector2(500, 50), CrateKind.Repair),
+        });
+        crates.Take(5);                                                // eaten: known, gone
+        crates.Take(7, CrateKind.Armor, new SN.Vector2(700, 70));     // eaten before it was ever seen
+        var frame = new MinimapFrame();
+
+        MinimapFeed.AddCrates(frame, crates);
+
+        Assert.Equal(new[]
+        {
+            new MinimapCrate(new SN.Vector2(200, 20), CrateKind.Ammo),
+            new MinimapCrate(new SN.Vector2(900, 90), CrateKind.Optics),
+        }, frame.Crates.ToArray());
+    }
+
+    [Fact]
+    public void No_crates_known_add_nothing_and_the_frame_has_room_for_the_whole_set()
+    {
+        var frame = new MinimapFrame();
+        MinimapFeed.AddCrates(frame, new CrateKnowledge());
+        Assert.Equal(0, frame.Crates.Length);
+
+        var all = new CrateKnowledge();
+        all.Reset(Enumerable.Range(0, CrateRules.MaxCrates).Select(i => new Crate((byte)i, new SN.Vector2(i, i), CrateKind.Reload)).ToArray());
+        MinimapFeed.AddCrates(frame, all);
+        Assert.Equal(CrateRules.MaxCrates, MinimapFrame.MaxCrates);
+        Assert.Equal(CrateRules.MaxCrates, frame.Crates.Length);
+    }
+
+    [Fact]
+    public void The_crate_squares_are_six_pixels_on_the_corner_map_and_nine_on_the_full_one_in_the_crate_s_colour()
+    {
+        Assert.Equal(6f, MinimapStyle.CornerIcons.Crate);
+        Assert.Equal(9f, MinimapStyle.FullIcons.Crate);
+        Assert.Equal(6f, new MinimapIconSizes(1, 1, 1, 1, 1, 1, 1, 1, 1, 1).Crate);   // appended with a default: older call sites keep compiling
+        foreach (CrateKind kind in Enum.GetValues<CrateKind>()) Assert.Equal(Tank.Client.Art.Palette.Crate(kind), MinimapStyle.CrateFill(kind));
     }
 
     /// <summary>

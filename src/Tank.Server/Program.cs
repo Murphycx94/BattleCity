@@ -54,7 +54,8 @@ public static class Program
 
         using var runner = new ServerRunner(server, log, SimConstants.TickRate);
         runner.Start();
-        log($"'{options.RoomName}' listening on UDP {options.Port}: {ModeRules.Id(options.Mode)}, map {options.Map.Id}, {server.Bots} bots. Ctrl+C to stop.");
+        string crates = ModeRules.HasCrates(options.Mode) ? $", {CratePlacer.Count} crates a match" : "";   // laid when a match starts; the server logs how many found a place
+        log($"'{options.RoomName}' listening on UDP {options.Port}: {ModeRules.Id(options.Mode)}, map {options.Map.Id}, {server.Bots} bots{crates}. Ctrl+C to stop.");
         bool stopped = WaitForStop(
             () => log($"players {server.ConnectedCount}, {(server.MatchRunning ? "in a match" : "in the room")}, tick avg {runner.AverageTickMs:F3} ms, max {runner.MaxTickMs:F3} ms"),
             () => server.MapStateOf(options.Map) == MapState.Failed);

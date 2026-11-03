@@ -10,7 +10,8 @@ namespace Tank.Sim.Tests;
 /// One whole royale on the riverland, started as the server starts one (stage 6A plan, task 6): the rings drawn from the
 /// seed before any tank (<see cref="BotArena.Royale"/>), an idle player in seat 0 (a medium, its commands all zero) and
 /// fifteen bots in seats 1–15, each tank drawn from the seed in seat order and each bot seeded from its seat
-/// (<see cref="BotSeating"/>), played until it ends or for <see cref="MaxTicks"/>. Only what the tests look at is kept.
+/// (<see cref="BotSeating"/>), played until it ends or for <see cref="MaxTicks"/>. From 6B the match has its crates
+/// (<see cref="BotArena.Royale"/>): who ate how many is kept (<see cref="CratesTaken"/> and the rest). Only what the tests look at is kept.
 /// </summary>
 internal sealed record RoyaleMatch(
     uint Seed,
@@ -31,6 +32,14 @@ internal sealed record RoyaleMatch(
     int[] UrgentOnsets,        // [k − 1]: times a live bot became ZoneUrgent while ring k was the zone's (waiting or shrinking; ring 0's go with ring 1)
     int[] FightToRun,          // [k − 1]: of those, the ones by a bot that was stopped to fight (Engaging) the tick before
     bool LastKillByZone,       // the last tank destroyed went in the zone
+    int CratesTaken,           // crates eaten by anyone (stage 6B plan, task 6)
+    int BotCratesTaken,        // … by the bots (CrateSet.TakenBy is a bot's tank: fetched or driven over)
+    int PlayerCratesTaken,     // … by the idle player (0 unless a crate was placed under its spawn)
+    int CrateRuns,             // crate runs the bots began
+    int CrateRepicks,          // of those, runs begun for the crate the same bot gave up last (batch C review follow-up: given up, a crate is shunned)
+    int StandingAtEnd,         // crates still standing at the end
+    int TanksWithThreeLayers,  // tanks (wrecks too) with three layers of one kind at the end
+    float FirstFullStackSeconds,   // when the first tank got three layers of one kind, s; −1: none did
     IReadOnlyList<GameEvent> Events,
     string Summary)
 {
@@ -47,29 +56,31 @@ internal sealed record RoyaleMatch(
 
     /// <summary>
     /// The riverland royale of <paramref name="seed"/>, seated, roles given out, nothing played yet. With
-    /// <see cref="RoyaleBots.Unarmed"/> the bots have no rounds, so nothing but the zone takes a tank out and every ring is
-    /// run; with <see cref="RoyaleBots.Tough"/> every tank (the player's too) has <see cref="ToughHealth"/> times its
-    /// health: the bots fight as ever, but shells hardly kill, so the late rings are run fighting (batch C review follow-up).
+    /// <see cref="RoyaleBots.Unarmed"/> the bots' tanks have no rounds and no racks to fill (capacities 0: an ammo crate does
+    /// nothing for them, so they never fetch one and stay unarmed; stage 6B task 6), so nothing but the zone takes a tank
+    /// out and every ring is run; with <see cref="RoyaleBots.Tough"/> every tank (the player's too) has
+    /// <see cref="ToughHealth"/> times its health: the bots fight as ever, but shells hardly kill, so the late rings are run
+    /// fighting (batch C review follow-up).
     /// </summary>
     public static BotArena Seat(uint seed, bool recording = true, RoyaleBots bots = RoyaleBots.Armed)
     {
         BotArena arena = BotArena.Royale(MapCatalog.Riverland, seed);
         arena.Recording = recording;
         var seating = new BotSeating(seed);
-        arena.Join(Spec(TankCatalog.Medium, bots), 0);   // seat 0: the player, who came into the room first
-        for (int slot = 1; slot < Seats; slot++)
-        {
-            Bot bot = arena.Bot(Spec(TankCatalog.All[seating.NextTankIndex()], bots), 0, seating.BotSeed(slot));
-            if (bots != RoyaleBots.Unarmed) continue;
-            ref TankState t = ref arena.Sim.TankRef(bot.TankId);
-            (t.ApLeft, t.HeLeft) = (0, 0);
-        }
+        arena.Join(Spec(TankCatalog.Medium, RoyaleBots.Armed, bots), 0);   // seat 0: the player, who came into the room first (armed, idle)
+        for (int slot = 1; slot < Seats; slot++) arena.Bot(Spec(TankCatalog.All[seating.NextTankIndex()], bots, bots), 0, seating.BotSeed(slot));
         arena.Director.AssignRoles();
         return arena;
     }
 
-    private static TankSpec Spec(TankSpec spec, RoyaleBots bots) =>
-        bots == RoyaleBots.Tough ? spec with { MaxHealth = spec.MaxHealth * ToughHealth } : spec;
+    /// <summary><paramref name="spec"/> as the tank of a <paramref name="bot"/> has it, the <paramref name="health"/> as every tank's (the player's too).</summary>
+    /// <remarks>The player's tank stays armed in the unarmed variant: it is idle (its commands all zero, so it never fires) and keeps the spec the server seats a player with; only the bots' racks are emptied (Capacity 0, not the rounds alone: an ammo crate would fill those again), so that nothing but the zone takes a tank out.</remarks>
+    private static TankSpec Spec(TankSpec spec, RoyaleBots bot, RoyaleBots health)
+    {
+        if (health == RoyaleBots.Tough) spec = spec with { MaxHealth = spec.MaxHealth * ToughHealth };
+        if (bot == RoyaleBots.Unarmed) spec = spec with { Ap = spec.Ap with { Capacity = 0 }, He = spec.He with { Capacity = 0 } };
+        return spec;
+    }
 
     /// <summary>Plays the riverland royale of <paramref name="seed"/> (<paramref name="bots"/>: see <see cref="Seat"/>) to its end (or <see cref="MaxTicks"/>).</summary>
     public static RoyaleMatch Play(uint seed, RoyaleBots bots = RoyaleBots.Armed)
@@ -82,11 +93,17 @@ internal sealed record RoyaleMatch(
         int[] onsets = new int[ZoneSchedule.Rings], fightToRun = new int[ZoneSchedule.Rings];
         var urgent = new bool[Simulation.MaxTanks + 1];
         var engaging = new bool[Simulation.MaxTanks + 1];
+        var runsSeen = new int[Simulation.MaxTanks + 1];
+        var runGoal = new Vector2[Simulation.MaxTanks + 1];
+        var takenAtRun = new int[Simulation.MaxTanks + 1];
+        int repicks = 0, firstFullStack = -1;
         while (rules.Phase == MatchPhase.Playing && arena.Sim.Tick - rules.StartTick < MaxTicks)
         {
             arena.Tick();
             int elapsed = arena.Sim.Tick - rules.StartTick;
             WatchUrgent(arena, urgent, engaging, onsets, fightToRun);
+            WatchRepicks(arena, runsSeen, runGoal, takenAtRun, ref repicks);
+            if (firstFullStack < 0 && AnyFullStack(arena.Sim)) firstFullStack = elapsed;
             for (int k = 1; k <= ZoneSchedule.Rings; k++)
                 if (elapsed == ZoneSchedule.ShrinkEnd(k)) outside[k - 1] = CountOutside(arena, k, detail);
         }
@@ -122,8 +139,58 @@ internal sealed record RoyaleMatch(
         bool lastByZone = false;
         foreach (GameEvent e in arena.Events)
             if (e.Type == GameEventType.TankDestroyed) lastByZone = e.Cause == KillCause.Zone;
+        var (taken, byBots, byPlayer, runs, standing) = CountCrates(arena);
+        int fullStacks = 0;
+        foreach (ref readonly TankState t in arena.Sim.Tanks)
+            if (HasFullStack(t)) fullStacks++;
         return new RoyaleMatch(seed, bots, rules.EndReason, rules.EndedAt - rules.StartTick, winner, winnerTank, winnerAlive, zoneKills, shellKills, hits,
-            firstZone, worst, worstTank, outside, detail, onsets, fightToRun, lastByZone, arena.Events.ToArray(), arena.Director.Summary());
+            firstZone, worst, worstTank, outside, detail, onsets, fightToRun, lastByZone, taken, byBots, byPlayer, runs, repicks, standing,
+            fullStacks, firstFullStack < 0 ? -1f : firstFullStack / (float)Tps, arena.Events.ToArray(), arena.Director.Summary());
+    }
+
+    /// <summary>
+    /// Counts each bot's crate run begun this tick (<see cref="Bot.CrateRuns"/> grew) for the crate (<see cref="Bot.Goal"/>:
+    /// a run begins on the crate's spot, and no two crates share one) its last run was for, when that run didn't end in
+    /// eating it (<see cref="Bot.CratesTaken"/> unchanged since it began): the crate was given up and picked again.
+    /// </summary>
+    private static void WatchRepicks(BotArena arena, int[] runsSeen, Vector2[] runGoal, int[] takenAtRun, ref int repicks)
+    {
+        foreach (Bot bot in arena.Director.Bots)
+        {
+            int id = bot.TankId;
+            if (bot.CrateRuns == runsSeen[id]) continue;
+            if (runsSeen[id] > 0 && bot.Goal == runGoal[id] && bot.CratesTaken == takenAtRun[id]) repicks++;
+            (runsSeen[id], runGoal[id], takenAtRun[id]) = (bot.CrateRuns, bot.Goal, bot.CratesTaken);
+        }
+    }
+
+    /// <summary>Three layers of one kind (<see cref="CrateRules.MaxLayers"/>): the full stack the acceptance list asks someone to reach.</summary>
+    private static bool HasFullStack(in TankState t) =>
+        t.ArmorLayers >= CrateRules.MaxLayers || t.ReloadLayers >= CrateRules.MaxLayers || t.OpticsLayers >= CrateRules.MaxLayers;
+
+    private static bool AnyFullStack(Simulation sim)
+    {
+        foreach (ref readonly TankState t in sim.Tanks)
+            if (HasFullStack(t)) return true;
+        return false;
+    }
+
+    /// <summary>The crates eaten (by anyone, by the bots, by the player in seat 0), the bots' crate runs, and the crates still standing.</summary>
+    private static (int Taken, int ByBots, int ByPlayer, int Runs, int Standing) CountCrates(BotArena arena)
+    {
+        CrateSet crates = arena.Rules.Crates ?? throw new InvalidOperationException("a royale without crates");
+        int player = arena.Rules.Of((byte)0).TankId;   // seat 0: the player
+        int taken = 0, byBots = 0, byPlayer = 0, runs = 0;
+        for (int id = 0; id < crates.Count; id++)
+        {
+            if (crates.IsStanding(id)) continue;
+            taken++;
+            int eater = crates.TakenBy(id);
+            if (eater == player) byPlayer++;
+            else if (arena.Director.Find(eater) is not null) byBots++;
+        }
+        foreach (Bot bot in arena.Director.Bots) runs += bot.CrateRuns;
+        return (taken, byBots, byPlayer, runs, crates.StandingCount);
     }
 
     /// <summary>Counts each live bot's turning <see cref="Bot.ZoneUrgent"/> this tick under the zone's ring, and those that were stopped to fight the tick before.</summary>
@@ -166,7 +233,9 @@ internal sealed record RoyaleMatch(
         $"({WinnerTank}, {(WinnerAlive ? "alive" : "gone")}); kills: {ShellKills} by shells, {ZoneKills} by the zone (first bot at {(FirstBotZoneDeath < 0 ? "never" : $"{FirstBotZoneDeath / (float)Tps:F1} s")}); " +
         $"{ShellHits} hits; live bots outside at rings 1–5's end: {string.Join(", ", OutsideAtRingEnd.Select(n => n < 0 ? "-" : n.ToString()))}" +
         $"{(OutsideDetail.Count == 0 ? "" : $" ({string.Join("; ", OutsideDetail)})")}; urgent in rings 1–5: {string.Join(", ", UrgentOnsets)} " +
-        $"(from a fight: {string.Join(", ", FightToRun)}); longest stuck {LongestStuck:F1} s (tank {LongestStuckTank}); {Summary}";
+        $"(from a fight: {string.Join(", ", FightToRun)}); longest stuck {LongestStuck:F1} s (tank {LongestStuckTank}); " +
+        $"crates: {CratesTaken} taken (bots {BotCratesTaken}, player {PlayerCratesTaken}), {CrateRuns} runs ({CrateRepicks} repicks), {StandingAtEnd} standing; " +
+        $"{TanksWithThreeLayers} tanks with three layers of a kind (first at {(FirstFullStackSeconds < 0f ? "never" : $"{FirstFullStackSeconds:F1} s")}); {Summary}";
 }
 
 /// <summary>Who the bots of a <see cref="RoyaleMatch"/> are.</summary>
@@ -174,7 +243,7 @@ public enum RoyaleBots
 {
     /// <summary>As the server seats them.</summary>
     Armed,
-    /// <summary>Without rounds: only the zone takes a tank out.</summary>
+    /// <summary>Without rounds, or racks to fill from an ammo crate: only the zone takes a tank out.</summary>
     Unarmed,
     /// <summary>Armed, every tank with <see cref="RoyaleMatch.ToughHealth"/> times its health: the late rings run fighting.</summary>
     Tough,

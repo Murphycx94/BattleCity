@@ -11,9 +11,9 @@ namespace Tank.Net.Battle;
 /// The battle client (design §5.9): connects, sits in the room, and in a match owns prediction, reconciliation,
 /// interpolation, the shells and the prop state, exposing ready-to-draw state. Drive it with <see cref="Update"/> once
 /// per rendered frame. Engine-free: tests and the soak run it as it is. Not thread-safe: every piece of state — the room,
-/// the match, the snapshots, the zone (<see cref="HasZone"/>, <see cref="ZoneRings"/>, <see cref="ZoneAt"/>) — is written
-/// in <see cref="OnData"/>, which the transport calls from <see cref="Update"/>'s poll, and must be read on that same thread
-/// (in the game, the Godot main thread, which polls).
+/// the match, the snapshots, the zone (<see cref="HasZone"/>, <see cref="ZoneRings"/>, <see cref="ZoneAt"/>), the crates
+/// (<see cref="Crates"/>, <see cref="TryDequeuePickup"/>) — is written in <see cref="OnData"/>, which the transport calls
+/// from <see cref="Update"/>'s poll, and must be read on that same thread (in the game, the Godot main thread, which polls).
 /// </summary>
 public sealed partial class BattleClient : ITransportHandler, IDisposable
 {
@@ -142,6 +142,7 @@ public sealed partial class BattleClient : ITransportHandler, IDisposable
                 case BattleMessage.Snapshot: HandleSnapshot(ref r, data.Length); break;
                 case BattleMessage.Events: OnEventBatch(BattleMessages.ReadEvents(ref r)); break;
                 case BattleMessage.Zone: HandleZone(BattleMessages.ReadZone(ref r)); break;
+                case BattleMessage.Crate: HandleCrate(BattleMessages.ReadCrate(ref r)); break;
             }
         }
         catch (ProtocolException ex)

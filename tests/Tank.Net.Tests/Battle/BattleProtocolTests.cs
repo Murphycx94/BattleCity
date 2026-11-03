@@ -327,7 +327,7 @@ public sealed class BattleProtocolTests
     [Fact]
     public void The_protocol_constants_are_the_designs_numbers()
     {
-        Assert.Equal(5, BattleProtocol.Version);
+        Assert.Equal(6, BattleProtocol.Version);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
         Assert.Equal(16, BattleProtocol.MaxPlayers);
         Assert.Equal(64, BattleSeat.HistorySize);
@@ -391,6 +391,8 @@ public sealed class BattleProtocolTests
             w.WriteBool(false);   // not "same as the baseline"
             own(w);
         }
+        if (baseTick != 0) w.WriteBool(false);   // the crates: not "same as the baseline"
+        w.WriteBits(0, 7);    // none in sight
         w.WriteBool(false);   // the scoreboard, in full: sixteen empty lines
         for (int i = 0; i < BattleProtocol.MaxPlayers; i++) w.WriteBool(false);
         if (entity is not null)
@@ -430,6 +432,7 @@ public sealed class BattleProtocolTests
         w.WriteVarInt(0);
         w.WriteVarInt(0);
         w.WriteBool(false);
+        w.WriteBits(0, 6);   // no layers
     };
 
     [Fact]
@@ -522,6 +525,7 @@ public sealed class BattleProtocolTests
         w.WriteVarUInt(tank);
         w.WriteByte(0);      // no bases
         w.WriteByte(0);      // no zone
+        w.WriteByte(0);      // no crates
         return Bytes(w);
     }
 

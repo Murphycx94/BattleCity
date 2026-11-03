@@ -16,7 +16,8 @@ namespace Tank.Sim.Ai;
 /// when their base falls, retreat when badly hurt and all go forward once their team has no attacker left
 /// (BotDirector.Roles.cs); outside one every bot wanders between the
 /// map's waypoints along searched paths (design §4.2), retreating to a team mate when badly hurt; in a royale they run
-/// into the ring they must be in and wander inside it (stage 6 design §3.4: BotDirector.Zone.cs, Bot.Zone.cs).
+/// into the ring they must be in and wander inside it (stage 6 design §3.4: BotDirector.Zone.cs, Bot.Zone.cs), fetching the
+/// useful supply crates they see on the way (stage 6 design §4.5: BotDirector.Crates.cs, Bot.Crates.cs).
 /// </summary>
 /// <remarks>
 /// The server's tick: <see cref="Update"/> once, then <see cref="Command"/> for each bot's tank, then the step. Everything
@@ -276,12 +277,12 @@ public sealed partial class BotDirector
     /// <summary>
     /// What the bots did, for the log at the end of the match (allocates): "team 0 fell back 2 times, team 1 0 times;
     /// 3 stucks; 412 paths, 2 not found" (the fall-backs in a standard battle only, of the teams that have bots; a royale
-    /// starts with the zone runs: "31 zone runs; 3 stucks; …").
+    /// starts with the crates and the zone runs: "12 crate runs, 9 fetched; 31 zone runs; 3 stucks; …").
     /// </summary>
     public string Summary()
     {
         int stucks = 0;
         foreach (Bot bot in _bots) stucks += bot.Stucks;
-        return $"{ZoneRunsText()}{(_standard ? FallBacksText() : "")}{stucks} stucks; {Paths.Searches} paths, {Paths.Failures} not found";
+        return $"{CrateRunsText()}{ZoneRunsText()}{(_standard ? FallBacksText() : "")}{stucks} stucks; {Paths.Searches} paths, {Paths.Failures} not found";
     }
 }

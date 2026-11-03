@@ -99,6 +99,35 @@ public class ShotPlanTests
         Assert.False(plan.TakeScreenshot(100));   // nothing in the sandbox ever notes the moment
     }
 
+    [Fact]
+    public void The_first_pickup_comes_straight_from_the_caller_in_a_match()
+    {
+        ShotPlan plan = Match("--shot-after", "pickup:2");
+        Assert.Empty(plan.Warnings);
+        Assert.False(plan.TakeScreenshot(50));
+        plan.OnMoment(ShotMoment.Pickup, 40);
+        plan.OnMoment(ShotMoment.Pickup, 41);   // a second crate: the first counts
+        Assert.False(plan.TakeScreenshot(41.9));
+        Assert.True(plan.TakeScreenshot(42.0));
+        Assert.False(plan.TakeScreenshot(43));   // once
+    }
+
+    [Fact]
+    public void A_pickup_never_happens_in_the_sandbox()
+    {
+        ShotPlan plan = Sandbox("--shot-after", "pickup:2");
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("'pickup'", warning);
+        Assert.Contains("the sandbox", warning);
+    }
+
+    [Fact]
+    public void Pickup_is_the_last_moment_and_a_bad_one_names_it()
+    {
+        Assert.Equal(ShotMoment.Pickup, Enum.GetValues<ShotMoment>()[^1]);   // appended: the moments before keep their numbers
+        Assert.Contains("|outside|pickup:SECONDS", Assert.Single(LaunchOptions.Parse(new[] { "--shot-after", "crate:1" }).Warnings));
+    }
+
     [Theory]
     [InlineData(8.0)]    // the results stay 8 s: the scene is gone by then
     [InlineData(12.5)]

@@ -19,6 +19,8 @@ public enum PuffColor { White, Grey }
 /// bursts splash: an AP shell striking armour and a tank blowing up keep their puff and fireball, wading or not.
 /// Debris (<see cref="Debris"/>): chunks thrown up and along a push (bricks, stones, wood chips, leaves), with an
 /// optional cloud of dust puffs; sized for a chip off a wall up to a whole wall coming down.
+/// Pickup (<see cref="Pickup"/>): a crate going (stage 6 design §4.3), a flash ball in the crate's colour that swells to
+/// <see cref="PickupRadius"/> and fades over <see cref="PickupTime"/>; four slots, since several crates can be seen gone at once.
 /// Pool sizes (10 muzzle, 10 impact, 10 splash, 16 debris slots) are sized for a full match (blueprint §5 T10): ten tanks can all
 /// fire inside one muzzle life (~0.8 s), so there is a muzzle and an impact slot per possible shooter; debris comes in
 /// bursts, up to a dozen at once when an HE shell lands in a bush patch, with headroom for two overlapping. If every
@@ -31,6 +33,7 @@ public partial class BattleFx : Node3D
     private const int ImpactSlots = 10;   // likewise: their shells can all burst inside one impact life (~1.2 s)
     private const int SplashSlots = 10;   // likewise for shells landing in water
     private const int DebrisSlots = 16;
+    private const int PickupSlots = 4;
     private const float MuzzleFlashTime = 0.08f;
     private const float MuzzleFlashSize = 1.3f;
     private const float FireballGrowTime = 0.1f;
@@ -40,10 +43,17 @@ public partial class BattleFx : Node3D
     private const int ImpactPuffs = 10;   // 6–10 used per impact
     private const int Stones = 8;
 
+    /// <summary>s: a pickup flash's whole life, <see cref="PickupGrowShare"/> of it swelling, the rest fading.</summary>
+    public const float PickupTime = 0.5f;
+    public const float PickupRadius = 1.5f;
+    private const float PickupGrowShare = 0.4f;
+    private const float PickupGlow = 1.6f, PickupLight = 5f, PickupLightRange = 10f;
+
     private readonly List<MuzzleSlot> _muzzles = new();
     private readonly List<ImpactSlot> _impacts = new();
     private readonly List<SplashSlot> _splashes = new();
     private readonly List<DebrisSlot> _debris = new();
+    private readonly List<PickupSlot> _pickups = new();
     private WaterSurface? _water;   // looked up until found
 
     public override void _Ready()
@@ -52,6 +62,7 @@ public partial class BattleFx : Node3D
         for (int i = 0; i < ImpactSlots; i++) _impacts.Add(new ImpactSlot(this));
         for (int i = 0; i < SplashSlots; i++) _splashes.Add(new SplashSlot(this));
         for (int i = 0; i < DebrisSlots; i++) _debris.Add(new DebrisSlot(this));
+        for (int i = 0; i < PickupSlots; i++) _pickups.Add(new PickupSlot(this));
     }
 
     public override void _Process(double delta)
@@ -61,6 +72,7 @@ public partial class BattleFx : Node3D
         foreach (ImpactSlot slot in _impacts) slot.Advance(dt);
         foreach (SplashSlot slot in _splashes) slot.Advance(dt);
         foreach (DebrisSlot slot in _debris) slot.Advance(dt);
+        foreach (PickupSlot slot in _pickups) slot.Advance(dt);
     }
 
     /// <summary>The slot that has been idle or playing for the longest time.</summary>
@@ -107,6 +119,12 @@ public partial class BattleFx : Node3D
         Oldest(_debris).Play(at, push, chunks, dust, size);
     }
 
+    /// <summary>A crate gone (eaten, or seen gone): a flash of <paramref name="color"/> at <paramref name="at"/>, swelling to <see cref="PickupRadius"/> and fading over <see cref="PickupTime"/>.</summary>
+    public void Pickup(Vector3 at, Color color)
+    {
+        Oldest(_pickups).Play(at, color);
+    }
+
     /// <summary>The scene's water surface, looked up again on every call until there is one (null in a scene without one).</summary>
     private WaterSurface? Water() => _water ??= WaterSurface.Find(this);
 
@@ -126,7 +144,9 @@ public partial class BattleFx : Node3D
 
         private readonly MeshInstance3D _ball;
         private readonly OmniLight3D _light;
+        private readonly float _energy;
         private readonly float _lightEnergy;
+        private Color _color;
         private float _time = float.MaxValue;
         private float _size;
         private float _grow;
@@ -143,10 +163,21 @@ public partial class BattleFx : Node3D
             _light = new OmniLight3D { LightColor = color, LightEnergy = 0, OmniRange = lightRange, ShadowEnabled = false };
             _ball.AddChild(_light);
             parent.AddChild(_ball);
+            _energy = energy;
             _lightEnergy = lightEnergy;
+            _color = color;
         }
 
         public float Age => _time;
+
+        /// <summary>Another colour for the next play (the pickup flashes: one slot serves every crate kind); the ball meshes are shared per colour.</summary>
+        public void Recolour(Color color)
+        {
+            if (color == _color) return;
+            _color = color;
+            _ball.Mesh = ParticleKit.GlowBall(color, _energy);
+            _light.LightColor = color;
+        }
 
         /// <summary>Grows from 30% to <paramref name="size"/> in <paramref name="grow"/> s (overshooting a little), then shrinks to nothing in <paramref name="shrink"/> s.</summary>
         public void Play(Vector3 at, float size, float grow, float shrink)
@@ -388,6 +419,27 @@ public partial class BattleFx : Node3D
             _ringProcess.ScaleMax = RingScaleMax * size;
             _ring.GlobalPosition = surface + Vector3.Up * 0.05f;
             _ring.Restart();
+        }
+    }
+
+    /// <summary>A crate's pickup flash: one <see cref="Flash"/>, recoloured for each crate's kind.</summary>
+    private sealed class PickupSlot : ISlot
+    {
+        private readonly Flash _flash;
+
+        public PickupSlot(Node parent)
+        {
+            _flash = new Flash(parent, Palette.CrateRepair.ToColor(), PickupGlow, PickupLight, PickupLightRange);
+        }
+
+        public float Age => _flash.Age;
+
+        public void Advance(float dt) => _flash.Advance(dt);
+
+        public void Play(Vector3 at, Color color)
+        {
+            _flash.Recolour(color);
+            _flash.Play(at, 2f * PickupRadius, PickupTime * PickupGrowShare, PickupTime * (1f - PickupGrowShare));   // the ball is unit-diameter: scale 2r
         }
     }
 

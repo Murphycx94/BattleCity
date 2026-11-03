@@ -2,6 +2,7 @@ using System.Numerics;
 using Tank.Client.Art;
 using Tank.Client.Match;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 
 namespace Tank.Client.Minimap;
 
@@ -9,10 +10,12 @@ namespace Tank.Client.Minimap;
 /// One map's icon sizes in base pixels of the map view: a tank shape's and a wreck cross's extent (see
 /// <see cref="MinimapGlyphs"/>), the eye arrow's length, the view fan's radius, and the smallest radius a base's ring is
 /// drawn with (a base smaller than that on the map is drawn at it); then the line widths: a wreck cross's strokes, a
-/// base's ring and its progress arc, the dark rim round every icon, the eye's ring, the zone's safe circle and its next ring.
+/// base's ring and its progress arc, the dark rim round every icon, the eye's ring, the zone's safe circle and its next ring;
+/// last a crate square's side.
 /// </summary>
 public readonly record struct MinimapIconSizes(float Tank, float Arrow, float Cross, float FanLength, float BaseMinRadius,
-    float CrossWidth, float RingWidth, float ArcWidth, float OutlineWidth, float EyeRingWidth, float ZoneWidth = 2f, float NextZoneWidth = 1.5f)
+    float CrossWidth, float RingWidth, float ArcWidth, float OutlineWidth, float EyeRingWidth, float ZoneWidth = 2f, float NextZoneWidth = 1.5f,
+    float Crate = 6f)
 {
     /// <summary>The gap between a base's ring and its progress arc, pixels.</summary>
     public const float ArcGap = 0.5f;
@@ -111,7 +114,7 @@ public static class MinimapStyle
 
     /// <summary>The full-screen map's icons.</summary>
     public static readonly MinimapIconSizes FullIcons = new(Tank: 15, Arrow: 22, Cross: 13, FanLength: 90, BaseMinRadius: 12,
-        CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f, ZoneWidth: 3, NextZoneWidth: 2);
+        CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f, ZoneWidth: 3, NextZoneWidth: 2, Crate: 9);
 
     public static MinimapIconSizes Icons(bool full) => full ? FullIcons : CornerIcons;
 
@@ -155,6 +158,9 @@ public static class MinimapStyle
     /// <summary>The ground outside the safe circle: this colour over it at <see cref="ZoneShadeOpacity"/>.</summary>
     public static readonly Vector3 ZoneShade = Palette.UiBackground;
     public const float ZoneShadeOpacity = 0.35f;
+
+    /// <summary>A crate's square (stage 6 design §4.3): its kind's colour, as the sign over the crate in the world; rimmed in <see cref="IconOutline"/>.</summary>
+    public static Vector3 CrateFill(CrateKind kind) => Palette.Crate(kind);
 
     /// <summary>A base's ring: the own team's in the ally blue-grey, the other's in the enemy red, as on the ground.</summary>
     public static Vector3 BaseRing(bool own) => MatchColors.Body(own ? Side.Ally : Side.Enemy);

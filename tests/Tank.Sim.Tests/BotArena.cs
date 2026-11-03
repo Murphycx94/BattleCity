@@ -69,36 +69,40 @@ internal sealed class BotArena
 
     /// <summary>
     /// A match of <paramref name="mode"/> on <paramref name="map"/> (the flat arena when null), with the match seed
-    /// <paramref name="seed"/> and a royale's rings <paramref name="zone"/> (both for <see cref="MatchRules"/>).
+    /// <paramref name="seed"/>, a royale's rings <paramref name="zone"/> and its crates <paramref name="crates"/> (all for
+    /// <see cref="MatchRules"/>).
     /// </summary>
     public BotArena(BattleMode mode = BattleMode.TeamBattle, MapDefinition? map = null, int? durationTicks = null, uint seed = 0,
-        IReadOnlyList<ZoneRing>? zone = null)
-        : this(map ?? FlatMap(), null, null, mode, durationTicks, seed, zone)
+        IReadOnlyList<ZoneRing>? zone = null, IReadOnlyList<Crate>? crates = null)
+        : this(map ?? FlatMap(), null, null, mode, durationTicks, seed, zone, crates)
     {
     }
 
     /// <summary>The match on <paramref name="field"/> and <paramref name="grid"/> when given (made from the map otherwise); the grid first, as the server has it.</summary>
-    private BotArena(MapDefinition map, Battlefield? field, NavGrid? grid, BattleMode mode, int? durationTicks, uint seed, IReadOnlyList<ZoneRing>? zone)
+    private BotArena(MapDefinition map, Battlefield? field, NavGrid? grid, BattleMode mode, int? durationTicks, uint seed, IReadOnlyList<ZoneRing>? zone,
+        IReadOnlyList<Crate>? crates)
     {
         Map = map;
         grid ??= map.NewNavGrid();
         Sim = new Simulation(field ?? map.NewBattlefield());
         Vision = new VisionTracker(Sim);
-        Rules = new MatchRules(mode, Sim, map.Spawns, durationTicks, map.Bases, seed, zone);
+        Rules = new MatchRules(mode, Sim, map.Spawns, durationTicks, map.Bases, seed, zone, crates);
         Director = new BotDirector(Sim, Vision, Rules, map, grid);
     }
 
     /// <summary>
-    /// A royale on <paramref name="map"/> as the server starts one (stage 6A plan, task 6): the battlefield and the grid,
-    /// the rings drawn on them from <paramref name="seed"/> (<see cref="ZonePicker"/>, with its salt) before any tank,
-    /// then the rules with the seed and the rings, and the director on the same grid.
+    /// A royale on <paramref name="map"/> as the server starts one (stage 6A plan, task 6; crates from 6B's task 6): the
+    /// battlefield and the grid, the rings drawn on them from <paramref name="seed"/> (<see cref="ZonePicker"/>, with its
+    /// salt) and the crates placed (<see cref="CratePlacer"/>, with its salt) before any tank, then the rules with the seed,
+    /// the rings and the crates, and the director on the same grid.
     /// </summary>
     public static BotArena Royale(MapDefinition map, uint seed)
     {
         Battlefield field = map.NewBattlefield();
         NavGrid grid = map.NewNavGrid();
         ZoneRing[] rings = ZonePicker.Pick(field, grid, map.Spawns.Solo, seed ^ ZonePicker.SeedSalt);
-        return new BotArena(map, field, grid, BattleMode.Royale, null, seed, rings);
+        Crate[] crates = CratePlacer.Place(field, grid, map.Spawns.Solo, seed ^ CratePlacer.SeedSalt);
+        return new BotArena(map, field, grid, BattleMode.Royale, null, seed, rings, crates);
     }
 
     public MapDefinition Map { get; }

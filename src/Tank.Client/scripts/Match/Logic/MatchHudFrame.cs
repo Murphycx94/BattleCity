@@ -24,7 +24,8 @@ public readonly record struct ResultsInfo(byte WinnerTeam, byte WinnerSlot, int 
 /// Everything the match HUD needs for one frame (blueprint §2.1): a plain value the scene fills from the client and the
 /// gallery from canned data. <c>Players</c> (indexed by room slot) and <c>Names</c> are the caller's arrays, handed on by
 /// reference for the scoreboard; nothing here is copied per frame. <c>Capture</c> is the bars under the plate (none
-/// outside a standard match); <c>Zone</c> the zone line and the outside warning (off outside a royale).
+/// outside a standard match); <c>Zone</c> the zone line and the outside warning (off outside a royale); <c>Buffs</c> the
+/// own buff layers over the status panel (none outside a royale, or without a tank).
 /// </summary>
 public readonly record struct MatchHudFrame(
     BattleMode Mode,
@@ -42,7 +43,8 @@ public readonly record struct MatchHudFrame(
     string?[] Names,
     ResultsInfo Results,
     CaptureBars Capture = default,
-    ZoneHud Zone = default)
+    ZoneHud Zone = default,
+    BuffHud Buffs = default)
 {
     /// <summary>The slot that has <paramref name="tankId"/> on the scoreboard, or -1 for a tank nobody plays (or has left).</summary>
     public static int SlotOf(PlayerStats[] players, int tankId)
@@ -58,10 +60,11 @@ public readonly record struct MatchHudFrame(
     /// the own tank is a wreck that is coming back (team battle only), and then <paramref name="spectateTarget"/> or
     /// <paramref name="spectateFree"/> still turn the bottom bar on under it. <paramref name="names"/> is the
     /// room's names by slot, <paramref name="fps"/> the engine's frame rate, <paramref name="resultsLeft"/> the ticks left on the results screen,
-    /// <paramref name="zone"/> the scene's zone for the HUD (it knows whether the own tank is outside; off by default). Reads only; allocates nothing.
+    /// <paramref name="zone"/> the scene's zone for the HUD (it knows whether the own tank is outside; off by default), <paramref name="buffs"/>
+    /// the own tank's layers (<see cref="BuffHud.From"/>; none by default). Reads only; allocates nothing.
     /// </summary>
     public static MatchHudFrame From(BattleClient client, BattleSession? session, byte ownTeam, string?[] names, int fps, string? spectateTarget = null, bool spectateFree = false, int resultsLeft = 0,
-        ZoneHud zone = default)
+        ZoneHud zone = default, BuffHud buffs = default)
     {
         BattleMode mode = client.MatchInfo?.Mode ?? client.Room?.Mode ?? BattleMode.TeamBattle;
         MatchBlock match = client.Match;
@@ -77,7 +80,8 @@ public readonly record struct MatchHudFrame(
         return new MatchHudFrame(mode, match.Phase, match.TicksLeft, slot, ownTeam, plate, banner, match.RespawnIn, spectateTarget, spectateFree, net, players, names,
             new ResultsInfo(match.WinnerTeam, match.WinnerSlot, resultsLeft, client.IsHost, match.EndReason, match.Entrants),
             CaptureText.Bars(mode, ownTeam, match),
-            zone);
+            zone,
+            buffs);
     }
 
     private static readonly PlayerStats[] NoPlayers = new PlayerStats[BattleProtocol.MaxPlayers];

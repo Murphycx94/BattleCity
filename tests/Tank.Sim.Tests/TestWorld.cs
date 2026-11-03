@@ -41,6 +41,24 @@ internal static class TestWorld
 
     public static Battlefield FlatField(params Prop[] props) => Field(Flat(), props);
 
+    /// <summary>Flat ground with a bank <paramref name="height"/> m high and 8 m wide across the field at <paramref name="z"/> (the sight tests' line of sight).</summary>
+    public static Battlefield RidgeField(float z, float height)
+    {
+        var heights = new float[Samples * Samples];
+        for (int j = 0; j < Samples; j++)
+        for (int i = 0; i < Samples; i++)
+            heights[j * Samples + i] = MathF.Abs(j * Cell - z) <= 4f ? height : 0f;
+        return Field(new HeightField(Samples, Samples, Cell, heights));
+    }
+
+    /// <summary>A 400 m × 400 m flat field: room for a look of 290 m.</summary>
+    public const int WideSamples = 201;
+
+    public static HeightField WideFlat() =>
+        new(WideSamples, WideSamples, Cell, Enumerable.Repeat(0f, WideSamples * WideSamples).ToArray());
+
+    public static Battlefield WideFlatField(params Prop[] props) => Field(WideFlat(), props);
+
     public static TankState Tank(float x, float z, float yaw = 0f) =>
         new() { Id = 1, Spec = TankCatalog.Medium, Position = new Vector2(x, z), Yaw = yaw };
 

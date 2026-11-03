@@ -15,12 +15,12 @@ namespace Tank.Client.Bootstrap;
 /// 一进对局就交给对局，从对局场景创建起算；--shot-after、--fx-shot 只由对局或试驾场截）  --quit-after SECONDS
 /// --no-update（不检查在线更新）  --update-now（更新就绪后不询问直接安装，用于测试）  --autodrive（试驾场和对局：自动驾驶并开火，用于截图）
 /// --map sandbox|riverland（开房时房间的地图，默认 riverland，吃鸡只在河谷开、--mode royale 时另给的图警告并用河谷；试驾场用哪张地图，默认 sandbox；写错时警告并用默认的）
-/// --camera-preset front|side|close|closerear|sprocket|spin|orbit|target，试驾场地图另有 hill|bush|yard|gate|patrol，河谷另有 overview|town|ford|forest|plateau|dunes|map，两张图都有 base0|base1|base0near|base1near|base0far|base1far，吃鸡对局另有 zone（光墙近处）（试驾场和对局：固定镜头，用于截图和测帧）  --fps-log（试驾场和对局：每秒打印平均和最差帧时间）
+/// --camera-preset front|side|close|closerear|sprocket|spin|orbit|target，试驾场地图另有 hill|bush|yard|gate|patrol，河谷另有 overview|town|ford|forest|plateau|dunes|map，两张图都有 base0|base1|base0near|base1near|base0far|base1far，吃鸡对局另有 zone（光墙近处）|crate（离自己最近的已知箱子特写）（试驾场和对局：固定镜头，用于截图和测帧）  --fps-log（试驾场和对局：每秒打印平均和最差帧时间）
 /// --fx-shot SECONDS（试驾场，配合 --autodrive：炮口压低，3 秒后第一次开炮再过 SECONDS 秒截图，用于检查特效）  --sniper（试驾场和对局：以狙击镜视角启动，用于截图）
 /// --range-demo pen|ricochet|nopen|he|kill|nopen-heavy|kill-td|turn|wall|breach|fence|ram|bush|lamp，河谷上是 house|ram-house|trees|ford
 /// （试驾场：自动对靶车开炮、开车撞墙，河谷上打塌、撞塌房子、开进树林、涉过浅滩，用于截图）
-/// --shot-after fire|hit|kill|prop|down|death|ended|outside:SECONDS（玩家第一次开炮、第一次命中坦克、第一次击毁坦克、第一次有墙受伤（prop，仅试驾场）、第一次有物件被毁（down，仅试驾场）、
-/// 自己的坦克第一次被击毁（death，仅对局）、对局结算开始（ended，仅对局）或自己的坦克第一次在安全区外（outside，仅吃鸡对局）后再过 SECONDS 秒截图）
+/// --shot-after fire|hit|kill|prop|down|death|ended|outside|pickup:SECONDS（玩家第一次开炮、第一次命中坦克、第一次击毁坦克、第一次有墙受伤（prop，仅试驾场）、第一次有物件被毁（down，仅试驾场）、
+/// 自己的坦克第一次被击毁（death，仅对局）、对局结算开始（ended，仅对局）、自己的坦克第一次在安全区外（outside，仅吃鸡对局）或自己第一次吃到补给箱（pickup，仅吃鸡对局）后再过 SECONDS 秒截图）
 /// --tank light|medium|heavy|td（开局的车型：试驾场里默认中坦；房间里则在连上后自动选这辆）  --spot-debug（试驾场：一开始就显示点亮调试文字，同 V 键）
 /// --full-map（进场后打开全屏地图，截图用）
 /// A plain parser, free of the engine: values it can't read fall back to defaults and are listed in <see cref="Warnings"/>
@@ -29,7 +29,7 @@ namespace Tank.Client.Bootstrap;
 /// </summary>
 public sealed record LaunchOptions
 {
-    private static readonly string[] ShotMoments = { "fire", "hit", "kill", "prop", "down", "death", "ended", "outside" };
+    private static readonly string[] ShotMoments = { "fire", "hit", "kill", "prop", "down", "death", "ended", "outside", "pickup" };
     private const int MaxBots = BattleProtocol.MaxPlayers - 1;
 
     public string? Name { get; init; }
@@ -84,7 +84,7 @@ public sealed record LaunchOptions
     public bool FullMap { get; init; }
     public string? RangeDemo { get; init; }
 
-    /// <summary>"fire", "hit", "kill", "prop", "down", "death", "ended" or "outside" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
+    /// <summary>"fire", "hit", "kill", "prop", "down", "death", "ended", "outside" or "pickup" (from <c>--shot-after EVENT:SECONDS</c>); null when not given.</summary>
     public string? ShotAfterEvent { get; init; }
     public double ShotAfterDelay { get; init; }
 

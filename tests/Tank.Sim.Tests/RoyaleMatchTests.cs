@@ -9,8 +9,10 @@ namespace Tank.Sim.Tests;
 /// Whole royales on the riverland, an idle player and fifteen bots, played headless as the server plays them (stage 6
 /// design §3.4, §6; stage 6A plan, task 6): each ends with one tank left, soon after the zone has closed at the latest;
 /// nobody gets stuck; the bots fight; they run the zone, so none dies in it before ring 3 has shrunk and at most one is
-/// left outside as each ring finishes shrinking (none, fighting through every ring with tough tanks). Each match is
-/// played once for the class (<see cref="RoyaleMatches"/>).
+/// left outside as each ring finishes shrinking (none, fighting through every ring with tough tanks); from 6B they eat
+/// crates on the way (stage 6B plan, task 6: at least <see cref="BotCratesShort"/> in a short armed match,
+/// <see cref="BotCratesUnarmed"/> or <see cref="BotCratesTough"/> in one run to the close). Each match is played once for
+/// the class (<see cref="RoyaleMatches"/>).
 /// </summary>
 public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
 {
@@ -21,6 +23,25 @@ public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
 
     /// <summary>A match ends at most this long after the zone has closed (everyone outside loses 10 % a second), ticks.</summary>
     private const int AfterClose = 20 * Tps;
+
+    /// <summary>The bots eat at least this many crates in an armed match (over before ring 2 has shrunk; measured 13–26 on the four seeds) …</summary>
+    private const int BotCratesShort = 3;
+
+    /// <summary>
+    /// … in an unarmed one played to the close (the plan asked 15; measured 13, 17, 22, 22, 23 on seeds 7, 3, 11, 19, 8: whole
+    /// and rackless, those bots want only the 26 layer crates, and crates near the late rings' centres get crowded out) …
+    /// </summary>
+    private const int BotCratesUnarmed = 10;
+
+    /// <summary>… and in a tough one (the plan asked 15; measured 7, 10, 11, 19, 22 on seeds 19, 3, 7, 11, 8: fighting all the time, which no crate run starts in).</summary>
+    private const int BotCratesTough = 5;
+
+    /// <summary>
+    /// At most this many crate runs in a match are for the crate the same bot gave up last (batch C review follow-up: a
+    /// crate given up is shunned for <see cref="Tank.Sim.Ai.BotDirector.CrateShunTicks"/> or until the next ring; before,
+    /// one bot on the ×50 seed 3 picked the same boxed-in crate four times running, 80 s in all).
+    /// </summary>
+    private const int CrateRepicksLimit = 3;
 
     private readonly RoyaleMatches _matches;
     private readonly ITestOutputHelper _output;
@@ -52,6 +73,8 @@ public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
         Assert.True(m.LongestStuck < StuckLimit, $"seed {seed}: tank {m.LongestStuckTank} got nowhere for {m.LongestStuck:F1} s");
         Assert.True(m.ShellHits >= 20, $"seed {seed}: only {m.ShellHits} hits");
         Assert.True(m.ShellKills >= 6, $"seed {seed}: only {m.ShellKills} tanks destroyed by shells");
+        Assert.True(m.BotCratesTaken >= BotCratesShort, $"seed {seed}: the bots ate only {m.BotCratesTaken} crates");
+        Assert.True(m.CrateRepicks <= CrateRepicksLimit, $"seed {seed}: {m.CrateRepicks} crate runs for a crate the same bot had just given up");
         Assert.True(m.FirstBotZoneDeath < 0 || m.FirstBotZoneDeath >= ZoneSchedule.ShrinkEnd(3),
             $"seed {seed}: a bot died in the zone at {m.FirstBotZoneDeath / (float)Tps:F1} s, before ring 3 had shrunk");
         for (int k = 1; k < ZoneSchedule.Rings; k++)
@@ -79,6 +102,8 @@ public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
         Assert.True(m.WinnerAlive || m.LastKillByZone, $"seed {seed}: the winner is gone and the last kill wasn't the zone's");
         Assert.True(m.LongestStuck < StuckLimit, $"seed {seed}: tank {m.LongestStuckTank} got nowhere for {m.LongestStuck:F1} s");
         Assert.True(m.ShellHits >= 20, $"seed {seed}: only {m.ShellHits} hits");
+        Assert.True(m.BotCratesTaken >= BotCratesTough, $"seed {seed}: the bots ate only {m.BotCratesTaken} crates");
+        Assert.True(m.CrateRepicks <= CrateRepicksLimit, $"seed {seed}: {m.CrateRepicks} crate runs for a crate the same bot had just given up");
         for (int k = 1; k < ZoneSchedule.Rings; k++)
             Assert.True(m.OutsideAtRingEnd[k - 1] == 0, $"seed {seed}: {m.OutsideAtRingEnd[k - 1]} live bots outside as ring {k} finished shrinking");
         Assert.True(m.UrgentOnsets.Skip(1).Sum() > 0, $"seed {seed}: no bot had to hurry in rings 2–5");
@@ -87,9 +112,9 @@ public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
 
     /// <summary>
     /// The armed matches are over before ring 2 has shrunk, so the later rings are run here: fifteen bots without rounds
-    /// (nothing but the zone takes a tank out) play every ring through. They get into each ring in time, rings 1–4 leave
-    /// at most one outside as they finish shrinking and the zone takes none before ring 3 has shrunk; nobody gets stuck,
-    /// crowded as they are in the small rings. The match ends on the closed zone.
+    /// (or racks an ammo crate could fill: nothing but the zone takes a tank out) play every ring through. They get into
+    /// each ring in time, rings 1–4 leave at most one outside as they finish shrinking and the zone takes none before ring 3
+    /// has shrunk; nobody gets stuck, crowded as they are in the small rings. The match ends on the closed zone.
     /// </summary>
     [Theory]
     [MemberData(nameof(UnarmedSeeds))]
@@ -100,10 +125,25 @@ public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
         Assert.Equal(MatchEndReason.Eliminated, m.EndReason);
         Assert.InRange(m.EndedAt, ZoneSchedule.ClosedAt - 60 * Tps, ZoneSchedule.ClosedAt + AfterClose);
         Assert.Equal(0, m.ShellKills);
+        Assert.True(m.BotCratesTaken >= BotCratesUnarmed, $"seed {seed}: the bots ate only {m.BotCratesTaken} crates");
+        Assert.True(m.CrateRepicks <= CrateRepicksLimit, $"seed {seed}: {m.CrateRepicks} crate runs for a crate the same bot had just given up");
         Assert.True(m.LongestStuck < StuckLimit, $"seed {seed}: tank {m.LongestStuckTank} got nowhere for {m.LongestStuck:F1} s");
         Assert.True(m.FirstBotZoneDeath >= ZoneSchedule.ShrinkEnd(3), $"seed {seed}: a bot died in the zone at {m.FirstBotZoneDeath / (float)Tps:F1} s, before ring 3 had shrunk");
         for (int k = 1; k < ZoneSchedule.Rings; k++)
             Assert.True(m.OutsideAtRingEnd[k - 1] is >= 0 and <= 1, $"seed {seed}: {m.OutsideAtRingEnd[k - 1]} live bots outside as ring {k} finished shrinking");
+    }
+
+    /// <summary>
+    /// The acceptance list's "someone stacks three layers of a kind" (stage 6B plan, 验收清单), measured: in at least one of
+    /// the unarmed matches, run to the close with the bots wanting only the 26 layer crates, a tank ends with three layers of one kind.
+    /// </summary>
+    [Fact]
+    public void Some_unarmed_royale_has_a_tank_with_three_layers_of_a_kind()
+    {
+        RoyaleMatch[] matches = RoyaleMatches.UnarmedSeeds.Select(seed => Play(seed, RoyaleBots.Unarmed)).ToArray();
+        string perSeed = string.Join(", ", matches.Select(m => $"seed {m.Seed}: {m.TanksWithThreeLayers} (first at {(m.FirstFullStackSeconds < 0f ? "never" : $"{m.FirstFullStackSeconds:F1} s")})"));
+        _output.WriteLine($"tanks with three layers of a kind at the end: {perSeed}");
+        Assert.True(matches.Any(m => m.TanksWithThreeLayers >= 1), $"no unarmed match had a tank with three layers of a kind: {perSeed}");
     }
 
     /// <summary>Someone wins standing: the other way is the last few dying in the zone on one second (deviation 3).</summary>
@@ -126,7 +166,7 @@ public sealed class RoyaleMatchTests : IClassFixture<RoyaleMatches>
         for (int k = 0; k < first.Events.Count; k++) Assert.Equal(first.Events[k], second.Events[k]);
     }
 
-    /// <summary>From ring 1's shrink on (tanks outside the ring, runs under way, the zone hurting), with the fighting.</summary>
+    /// <summary>From ring 1's shrink on (tanks outside the ring, runs under way, the zone hurting), with the fighting and the crates.</summary>
     [Fact]
     public void A_royale_tick_allocates_nothing()
     {

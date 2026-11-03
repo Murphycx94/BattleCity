@@ -243,6 +243,7 @@ public sealed class BaseCaptureTests
             {
                 GameEventType.ShellFired, GameEventType.ShellExploded, GameEventType.TankHit, GameEventType.SplashDamage,
                 GameEventType.TankDestroyed, GameEventType.TankRevived, GameEventType.PropDamaged, GameEventType.PropDestroyed,
+                GameEventType.CratePicked,
             },
             Enum.GetValues<GameEventType>());
         var resetting = new[] { GameEventType.TankHit, GameEventType.SplashDamage, GameEventType.TankDestroyed };

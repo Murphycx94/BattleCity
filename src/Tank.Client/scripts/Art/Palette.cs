@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using Tank.Sim.Modes;
 
 namespace Tank.Client.Art;
 
@@ -77,6 +78,14 @@ public static class Palette
     // The royale's zone (stage 6 design §3.3): a light blue apart from the sky, the water and both sides' tanks.
     public static readonly Vector3 ZoneWall = Hex("7CCBFF");     // the wall, the safe circle on the map, the outside tint
 
+    // The supply crates (stage 6 design §4): the sign of each kind, its minimap dot and its pickup flash. Five hues apart
+    // from each other, from the zone wall, from both sides' tanks and from the grass.
+    public static readonly Vector3 CrateRepair = Hex("4CCB5A");  // a green
+    public static readonly Vector3 CrateAmmo = Hex("F0B429");    // an amber
+    public static readonly Vector3 CrateArmor = Hex("9A8FD0");   // a lilac
+    public static readonly Vector3 CrateReload = Hex("C65BD1");  // a magenta
+    public static readonly Vector3 CrateOptics = Hex("2EC4B6");  // a teal
+
     // Team colours in a match, seen from the player's seat (the player's own tank is TankBody). Declared after the
     // entries they alias: static initialisers run in textual order.
     public static readonly Vector3 AllyBody = TargetBody;        // a teammate: the same blue-grey as the practice targets
@@ -87,6 +96,17 @@ public static class Palette
     public static readonly Vector3 UiDim = Hex("8C94A3");        // secondary text, disabled controls
     public static readonly Vector3 UiGood = Hex("73E68C");       // ready, joinable, a win
     public static readonly Vector3 UiDanger = HitPierced;        // errors, a loss: the same red as damage numbers
+
+    /// <summary>The colour of a crate kind's sign (sRGB); ArgumentOutOfRangeException for a kind the set doesn't have.</summary>
+    public static Vector3 Crate(CrateKind kind) => kind switch
+    {
+        CrateKind.Repair => CrateRepair,
+        CrateKind.Ammo => CrateAmmo,
+        CrateKind.Armor => CrateArmor,
+        CrateKind.Reload => CrateReload,
+        CrateKind.Optics => CrateOptics,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a crate kind."),
+    };
 
     /// <summary>"RRGGBB" (an optional leading '#') to sRGB 0–1.</summary>
     public static Vector3 Hex(string hex)

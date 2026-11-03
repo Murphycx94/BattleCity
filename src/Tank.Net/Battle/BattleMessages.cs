@@ -57,7 +57,8 @@ public readonly record struct PropState(int PropId, byte Durability);
 
 /// <summary>
 /// Everything a client needs to join a match in progress (design §5.4): the map itself, the props that aren't as new,
-/// the clock, which tank is the client's (0: none, it spectates or waits), and the teams' bases.
+/// the clock, which tank is the client's (0: none, it spectates or waits), the teams' bases, a royale's zone and the
+/// crates the seat knows.
 /// </summary>
 /// <param name="Map">
 /// The map; null when the server left it out: its answer to a <see cref="MatchStateRequest"/> from a client that already
@@ -68,8 +69,14 @@ public readonly record struct PropState(int PropId, byte Durability);
 /// for none, else one per team (<see cref="TeamBase.Check"/>). Never null once read: an empty array.
 /// </param>
 /// <param name="Zone">A royale's zone (stage 6 design §3.5): the match's start tick and the rings announced so far; null for none.</param>
+/// <param name="Crates">
+/// The crates this seat has seen and not been told are gone (stage 6 design §4.4; a row of it down, or its own pickup), ids
+/// rising: what a resync gives back, so the client draws them again — one eaten out of its sight among them, as its table
+/// had it; a fresh start passes none. Never the whole table: a client learns of a crate only by seeing
+/// it. Null or empty for none; never null once read: an empty array.
+/// </param>
 public sealed record MatchStartMessage(BattleMode Mode, int MatchNumber, int CurrentTick, int EndTick, MapData? Map, IReadOnlyList<PropState> Props, int MyTankId,
-    IReadOnlyList<TeamBase>? Bases = null, ZoneSync? Zone = null);
+    IReadOnlyList<TeamBase>? Bases = null, ZoneSync? Zone = null, IReadOnlyList<Crate>? Crates = null);
 
 /// <summary>
 /// A royale's zone in a match start (stage 6 design §3.5): the simulation tick the match started at (what
@@ -80,6 +87,14 @@ public sealed record ZoneSync(int StartTick, IReadOnlyList<ZoneRing> Rings);
 
 /// <summary>Ring <paramref name="Ring"/> (1–5) of match <paramref name="MatchNumber"/>, sent reliably when its waiting begins (stage 6 design §3.5).</summary>
 public sealed record ZoneMessage(int MatchNumber, byte Ring, ZoneRing Circle);
+
+/// <summary>
+/// To the one player who ate a crate (stage 6 design §4.4): which crate, where it stood, what it did (<see cref="CrateTake"/>'s
+/// numbers: <paramref name="Amount"/> the health or AP rounds or 1 for a layer, <paramref name="Amount2"/> the HE rounds,
+/// <paramref name="Layers"/> the tank's layers of that kind afterwards). Nobody else is told. A struct: the server makes one
+/// per pickup on its tick, so no allocation.
+/// </summary>
+public readonly record struct CrateMessage(int MatchNumber, byte CrateId, CrateKind Kind, Vector2 Position, int Amount, int Amount2, byte Layers);
 
 /// <summary>A client asks for the match state again (<see cref="BattleMessage.RequestMatchState"/>).</summary>
 /// <param name="NeedMap">
@@ -111,6 +126,9 @@ public static class BattleMessages
     /// <summary>The fewest rings a match start with a zone carries: ring 0 and ring 1, known from the start.</summary>
     public const int MinZoneRings = 2;
 
+    /// <summary>A crate in a match start: its id (a byte), its kind (3 bits, padded to the byte), x and z (floats).</summary>
+    public const int CrateBytes = 10;
+
     private const int MaxEventsPerBatch = 1024;
     private const int MaxPropsPerMessage = 4096;   // prop states in an event batch
     private const int MaxMapSamples = 1024 * 1024;
@@ -127,6 +145,8 @@ public static class BattleMessages
     private const float MaxBaseCoordinateMetres = BattleProtocol.MaxCoordinateCm * BattleProtocol.PositionUnit;   // a base or ring centre, either axis, and a ring's radius: 100 km
     private const int RingBytes = 3 * 4;          // a ring: centre x, z and radius
     private const int KillCauseBits = 2;          // KillCause: at most 3
+    private const int CrateKindBits = 3;          // CrateKind: at most 4
+    private const int LayerBits = 2;              // a buff's layers: 0–CrateRules.MaxLayers
 
     // ---- Hello / Welcome / Reject ----
 
@@ -217,15 +237,17 @@ public static class BattleMessages
     /// The type byte, the mode, the match number, the tick and the end tick; a flags byte (bit 0: the map follows; the
     /// others 0); the map (<see cref="WriteMap"/>) when there is one; the props that aren't as new; the client's tank; the
     /// number of bases (a byte, 0 or 2) and each base's team (a byte), centre x and z and radius (floats); the number of
-    /// rings (a byte: 0 for no zone, else 2–6), and with a zone its start tick and each ring's centre x and z and radius (floats).
+    /// rings (a byte: 0 for no zone, else 2–6), and with a zone its start tick and each ring's centre x and z and radius (floats);
+    /// the number of crates known (a byte, 0–<see cref="CrateRules.MaxCrates"/>) and each crate's id (a byte), kind (3 bits) and x and z (floats).
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <c>m.Bases</c> or <c>m.Zone</c> are ones the reader would refuse (<see cref="CheckedBases"/>, <see cref="CheckZone"/>).
+    /// <c>m.Bases</c>, <c>m.Zone</c> or <c>m.Crates</c> are ones the reader would refuse (<see cref="CheckedBases"/>, <see cref="CheckZone"/>, <see cref="CheckCrates"/>).
     /// </exception>
     public static void Write(BitWriter w, MatchStartMessage m)
     {
         IReadOnlyList<TeamBase> bases = CheckedBases(m);   // before a byte is written: a bad message writes nothing
         CheckZone(m);
+        CheckCrates(m);
         WriteMatchStartHeader(w, m);
         if (m.Map is not null) WriteMap(w, m.Map);
         WriteMatchStartTail(w, m, bases);
@@ -238,15 +260,16 @@ public static class BattleMessages
     /// The writer is grown once, to all the message can take, before anything is written.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <c>m.Map</c> is null (a match start without the map has nothing to copy in), or <c>m.Bases</c> or <c>m.Zone</c> are
-    /// ones the reader would refuse (<see cref="CheckedBases"/>, <see cref="CheckZone"/>).
+    /// <c>m.Map</c> is null (a match start without the map has nothing to copy in), or <c>m.Bases</c>, <c>m.Zone</c> or
+    /// <c>m.Crates</c> are ones the reader would refuse (<see cref="CheckedBases"/>, <see cref="CheckZone"/>, <see cref="CheckCrates"/>).
     /// </exception>
     public static void Write(BitWriter w, MatchStartMessage m, ReadOnlySpan<byte> encodedMap)
     {
         if (m.Map is null) throw new ArgumentException("A match start without its map takes no encoded map.", nameof(m));
         IReadOnlyList<TeamBase> bases = CheckedBases(m);   // before a byte is written: a bad message writes nothing
         CheckZone(m);
-        w.Reserve(MaxMatchStartHeaderBytes + encodedMap.Length + MaxMatchStartTailBytes(m.Props.Count, m.Zone?.Rings.Count ?? 0));
+        CheckCrates(m);
+        w.Reserve(MaxMatchStartHeaderBytes + encodedMap.Length + MaxMatchStartTailBytes(m.Props.Count, m.Zone?.Rings.Count ?? 0, m.Crates?.Count ?? 0));
         WriteMatchStartHeader(w, m);
         w.WriteAligned(encodedMap);
         WriteMatchStartTail(w, m, bases);
@@ -285,6 +308,28 @@ public static class BattleMessages
         MathF.Abs(ring.Centre.X) <= MaxBaseCoordinateMetres && MathF.Abs(ring.Centre.Y) <= MaxBaseCoordinateMetres
         && ring.Radius >= 0f && ring.Radius <= MaxBaseCoordinateMetres;   // NaN fails every comparison
 
+    /// <summary>A crate's spot as the wire carries it: finite, within ±100 km on either axis.</summary>
+    private static bool PositionFits(Vector2 p) => MathF.Abs(p.X) <= MaxBaseCoordinateMetres && MathF.Abs(p.Y) <= MaxBaseCoordinateMetres;   // NaN fails every comparison
+
+    /// <summary>
+    /// <c>m.Crates</c> as the reader takes them (<see cref="ReadCrates"/>): none, or at most <see cref="CrateRules.MaxCrates"/>
+    /// with ids strictly rising (below <see cref="CrateRules.MaxCrates"/>), kinds known, each within the wire's range. ArgumentException otherwise.
+    /// </summary>
+    private static void CheckCrates(MatchStartMessage m)
+    {
+        if (m.Crates is not { } crates) return;
+        if (crates.Count > CrateRules.MaxCrates) throw new ArgumentException($"A match start carries at most {CrateRules.MaxCrates} crates, not {crates.Count}.", nameof(m));
+        int prevId = -1;
+        for (int i = 0; i < crates.Count; i++)
+        {
+            Crate c = crates[i];
+            if (c.Id <= prevId || c.Id >= CrateRules.MaxCrates) throw new ArgumentException($"Crate ids rise below {CrateRules.MaxCrates}: crate {i} is {c.Id} after {prevId}.", nameof(m));
+            if ((byte)c.Kind >= CrateRules.Kinds) throw new ArgumentException($"Crate {c.Id} has an unknown kind {(byte)c.Kind}.", nameof(m));
+            if (!PositionFits(c.Position)) throw new ArgumentException($"Crate {c.Id} at {c.Position} is beyond the wire's ±{MaxBaseCoordinateMetres} m.", nameof(m));
+            prevId = c.Id;
+        }
+    }
+
     private static void WriteMatchStartHeader(BitWriter w, MatchStartMessage m)
     {
         w.WriteByte((byte)BattleMessage.MatchStart);
@@ -309,22 +354,39 @@ public static class BattleMessages
             WriteFloat(w, b.Centre.Y);
             WriteFloat(w, b.Radius);
         }
-        if (m.Zone is not { } zone)
+        if (m.Zone is { } zone)
         {
-            w.WriteByte(0);
-            return;
+            w.WriteByte((byte)zone.Rings.Count);
+            w.WriteVarUInt((uint)zone.StartTick);
+            for (int k = 0; k < zone.Rings.Count; k++) WriteRing(w, zone.Rings[k]);
         }
-        w.WriteByte((byte)zone.Rings.Count);
-        w.WriteVarUInt((uint)zone.StartTick);
-        for (int k = 0; k < zone.Rings.Count; k++) WriteRing(w, zone.Rings[k]);
+        else w.WriteByte(0);
+        WriteCrates(w, m.Crates);
+    }
+
+    /// <summary>The crates a seat knows (<see cref="CheckCrates"/> passed them): the count, then each one's id, kind and x and z.</summary>
+    private static void WriteCrates(BitWriter w, IReadOnlyList<Crate>? crates)
+    {
+        w.WriteByte((byte)(crates?.Count ?? 0));
+        if (crates is null) return;
+        for (int i = 0; i < crates.Count; i++)
+        {
+            Crate c = crates[i];
+            w.WriteByte(c.Id);
+            w.WriteBits((uint)c.Kind, CrateKindBits);
+            WriteFloat(w, c.Position.X);
+            WriteFloat(w, c.Position.Y);
+        }
     }
 
     /// <summary>
     /// The most bytes the tail can take: the prop count, each prop's id and hit points, the tank id, the bases, the ring
-    /// count, and with <paramref name="rings"/> rings (at most <see cref="MaxZoneRings"/>) the start tick and the rings.
+    /// count, with <paramref name="rings"/> rings (at most <see cref="MaxZoneRings"/>) the start tick and the rings, the
+    /// crate count and <paramref name="crates"/> crates (at most <see cref="CrateRules.MaxCrates"/>).
     /// </summary>
-    private static int MaxMatchStartTailBytes(int props, int rings) =>
-        MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes + 1 + MaxBases * BaseBytes + 1 + (rings > 0 ? MaxVarUIntBytes + rings * RingBytes : 0);
+    private static int MaxMatchStartTailBytes(int props, int rings, int crates) =>
+        MaxVarUIntBytes + props * (MaxVarUIntBytes + 1) + MaxVarUIntBytes + 1 + MaxBases * BaseBytes + 1 + (rings > 0 ? MaxVarUIntBytes + rings * RingBytes : 0)
+        + 1 + crates * CrateBytes;
 
     public static MatchStartMessage ReadMatchStart(ref BitReader r)
     {
@@ -336,7 +398,30 @@ public static class BattleMessages
         PropState[] props = ReadProps(ref r, map?.Props.Length ?? MaxMapProps);   // a prop that isn't on the map has no state (the client checks a map it keeps)
         int mine = ReadNonNegative(ref r);
         TeamBase[] bases = ReadBases(ref r);
-        return new MatchStartMessage(mode, number, tick, end, map, props, mine, bases, ReadZoneSync(ref r));
+        ZoneSync? zone = ReadZoneSync(ref r);
+        return new MatchStartMessage(mode, number, tick, end, map, props, mine, bases, zone, ReadCrates(ref r));
+    }
+
+    /// <summary>The crates of a match start: at most <see cref="CrateRules.MaxCrates"/>, ids strictly rising, kinds known, each within the wire's range.</summary>
+    private static Crate[] ReadCrates(ref BitReader r)
+    {
+        byte count = r.ReadByte();
+        if (count == 0) return Array.Empty<Crate>();
+        if (count > CrateRules.MaxCrates) throw new ProtocolException("Too many crates.");
+        var crates = new Crate[count];
+        int prevId = -1;
+        for (int i = 0; i < count; i++)
+        {
+            byte id = r.ReadByte();
+            if (id <= prevId || id >= CrateRules.MaxCrates) throw new ProtocolException("Invalid crate id sequence.");
+            prevId = id;
+            uint kind = r.ReadBits(CrateKindBits);
+            if (kind >= CrateRules.Kinds) throw new ProtocolException("Unknown crate kind.");
+            var position = new Vector2(ReadFloat(ref r), ReadFloat(ref r));
+            if (!PositionFits(position)) throw new ProtocolException("Crate out of range.");
+            crates[i] = new Crate(id, position, (CrateKind)kind);
+        }
+        return crates;
     }
 
     /// <summary>The zone of a match start: a ring count (0: none), then the start tick and 2–6 rings, each by <see cref="ReadRing"/>.</summary>
@@ -412,6 +497,51 @@ public static class BattleMessages
     {
         var ring = new ZoneRing(new Vector2(ReadFloat(ref r), ReadFloat(ref r)), ReadFloat(ref r));
         return RingFits(ring) ? ring : throw new ProtocolException("Zone ring out of range.");
+    }
+
+    // ---- Crate ----
+
+    /// <summary>
+    /// The type byte, the match number, the crate's id (a byte), its kind (3 bits), where it stood (x and z, floats), the
+    /// amounts (VarUInt each) and the layers (2 bits). Allocation-free.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// A pickup the reader would refuse: a crate id past <see cref="CrateRules.MaxCrates"/>, an unknown kind, more than
+    /// <see cref="CrateRules.MaxLayers"/> layers, a negative amount, a position beyond the wire's range.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">A negative match number (the reader takes none).</exception>
+    public static void Write(BitWriter w, in CrateMessage m)
+    {
+        if (m.MatchNumber < 0) throw new ArgumentOutOfRangeException(nameof(m), m.MatchNumber, "A match number is never negative.");
+        if (m.CrateId >= CrateRules.MaxCrates) throw new ArgumentException($"Crate ids run below {CrateRules.MaxCrates}, not {m.CrateId}.", nameof(m));
+        if ((byte)m.Kind >= CrateRules.Kinds) throw new ArgumentException($"Unknown crate kind {(byte)m.Kind}.", nameof(m));
+        if (m.Layers > CrateRules.MaxLayers) throw new ArgumentException($"A tank has at most {CrateRules.MaxLayers} layers, not {m.Layers}.", nameof(m));
+        if (m.Amount < 0 || m.Amount2 < 0) throw new ArgumentException($"A pickup's amounts are never negative: {m.Amount}, {m.Amount2}.", nameof(m));
+        if (!PositionFits(m.Position)) throw new ArgumentException($"Crate {m.CrateId} at {m.Position} is beyond the wire's ±{MaxBaseCoordinateMetres} m.", nameof(m));
+        w.WriteByte((byte)BattleMessage.Crate);
+        w.WriteVarUInt((uint)m.MatchNumber);
+        w.WriteByte(m.CrateId);
+        w.WriteBits((uint)m.Kind, CrateKindBits);
+        WriteFloat(w, m.Position.X);
+        WriteFloat(w, m.Position.Y);
+        w.WriteVarUInt((uint)m.Amount);
+        w.WriteVarUInt((uint)m.Amount2);
+        w.WriteBits(m.Layers, LayerBits);
+    }
+
+    /// <summary>Allocation-free. ProtocolException on a crate id past <see cref="CrateRules.MaxCrates"/>, an unknown kind, a position off the wire's range.</summary>
+    public static CrateMessage ReadCrate(ref BitReader r)
+    {
+        int number = ReadNonNegative(ref r);
+        byte id = r.ReadByte();
+        if (id >= CrateRules.MaxCrates) throw new ProtocolException("Crate id out of range.");
+        uint kind = r.ReadBits(CrateKindBits);
+        if (kind >= CrateRules.Kinds) throw new ProtocolException("Unknown crate kind.");
+        var position = new Vector2(ReadFloat(ref r), ReadFloat(ref r));
+        if (!PositionFits(position)) throw new ProtocolException("Crate out of range.");
+        int amount = ReadNonNegative(ref r), amount2 = ReadNonNegative(ref r);
+        var layers = (byte)r.ReadBits(LayerBits);   // every 2-bit value is a layer count
+        return new CrateMessage(number, id, (CrateKind)kind, position, amount, amount2, layers);
     }
 
     // ---- Match state request ----
@@ -580,7 +710,7 @@ public static class BattleMessages
         for (int i = 0; i < count; i++)
         {
             byte type = r.ReadByte();
-            if (type > (byte)GameEventType.PropDestroyed) throw new ProtocolException("Unknown event type.");
+            if (type > (byte)GameEventType.CratePicked) throw new ProtocolException("Unknown event type.");   // never sent (Viewer.Wants), but a type all the same
             int tank = ReadNonNegative(ref r), shell = ReadNonNegative(ref r);
             Vector3 position = ReadVector(ref r), velocity = ReadVector(ref r);
             int target = ReadNonNegative(ref r);

@@ -10,7 +10,7 @@ namespace Tank.Client.Minimap;
 /// One map on the screen (stage 5 design §5): the corner map or the full-screen one, filling its own rectangle. Draws, in
 /// this order, a rounded dark box, the map's picture inset in it (nothing more until the ground is baked), a royale's
 /// zone (the ground outside the safe circle darkened, the circle in the wall's blue, the next ring in white: stage 6
-/// design §3.3), the bases'
+/// design §3.3), the crates the player knows of as squares in their kinds' colours (under everything else: §4.3), the bases'
 /// tinted discs, rings and progress arcs (outside the ring), the view fan, the wrecks' crosses, the teammates, the enemies, the own wreck and the eye
 /// (an arrow, or a ring). A point on the ground (x, z) is at <c>inner.Position + area.ToUnit(ground) · inner.Size</c>;
 /// icons beyond the box are cut at its edge (<see cref="Control.ClipContents"/>). Click-through. Redraws every frame it
@@ -81,6 +81,7 @@ public partial class MinimapView : Control
         if (_frame is null || _area.Size <= 0) return;
 
         if (_frame.Zone is { } zone) DrawZone(zone, rect);
+        foreach (MinimapCrate c in _frame.Crates) DrawCrate(c);
         foreach (MinimapBase b in _frame.Bases) DrawBase(b);
         DrawFan(_frame.Eye);
         foreach (MinimapTank t in _frame.Tanks)
@@ -144,6 +145,13 @@ public partial class MinimapView : Control
         DrawArc(at, radius, 0, Mathf.Tau, BaseRingSegments, ring.ToColor(), _sizes.RingWidth, true);
         int n = MinimapGlyphs.Arc(centre, _sizes.ArcRadius(radius), b.Points, _glyph);
         if (n >= 2) DrawPolyline(Copy(n), MinimapStyle.BaseArc(b.Own).ToColor(), _sizes.ArcWidth, true);
+    }
+
+    /// <summary>A crate: a square <see cref="MinimapIconSizes.Crate"/> on a side in its kind's colour, rimmed as every icon is.</summary>
+    private void DrawCrate(in MinimapCrate c)
+    {
+        int n = MinimapGlyphs.Square(ToScreen(c.Position), _sizes.Crate, _glyph);
+        DrawFilled(n, MinimapStyle.CrateFill(c.Kind).ToColor());
     }
 
     private void DrawFan(in MinimapEye eye)

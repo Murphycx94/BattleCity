@@ -41,6 +41,21 @@ public class MinimapGlyphsTests
     }
 
     [Fact]
+    public void A_crate_s_square_is_upright_and_its_size_on_a_side()
+    {
+        Span<SN.Vector2> points = stackalloc SN.Vector2[MinimapGlyphs.SquarePoints];
+        const float size = 6;
+
+        int n = MinimapGlyphs.Square(Centre, size, points);
+
+        Assert.Equal(MinimapGlyphs.SquarePoints, n);
+        AssertNear(Centre + new SN.Vector2(-3, -3), points[0]);
+        AssertNear(Centre + new SN.Vector2(3, -3), points[1]);
+        AssertNear(Centre + new SN.Vector2(3, 3), points[2]);
+        AssertNear(Centre + new SN.Vector2(-3, 3), points[3]);
+    }
+
+    [Fact]
     public void A_quarter_turn_points_the_arrow_left()
     {
         Span<SN.Vector2> points = stackalloc SN.Vector2[MinimapGlyphs.ArrowPoints];
@@ -172,7 +187,7 @@ public class MinimapGlyphsTests
         Assert.Equal(new MinimapIconSizes(Tank: 10, Arrow: 15, Cross: 9, FanLength: 40, BaseMinRadius: 9,
             CrossWidth: 2.5f, RingWidth: 2.5f, ArcWidth: 3, OutlineWidth: 1.5f, EyeRingWidth: 2), MinimapStyle.Icons(full: false));
         Assert.Equal(new MinimapIconSizes(Tank: 15, Arrow: 22, Cross: 13, FanLength: 90, BaseMinRadius: 12,
-            CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f, ZoneWidth: 3, NextZoneWidth: 2), MinimapStyle.Icons(full: true));
+            CrossWidth: 3, RingWidth: 3, ArcWidth: 4, OutlineWidth: 2, EyeRingWidth: 2.5f, ZoneWidth: 3, NextZoneWidth: 2, Crate: 9), MinimapStyle.Icons(full: true));
         Assert.Equal((2f, 1.5f), (MinimapStyle.CornerIcons.ZoneWidth, MinimapStyle.CornerIcons.NextZoneWidth));
         Assert.Equal(Palette.ZoneWall, MinimapStyle.ZoneLine);
         Assert.Equal(Palette.UiText, MinimapStyle.NextZoneLine);

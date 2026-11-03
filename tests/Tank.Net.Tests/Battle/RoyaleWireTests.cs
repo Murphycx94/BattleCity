@@ -23,9 +23,9 @@ public sealed class RoyaleWireTests
     private static readonly ZoneRing R2 = new(new Vector2(520f, 610f), 250f);
 
     [Fact]
-    public void The_protocol_is_version_5_with_sixteen_seats_and_a_zone_message()
+    public void The_protocol_is_version_6_with_sixteen_seats_and_a_zone_message()
     {
-        Assert.Equal(5, BattleProtocol.Version);
+        Assert.Equal(6, BattleProtocol.Version);   // v6: the crates (CrateWireTests)
         Assert.Equal(26, (byte)BattleMessage.Zone);
         Assert.Equal(16, BattleProtocol.MaxPlayers);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
@@ -96,7 +96,7 @@ public sealed class RoyaleWireTests
         BattleSnapshot back = Decode(w.Data.ToArray(), tick => tick == fullA.Tick ? fullA : null);
 
         Assert.Equal(b.Players, back.Players);
-        Assert.True(w.ByteLength < 20, $"{w.ByteLength} bytes");   // the header, the match block and four bits: no scoreboard
+        Assert.True(w.ByteLength <= 20, $"{w.ByteLength} bytes");   // the header, the match block and five bits (v6: the crates' "same" bit too): no scoreboard
 
         // Damage or time lasted alone changes the line, so the scoreboard goes again.
         Assert.False(a.Players[7].Equals(a.Players[7] with { Damage = 12346 }));
@@ -173,7 +173,7 @@ public sealed class RoyaleWireTests
         new BattleSnapshotCodec().Write(w, s, null, new ClientFeedback { LastProcessedInputTick = 18003, InputSlack = -3 });
 
         Assert.True(w.ByteLength < BattleServer.MaxUnreliableBytes, $"{w.ByteLength} bytes");
-        Assert.Equal(845, w.ByteLength);   // every line's damage 3 bytes and time lasted 2: 30 bytes more than the standard worst case's 815
+        Assert.Equal(846, w.ByteLength);   // v5's 845 (every line's damage 3 bytes and time lasted 2: 30 more than the standard worst case) plus v6's 13 bits: the layers (6) and an empty crate block (7)
         BattleSnapshot back = Decode(w.Data.ToArray());
         Assert.Equal(s.Match, back.Match);
         Assert.Equal(s.Players, back.Players);
@@ -270,7 +270,7 @@ public sealed class RoyaleWireTests
         byte[] bytes = Encode(w => BattleMessages.Write(w, m));
         MatchStartMessage back = ReadMatchStart(bytes);
 
-        Assert.Equal(9 + 53053 + 7 + 1 + 1 + (1 + 1 + 3 * RingBytes), bytes.Length);   // header · map · props · tank · no bases · the zone: 53109
+        Assert.Equal(9 + 53053 + 7 + 1 + 1 + (1 + 1 + 3 * RingBytes) + 1, bytes.Length);   // header · map · props · tank · no bases · the zone · no crates: 53110
         Assert.NotNull(back.Zone);
         Assert.Equal(120, back.Zone.StartTick);
         Assert.Equal(new[] { R0, R1, R2 }, back.Zone.Rings);
@@ -288,7 +288,7 @@ public sealed class RoyaleWireTests
         // Without the zone: one byte, read as null.
         byte[] none = Encode(w => BattleMessages.Write(w, m with { Zone = null }));
         Assert.Equal(bytes.Length - 1 - 3 * RingBytes, none.Length);
-        Assert.Equal(0, none[^1]);
+        Assert.Equal(0, none[^2]);   // the ring count; the crate count (none) follows
         Assert.Null(ReadMatchStart(none).Zone);
 
         // All six rings, a late start tick.
@@ -355,7 +355,7 @@ public sealed class RoyaleWireTests
         var m = new MatchStartMessage(BattleMode.Royale, 3, 150, 18150, null, Array.Empty<PropState>(), 7, null, new ZoneSync(120, new[] { R0, R1 }));
         byte[] whole = Encode(w => BattleMessages.Write(w, m));
         ReadMatchStart(whole);
-        int countAt = whole.Length - 1 - 1 - 2 * RingBytes;
+        int countAt = whole.Length - 1 - 1 - 1 - 2 * RingBytes;   // the crate count (none) last
         Assert.Equal(2, whole[countAt]);
         for (int len = countAt; len < whole.Length; len++)
         {
@@ -462,6 +462,7 @@ public sealed class RoyaleWireTests
         w.WriteBits((uint)MatchEndReason.None, 2);
         w.WriteByte(entrants);
         w.WriteBool(false);    // no own tank
+        w.WriteBits(0, 7);     // no crates in sight (no baseline: no "same" bit)
         w.WriteBool(false);    // the scoreboard, in full
         w.WriteBool(true);     // slot 0
         w.WriteBits(0, 4);
@@ -522,6 +523,7 @@ public sealed class RoyaleWireTests
         w.WriteVarUInt(2);     // the client's tank
         w.WriteByte(0);        // no bases
         zone(w);
+        w.WriteByte(0);        // no crates
     });
 
     /// <summary>The zone part of a match start: the ring count, the start tick, each ring's x, z and radius.</summary>

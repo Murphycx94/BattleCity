@@ -273,7 +273,8 @@ public sealed class BattleClientRobustnessTests
         return w.Data.ToArray();
     }
 
-    private static byte[] SnapshotAgainstAMissingBaseline(BattleClient a)
+    /// <summary>A snapshot of the next tick against a baseline the client never had: the codec refuses it, and the client asks for the match state (its one way to a resync short of reconnecting).</summary>
+    internal static byte[] SnapshotAgainstAMissingBaseline(BattleClient a)
     {
         var other = new BattleSnapshot();
         other.CopyFrom(a.Latest!);

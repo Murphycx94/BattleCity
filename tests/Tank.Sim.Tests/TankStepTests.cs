@@ -211,4 +211,20 @@ public sealed class TankStepTests
         Assert.Throws<ArgumentException>(() => new MapData(65536, 65536, 2f, Array.Empty<int>(), Array.Empty<Prop>(), 4f));   // the product overflows to 0
         Assert.Throws<ArgumentException>(() => new MapData(3, 3, 0f, new int[9], Array.Empty<Prop>(), 4f));
     }
+
+    [Fact]
+    public void Without_reload_layers_the_reload_time_is_the_specs_after_a_shot_and_after_a_change_of_ammunition()
+    {
+        var sim = new Simulation(TestWorld.FlatField());
+        foreach (TankSpec spec in TankCatalog.All)
+        {
+            sim.AddTank(spec, new Vector2(100, 100), 0f);
+            TankState tank = sim.Tanks[^1];
+            Assert.Equal(0, tank.ReloadLayers);
+            Assert.True(TankStep.Advance(ref tank, TestWorld.Cmd(fire: true), 1, sim.Field, ReadOnlySpan<Obb2>.Empty, true, null, true, out _));
+            Assert.Equal(spec.ReloadTime, tank.Reload);
+            TankStep.Advance(ref tank, TestWorld.Cmd(ammo: AmmoType.HE), 2, sim.Field, ReadOnlySpan<Obb2>.Empty, true, null, true, out _);
+            Assert.Equal(spec.ReloadTime, tank.Reload);
+        }
+    }
 }

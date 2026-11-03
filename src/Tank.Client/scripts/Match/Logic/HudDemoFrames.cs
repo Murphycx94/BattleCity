@@ -10,9 +10,11 @@ namespace Tank.Client.Match;
 
 /// <summary>
 /// One screen of the HUD gallery: the frame, the kills already on the feed, whether the F3 panel is open, whether Tab is
-/// "held", and the map's icons over a map from the catalog (null: no map on the screen).
+/// "held", the map's icons over a map from the catalog (null: no map on the screen), and the pickup toasts already up
+/// (null: none; each line's <c>ExpiresAt</c> on the gallery's clock, which starts at 0).
 /// </summary>
-public sealed record HudDemo(string Name, MatchHudFrame Frame, FeedLine[] Kills, bool NetPanelOpen, bool ScoreboardOpen = false, MinimapDemo? Minimap = null);
+public sealed record HudDemo(string Name, MatchHudFrame Frame, FeedLine[] Kills, bool NetPanelOpen, bool ScoreboardOpen = false, MinimapDemo? Minimap = null,
+    PickupLine[]? Pickups = null);
 
 /// <summary>The gallery's map: the catalog map <paramref name="MapId"/>'s ground under <paramref name="Frame"/>'s icons, the corner map or the full one.</summary>
 public sealed record MinimapDemo(string MapId, MinimapFrame Frame, bool FullOpen);
@@ -36,6 +38,7 @@ public static class HudDemoFrames
     {
         "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture", "minimap", "map-full",
         "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale",
+        "royale-crates",
     };
 
     /// <summary>The gallery's screen names, in a fixed order.</summary>
@@ -68,6 +71,7 @@ public static class HudDemoFrames
             "royale-map" => Royale("royale-map", fullOpen: true),
             "results-royale-win" => ResultsRoyale("results-royale-win", RoyaleWinRanks, winnerSlot: 0, isHost: true),
             "results-royale" => ResultsRoyale("results-royale", RoyaleSeventhRanks, winnerSlot: 4, isHost: false),
+            "royale-crates" => RoyaleCrates(),
             _ => null!,
         };
         return demo is not null;
@@ -283,6 +287,39 @@ public static class HudDemoFrames
         MinimapFrame map = RoyaleMap(zone, eye: new Vector2(760, 640), new Vector2(560, 560), new Vector2(470, 650), new Vector2(600, 700));
         return new HudDemo("royale-outside", frame, new[] { ZoneLine("机器人 9") }, NetPanelOpen: false, Minimap: new MinimapDemo(RiverlandMap.Id, map, FullOpen: false));
     }
+
+    /// <summary>The gallery's toasts stay up this long (s on its clock): past any screenshot's moment.</summary>
+    private const double ToastsUntil = 10;
+
+    /// <summary>
+    /// The royale screen with the crates' HUD (stage 6 design §4.3): the buff row with armour ×1 and reload ×2, three pickup
+    /// toasts ("+ 快速装填 2/3", "+ 维修 270" for a heavy's 900, the optics crate that came too late), and six crates the
+    /// player knows of on the corner map — one of each kind and a second repair — on dry ground about the arrow, the
+    /// placer's 25 m apart.
+    /// </summary>
+    private static HudDemo RoyaleCrates()
+    {
+        HudDemo royale = Royale("royale-crates", fullOpen: false);
+        MinimapFrame map = royale.Minimap!.Frame;
+        foreach (MinimapCrate crate in GalleryCrates) map.AddCrate(crate);
+        PickupLine[] toasts =
+        {
+            new(CrateKind.Reload, 1, 0, 2, ToastsUntil),
+            new(CrateKind.Repair, 270, 0, 0, ToastsUntil),
+            new(CrateKind.Optics, 0, 0, CrateRules.MaxLayers, ToastsUntil),
+        };
+        return royale with { Frame = royale.Frame with { Buffs = new BuffHud(Armor: 1, Reload: 2, Optics: 0) }, Pickups = toasts };
+    }
+
+    private static readonly MinimapCrate[] GalleryCrates =
+    {
+        new(new Vector2(800, 660), CrateKind.Repair),
+        new(new Vector2(900, 620), CrateKind.Ammo),
+        new(new Vector2(760, 560), CrateKind.Armor),
+        new(new Vector2(610, 640), CrateKind.Reload),
+        new(new Vector2(560, 780), CrateKind.Optics),
+        new(new Vector2(930, 760), CrateKind.Repair),
+    };
 
     private static MatchHudFrame RoyaleFrame(int ticksLeft)
     {

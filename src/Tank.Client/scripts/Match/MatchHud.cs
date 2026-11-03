@@ -1,4 +1,5 @@
 using Godot;
+using Tank.Net.Battle;
 using Tank.Sim.Modes;
 
 namespace Tank.Client.Match;
@@ -10,14 +11,19 @@ namespace Tank.Client.Match;
 /// data. While the scoreboard is up (Tab held, <see cref="SetScoreboardOpen"/>, or the results screen once the match has
 /// ended) the kill feed and the F3 panel step aside: the scoreboard is wider than the room between them; so do the capture
 /// bars and the zone line, which sit where the board's top does, and the warning's words, whose box lies in the board's
-/// rows; the warning's tint stays under the board and goes only with the results.
+/// rows; the warning's tint stays under the board and goes only with the results. A royale adds the crates' two blocks
+/// (stage 6 design §4.3): the pickup toasts under the banner (<see cref="OnPickup"/>) and the buff row over the status
+/// panel (<see cref="MatchHudFrame.Buffs"/>); both step aside under the board too, and draw nothing while empty.
 /// </summary>
 public partial class MatchHud : CanvasLayer
 {
     private const int HudLayer = 2;
 
     private readonly KillFeed _feed = new();
+    private readonly PickupFeed _pickups = new();
     private ZoneWarningView _warning = null!;
+    private PickupToastView _toasts = null!;
+    private BuffRowView _buffs = null!;
     private ScorePlate _plate = null!;
     private CaptureBarsView _capture = null!;
     private ZoneLineView _zoneLine = null!;
@@ -35,6 +41,8 @@ public partial class MatchHud : CanvasLayer
     public override void _Ready()
     {
         _warning = Add(new ZoneWarningView());   // first: its tint lies under the plate and the feed
+        _toasts = Add(new PickupToastView(_pickups));
+        _buffs = Add(new BuffRowView());
         _plate = Add(new ScorePlate());
         _capture = Add(new CaptureBarsView());
         _zoneLine = Add(new ZoneLineView());
@@ -54,10 +62,18 @@ public partial class MatchHud : CanvasLayer
     /// <summary>A tank the zone finished, for the feed: "victim 死于毒圈".</summary>
     public void OnZoneKill(string victim, Side victimSide, double now) => _feed.AddZone(victim, victimSide, now);
 
+    /// <summary>The player's own pickup (the server's <see cref="CrateMessage"/>), for a toast from <paramref name="now"/> on.</summary>
+    public void OnPickup(in CrateMessage m, double now) => _pickups.Add(m.Kind, m.Amount, m.Amount2, m.Layers, now);
+
+    /// <summary>A canned toast (the gallery): <paramref name="line"/>'s words, to go at its <see cref="PickupLine.ExpiresAt"/>.</summary>
+    public void AddPickup(in PickupLine line) => _pickups.Add(line.Kind, line.Amount, line.Amount2, line.Layers, line.ExpiresAt - PickupFeed.Lifetime);
+
     /// <summary>One frame: <paramref name="now"/> is the scene's clock in seconds (the feed's lines expire by it).</summary>
     public void Refresh(in MatchHudFrame frame, bool netPanelOpen, double now)
     {
         _warning.Update(frame);
+        _toasts.Update(now);
+        _buffs.Update(frame.Buffs);
         _plate.Update(frame);
         _capture.Update(frame, now);
         _zoneLine.Update(frame);
@@ -88,6 +104,8 @@ public partial class MatchHud : CanvasLayer
         _capture.Visible = !_boardShown;   // the board (Tab, or the results) covers the bars' place
         _zoneLine.Visible = !_boardShown;   // and the zone line's
         _feedView.Visible = !_boardShown;
+        _toasts.Visible = !_boardShown;   // the toasts' box lies in the board's rows
+        _buffs.Visible = !_boardShown;    // and the buff row goes with the status panel's play HUD
         _net.Visible = _netOpen && !_boardShown;
     }
 

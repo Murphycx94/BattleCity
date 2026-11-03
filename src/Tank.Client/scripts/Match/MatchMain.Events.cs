@@ -117,6 +117,20 @@ public partial class MatchMain
         _hud.OnKill(killer, killerSide, victim, victimSide, killer is not null && KillFeed.IsFriendly(killerSide, victimSide), _time);
     }
 
+    /// <summary>
+    /// The player ate a crate (the server's word, to the eater alone): a toast, the crate's flash (this frame's
+    /// <see cref="CrateViews.Sync"/> sees it gone and, told it was the player's own, flashes it even unseen), the
+    /// <c>pickup</c> moment for the automation, and one log line (acceptance reads it; only on a pickup, so the string
+    /// costs nothing per frame).
+    /// </summary>
+    private void OnPickup(in CrateMessage m)
+    {
+        _hud.OnPickup(m, _time);
+        _crates?.NoteOwnPickup(m.CrateId);
+        _automation.NotifyPickup(_time);
+        GD.Print($"[match] picked up {CrateRules.Id(m.Kind)} {m.Amount}/{m.Amount2} layers {m.Layers}");
+    }
+
     private (string Name, Side Side) Describe(PlayerStats[] players, int tankId, byte ownTeam)
     {
         int slot = MatchHudFrame.SlotOf(players, tankId);

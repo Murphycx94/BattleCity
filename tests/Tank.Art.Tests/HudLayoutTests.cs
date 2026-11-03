@@ -29,6 +29,8 @@ public class HudLayoutTests
         yield return ("full map", b.FullMap);
         yield return ("zone line", b.ZoneLine);
         yield return ("zone warning", b.ZoneWarning);
+        yield return ("pickup toasts", b.Pickup);
+        yield return ("buff row", b.Buffs);
     }
 
     [Theory]
@@ -299,6 +301,81 @@ public class HudLayoutTests
             ("score plate", b.ScorePlate), ("mode label", b.ModeLabel), ("zone line", b.ZoneLine), ("kill feed", b.KillFeed), ("banner", b.Banner),
         };
         foreach ((string name, HudRect rect) in others) Assert.False(b.ZoneWarning.Intersects(rect), $"the zone warning {b.ZoneWarning} overlaps the {name} {rect} at {w}x{h}");
+    }
+
+    [Fact]
+    public void The_pickup_toasts_and_the_buff_row_sit_where_the_plan_puts_them_at_the_base_size()
+    {
+        HudBoxes b = HudLayout.For(new Vector2(1600, 900));
+        Assert.Equal(500, b.Pickup.X);
+        Assert.Equal(480, b.Pickup.Y);
+        Assert.Equal(600, b.Pickup.Width);
+        Assert.Equal(44 + 2 * 0.8f * 44, b.Pickup.Height, precision: 3);   // three rows: the newest 44 high, two older ones 0.8 × 44 above it
+        Assert.Equal(594.4f, b.Pickup.Bottom, precision: 3);
+        Assert.Equal(new HudRect(24, 596, 360, 32), b.Buffs);
+    }
+
+    /// <summary>Both lists' sizes, once each.</summary>
+    public static TheoryData<float, float> AllScreens => new()
+    {
+        { 1600, 900 },
+        { 1600, 1200 },
+        { 2100, 900 },
+        { 2560, 900 },
+    };
+
+    [Theory]
+    [MemberData(nameof(AllScreens))]
+    public void Every_pickup_row_the_feed_can_hold_lies_inside_the_pickup_box(float w, float h)
+    {
+        HudBoxes b = HudLayout.For(new Vector2(w, h));
+        Assert.Equal(b.Pickup.Bottom, b.PickupRow(0).Bottom, precision: 3);                       // the newest at the bottom
+        Assert.Equal(b.Pickup.Y, b.PickupRow(PickupFeed.Capacity - 1).Y, precision: 3);          // the oldest the feed keeps at the top
+        for (int i = 0; i < PickupFeed.Capacity; i++)
+        {
+            HudRect row = b.PickupRow(i);
+            Assert.Equal(HudLayout.PickupHeight, row.Height);
+            Assert.Equal(b.Pickup.X, row.X);
+            Assert.Equal(b.Pickup.Width, row.Width);
+            Assert.True(row.Y >= b.Pickup.Y - 1e-3f && row.Bottom <= b.Pickup.Bottom + 1e-3f, $"pickup row {i} {row} sticks out of the box {b.Pickup} at {w}x{h}");
+            Assert.False(row.Intersects(b.Banner), $"pickup row {i} {row} overlaps the banner {b.Banner} at {w}x{h}");
+            if (i > 0) Assert.Equal(HudLayout.PickupRowShare * HudLayout.PickupHeight, b.PickupRow(i - 1).Y - row.Y, precision: 3);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimapScreens))]
+    public void The_pickup_toasts_hang_centred_under_the_banner_clear_of_it_and_the_zone_warning(float w, float h)
+    {
+        var screen = new Vector2(w, h);
+        HudBoxes b = HudLayout.For(screen);
+        Assert.True(b.Pickup.FitsIn(screen));
+        Assert.Equal(w / 2, b.Pickup.CenterX, precision: 3);
+        Assert.Equal(b.Banner.Bottom + HudLayout.PickupGap, b.Pickup.Y, precision: 3);
+        (string Name, HudRect Rect)[] others =
+        {
+            ("banner", b.Banner), ("zone warning", b.ZoneWarning), ("zone line", b.ZoneLine), ("status panel", b.StatusPanel), ("minimap", b.Minimap),
+            ("spectate bar", b.SpectateBar), ("kill feed", b.KillFeed),
+        };
+        foreach ((string name, HudRect rect) in others) Assert.False(b.Pickup.Intersects(rect), $"the pickup toasts {b.Pickup} overlap the {name} {rect} at {w}x{h}");
+    }
+
+    [Theory]
+    [MemberData(nameof(MinimapScreens))]
+    public void The_buff_row_sits_over_the_status_panel_and_its_name_as_wide_as_the_panel(float w, float h)
+    {
+        var screen = new Vector2(w, h);
+        HudBoxes b = HudLayout.For(screen);
+        Assert.True(b.Buffs.FitsIn(screen));
+        Assert.Equal(b.StatusPanel.X, b.Buffs.X);
+        Assert.Equal(b.StatusPanel.Width, b.Buffs.Width);
+        Assert.Equal(HudLayout.BuffsHeight, b.Buffs.Height);
+        Assert.True(b.Buffs.Bottom <= b.StatusPanel.Y - HudLayout.BuffsGap, "the buff row leaves the ground hint over the vehicle's name room");
+        (string Name, HudRect Rect)[] others =
+        {
+            ("status panel", b.StatusPanel), ("minimap", b.Minimap), ("spectate bar", b.SpectateBar), ("banner", b.Banner), ("pickup toasts", b.Pickup),
+        };
+        foreach ((string name, HudRect rect) in others) Assert.False(b.Buffs.Intersects(rect), $"the buff row {b.Buffs} overlaps the {name} {rect} at {w}x{h}");
     }
 
     private static void AssertNoOverlaps((string Name, HudRect Rect)[] blocks)

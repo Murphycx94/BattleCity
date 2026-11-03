@@ -70,7 +70,9 @@ public enum BotActivity : byte
 /// over.</para>
 /// <para>In a royale (stage 6 design §3.4) every bot wanders, inside the zone's ring, and runs into the ring when out of
 /// it, dropping the fight only when time is short (Bot.Zone.cs); everyone being an enemy there, it keeps off every tank,
-/// makes room when holding, and handles getting stuck in its own ways (Bot.Crowd.cs).</para>
+/// makes room when holding, and handles getting stuck in its own ways (Bot.Crowd.cs). Wandering there with nothing to
+/// fight, it fetches a useful supply crate it sees within <see cref="BotDirector.CrateRange"/> when the zone's timing
+/// allows, stopping to fight on the way (stage 6B: Bot.Crates.cs).</para>
 /// <para>Allocation-free after construction; deterministic (its own random numbers and the simulation's state).</para>
 /// </remarks>
 public sealed partial class Bot
@@ -97,6 +99,8 @@ public sealed partial class Bot
         Paused,
         /// <summary>A royale: driving to a point in the zone's ring, to stop there (a run, or a wander point inside the ring: Bot.Zone.cs).</summary>
         Zone,
+        /// <summary>A royale: driving to supply crate <see cref="_crate"/>, to stop on it (Bot.Crates.cs).</summary>
+        Crate,
     }
 
     private readonly BotDirector _director;
@@ -295,6 +299,7 @@ public sealed partial class Bot
         Picker.Clear();
         (_pathCount, _asked, _checkAt, _reverseUntil, _legStucks, _askAfter) = (0, false, -1, -1, 0, 0);
         (_backedOff, _backOffStucks) = (false, 0);
+        (_cratesShunned, _shunUntil) = (0, 0);
         if (Retreating && !FallingBack)
         {
             Retreating = false;
@@ -302,6 +307,12 @@ public sealed partial class Bot
             return;
         }
         Retreating = false;
+        if (_leg == Leg.Crate)
+        {
+            DropCrate();   // the crate may be long gone: its role again from here (a wanderer's waypoint)
+            ResumeRole(at);
+            return;
+        }
         if (_leg == Leg.Arrived) _leg = Leg.End;
         _needPath = _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
     }
@@ -340,8 +351,9 @@ public sealed partial class Bot
         TakeAnswer(paths, me, tick);
         WatchHealth(director, me, tick);
         if (_leg == Leg.Paused && tick >= _retryAt) Begin(RunningToZone ? Leg.Zone : Leg.End, Goal, keepPath: false);
-        if (director.ZoneOn) WatchZone(director, me);
+        if (director.ZoneOn) WatchZone(director, me, tick);
         CheckArrival(me, tick);
+        WatchCrates(director, me, tick);
         int target = Picker.Pick(sim, director.Vision, tick);
         HeightField terrain = sim.Field.Terrain;
         bool onTheWay = (FallingBack || Retreating || ZoneUrgent) && _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
@@ -446,7 +458,7 @@ public sealed partial class Bot
         }
         Vector2 point = _path[_pathIndex];
         bool last = _pathIndex == _pathCount - 1;
-        var (throttle, steer) = Steering.Toward(me, AroundMates(me, point, out bool yield), stopThere: last && (_leg is Leg.End or Leg.Zone) && _pathGoal == Goal);
+        var (throttle, steer) = Steering.Toward(me, AroundMates(me, point, out bool yield), stopThere: last && (_leg is Leg.End or Leg.Zone or Leg.Crate) && _pathGoal == Goal);
         if (yield) throttle = 0;
         else if (_director.ZoneOn && DropAhead(me, throttle, me.Yaw)) (throttle, steer) = (0, AwayFromDrop(me, steer));
         Activity = BotActivity.Driving;
@@ -497,6 +509,7 @@ public sealed partial class Bot
     /// <summary>
     /// Whether the leg is over: the goal (or the end of a whole path to it) is reached. A final leg that stopped at the
     /// end of its path outside the circle its point lies in (the end moved off a wreck, say) draws another point at once.
+    /// A crate run is over once the crate is gone, the tank has stopped on its spot, or its time is up (Bot.Crates.cs).
     /// </summary>
     private void CheckArrival(in TankState me, int tick)
     {
@@ -504,6 +517,9 @@ public sealed partial class Bot
         {
             case Leg.Waypoint when Reached(me, BotDirector.WaypointRadius):
                 NextWaypoint(me);
+                break;
+            case Leg.Crate when CrateRunOver(me, tick):
+                EndCrateRun(me, tick);
                 break;
             case Leg.Zone when Reached(me, BotDirector.WaypointRadius) || Steering.StoppedAt(me, Goal) ||
                                (WholePath && Steering.StoppedAt(me, _path[_pathCount - 1])):
@@ -573,7 +589,7 @@ public sealed partial class Bot
     private void Begin(Leg leg, Vector2 goal, bool keepPath)
     {
         (_leg, Goal, _legStucks, _askAfter) = (leg, goal, 0, 0);
-        _needPath = leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
+        _needPath = leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Crate;
         if (!keepPath) _pathCount = 0;
     }
 
@@ -585,8 +601,8 @@ public sealed partial class Bot
     }
 
     /// <summary>
-    /// Gives the leg up after <see cref="BotDirector.StuckRetries"/> stucks on it: the next waypoint or via point; a final
-    /// leg is never given up short of its target (see the remarks).
+    /// Gives the leg up after <see cref="BotDirector.StuckRetries"/> stucks on it: the next waypoint or via point (a crate
+    /// run over, the next waypoint); a final leg is never given up short of its target (see the remarks).
     /// </summary>
     private void GiveUpLeg(in TankState me, int tick)
     {
@@ -594,6 +610,9 @@ public sealed partial class Bot
         {
             case Leg.Waypoint:
                 NextWaypoint(me);
+                break;
+            case Leg.Crate:
+                EndCrateRun(me, tick);
                 break;
             case Leg.Via:
                 NextVia(keepPath: false);
@@ -670,7 +689,7 @@ public sealed partial class Bot
                 break;
             case PathStatus.NoPath:
                 _asked = false;
-                if (_leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone) NotFound(me, tick);
+                if (_leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Crate) NotFound(me, tick);
                 break;
         }
     }
@@ -678,8 +697,8 @@ public sealed partial class Bot
     /// <summary>
     /// A search found no path: a stuck without backing off (there is nothing to back away from), asked again after
     /// <see cref="BotDirector.ReplanTicks"/>; the third on one leg gives the leg up. In a royale a point in the ring, or a
-    /// waypoint in it, is given up at once for another (any will do, and the zone doesn't wait), asked for after
-    /// <see cref="BotDirector.ZoneRetryTicks"/> (a run holds that long: Bot.Zone.cs); off open ground it first drives
+    /// waypoint in it, or a crate, is given up at once for another (any will do, and the zone doesn't wait), asked for
+    /// after <see cref="BotDirector.ZoneRetryTicks"/> (a run holds that long: Bot.Zone.cs); off open ground it first drives
     /// for some (<see cref="LeaveClosedGround"/>).
     /// </summary>
     private void NotFound(in TankState me, int tick)
@@ -689,7 +708,7 @@ public sealed partial class Bot
         (_askAfter, _needPath) = (tick + BotDirector.ReplanTicks, true);
         if (_director.ZoneOn && LeaveClosedGround(me, tick)) return;
         if (_director.ZoneOn && _leg == Leg.Zone && RunningToZone) NextZonePoint(tick, noWay: true);
-        else if (_director.ZoneOn && _leg is Leg.Zone or Leg.Waypoint)
+        else if (_director.ZoneOn && _leg is Leg.Zone or Leg.Waypoint or Leg.Crate)
         {
             GiveUpLeg(me, tick);
             _askAfter = tick + BotDirector.ZoneRetryTicks;

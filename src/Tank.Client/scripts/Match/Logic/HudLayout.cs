@@ -17,14 +17,25 @@ public readonly record struct HudRect(float X, float Y, float Width, float Heigh
     public bool FitsIn(Vector2 screen) => X >= 0 && Y >= 0 && Right <= screen.X && Bottom <= screen.Y;
 }
 
-/// <summary>Where every HUD block goes on one screen size. <c>ZoneLine</c> and <c>ZoneWarning</c> are a royale's (stage 6 design §3.3).</summary>
+/// <summary>
+/// Where every HUD block goes on one screen size. <c>ZoneLine</c> and <c>ZoneWarning</c> are a royale's (stage 6 design
+/// §3.3), <c>Pickup</c> (the pickup toasts, rows by <see cref="PickupRow"/>) and <c>Buffs</c> (the buff row) its crates'
+/// (§4.3); they draw nothing while empty.
+/// </summary>
 public readonly record struct HudBoxes(
     HudRect ScorePlate, HudRect ModeLabel, HudRect KillFeed, HudRect NetPanel, HudRect Banner, HudRect SpectateBar,
     HudRect Scoreboard, HudRect StatusPanel, HudRect Results, HudRect ResultsTable, HudRect CaptureBars, HudRect Minimap, HudRect FullMap,
-    HudRect ZoneLine, HudRect ZoneWarning)
+    HudRect ZoneLine, HudRect ZoneWarning, HudRect Pickup, HudRect Buffs)
 {
     /// <summary>Row <paramref name="index"/> (0 = top) of the kill feed.</summary>
     public HudRect KillRow(int index) => new(KillFeed.X, KillFeed.Y + index * (HudLayout.KillRowHeight + HudLayout.KillRowGap), KillFeed.Width, HudLayout.KillRowHeight);
+
+    /// <summary>
+    /// Pickup toast row <paramref name="fromBottom"/> (0 = the newest, at the box's bottom; each older one
+    /// <see cref="HudLayout.PickupRowShare"/> of a row higher): <see cref="HudLayout.PickupHeight"/> high, as wide as the box.
+    /// </summary>
+    public HudRect PickupRow(int fromBottom) =>
+        new(Pickup.X, Pickup.Bottom - HudLayout.PickupHeight - fromBottom * HudLayout.PickupRowShare * HudLayout.PickupHeight, Pickup.Width, HudLayout.PickupHeight);
 
     /// <summary>Row <paramref name="index"/> (0 = top, 1 under it) of the capture bars.</summary>
     public HudRect CaptureRow(int index) => new(CaptureBars.X, CaptureBars.Y + index * (HudLayout.CaptureBarHeight + HudLayout.CaptureBarGap), CaptureBars.Width, HudLayout.CaptureBarHeight);
@@ -56,6 +67,27 @@ public static class HudLayout
 
     /// <summary>The outside warning: centred, this far down the screen (between the zone line and the banner's 0.28).</summary>
     public const float ZoneWarningWidth = 600f, ZoneWarningHeight = 44f, ZoneWarningTopShare = 0.18f;
+
+    /// <summary>
+    /// The pickup toasts (stage 6 design §4.3, "屏幕中间偏下"): centred, <see cref="PickupGap"/> under the banner's box, tall
+    /// enough for every line the feed keeps (<see cref="PickupBoxHeight"/>): the newest in the bottom row
+    /// (<see cref="PickupHeight"/>), each older one <see cref="PickupRowShare"/> of a row above it (<see cref="HudBoxes.PickupRow"/>),
+    /// so even three lines stay in the box, clear of the banner a death brings up while they still show.
+    /// </summary>
+    public const float PickupWidth = 600f, PickupHeight = 44f, PickupGap = 18f;
+
+    /// <summary>A toast row's pitch as a share of its height: the lines overlap each other's margins, not their letters.</summary>
+    public const float PickupRowShare = 0.8f;
+
+    /// <summary>The newest row and <see cref="PickupFeed.Capacity"/> − 1 older ones above it.</summary>
+    public const float PickupBoxHeight = PickupHeight + (PickupFeed.Capacity - 1) * PickupRowShare * PickupHeight;
+
+    /// <summary>
+    /// The buff row (stage 6 design §4.3, "状态面板上方"): as wide as the status panel, its top <see cref="StatusNameRoom"/> +
+    /// <see cref="BuffsGap"/> above the panel's box, which leaves the ground hint ("公路 ×1.15", drawn 30 over the name, so
+    /// above the box's top) room under the row.
+    /// </summary>
+    public const float BuffsHeight = 32f, BuffsGap = 30f;
 
     public const float NetWidth = 500f, NetHeight = 280f;
 
@@ -94,21 +126,25 @@ public static class HudLayout
         var results = new HudRect(cx - ResultsWidth / 2, ResultsTop, ResultsWidth, ResultsHeight);
         float feedHeight = KillRows * KillRowHeight + (KillRows - 1) * KillRowGap;
         float fullSide = MathF.Max(0, MathF.Min(size.X, size.Y) - 2 * FullMapMargin);   // a window too small for the margins gets an empty square
+        var banner = new HudRect(cx - BannerWidth / 2, size.Y * BannerTopShare, BannerWidth, BannerHeight);
+        var status = new HudRect(Margin, size.Y - Margin - StatusHeight - StatusNameRoom, StatusWidth, StatusHeight + StatusNameRoom);
         return new HudBoxes(
             plate,
             label,
             new HudRect(size.X - Margin - KillWidth, Top, KillWidth, feedHeight),
             new HudRect(Margin, Top, NetWidth, NetHeight),
-            new HudRect(cx - BannerWidth / 2, size.Y * BannerTopShare, BannerWidth, BannerHeight),
+            banner,
             new HudRect(cx - SpectateWidth / 2, size.Y - SpectateFromBottom - SpectateHeight, SpectateWidth, SpectateHeight),
             new HudRect(cx - ScoreboardWidth / 2, ScoreboardTop, ScoreboardWidth, ScoreboardHeight),
-            new HudRect(Margin, size.Y - Margin - StatusHeight - StatusNameRoom, StatusWidth, StatusHeight + StatusNameRoom),
+            status,
             results,
             new HudRect(cx - ScoreboardWidth / 2, results.Y + ResultsTableTop, ScoreboardWidth, ScoreboardHeight),
             new HudRect(plate.X, CaptureTop, PlateWidth, CaptureRows * CaptureBarHeight + (CaptureRows - 1) * CaptureBarGap),
             new HudRect(size.X - Margin - MinimapSize, size.Y - Margin - MinimapSize, MinimapSize, MinimapSize),
             new HudRect(cx - fullSide / 2, FullMapMargin, fullSide, fullSide),
             new HudRect(plate.X, CaptureTop, PlateWidth, ZoneLineHeight),
-            new HudRect(cx - ZoneWarningWidth / 2, size.Y * ZoneWarningTopShare, ZoneWarningWidth, ZoneWarningHeight));
+            new HudRect(cx - ZoneWarningWidth / 2, size.Y * ZoneWarningTopShare, ZoneWarningWidth, ZoneWarningHeight),
+            new HudRect(cx - PickupWidth / 2, banner.Bottom + PickupGap, PickupWidth, PickupBoxHeight),
+            new HudRect(status.X, status.Y - StatusNameRoom - BuffsGap, status.Width, BuffsHeight));
     }
 }

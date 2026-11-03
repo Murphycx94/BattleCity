@@ -23,6 +23,7 @@ public sealed partial class BattleClient
     private readonly Obb2[] _obstacles = new Obb2[Simulation.MaxTanks];
     private readonly ZoneRing[] _zoneRings = new ZoneRing[BattleMessages.MaxZoneRings];
     private int _zoneRingCount;
+    private readonly Queue<CrateMessage> _pickups = new(CrateRules.MaxCrates);   // a match has at most that many crates: never grown
     private int _droppedPackets;
 
     // stats accumulators
@@ -63,6 +64,15 @@ public sealed partial class BattleClient
     /// </summary>
     public ZoneState ZoneAt(double serverTick) =>
         HasZone ? ZoneState.At(ZoneRings, (float)(serverTick - ZoneStartTick)) : default;
+
+    /// <summary>
+    /// The crates this client has seen (stage 6 design §4.4): reset to what the match start says the seat knows, fed by
+    /// every newest snapshot, felled by the player's own pickups, cleared on leaving the match. One instance, reused.
+    /// </summary>
+    public CrateKnowledge Crates { get; } = new();
+
+    /// <summary>The player's own pickups (<see cref="CrateMessage"/>), in the order they came: for the HUD's toasts.</summary>
+    public bool TryDequeuePickup(out CrateMessage pickup) => _pickups.TryDequeue(out pickup);
 
     /// <summary>The match as the newest snapshot shows it (no winner, nothing scored, before the first one).</summary>
     public MatchBlock Match => Latest?.Match ?? NoMatch;
@@ -116,9 +126,11 @@ public sealed partial class BattleClient
         _needMap = false;
         OwnTankId = msg.MyTankId;
         SetZone(ModeRules.HasZone(msg.Mode) ? msg.Zone : null);   // a zone in another mode's start is no zone of ours
+        Crates.Reset(ModeRules.HasCrates(msg.Mode) ? msg.Crates : null);   // likewise the crates: a resync's known ones, or none
         _pendingEvents.Clear();
         _remoteShells.Clear();
         if (resync) return;
+        _pickups.Clear();   // the last match's toasts don't belong to this one
         Store.Clear();
         Interpolator.Reset();
         Clock.Reset();
@@ -136,6 +148,8 @@ public sealed partial class BattleClient
         Field = null;
         OwnTankId = 0;
         SetZone(null);
+        Crates.Clear();
+        _pickups.Clear();
         _pendingEvents.Clear();
         _remoteShells.Clear();
         _shellViews.Clear();
@@ -165,6 +179,19 @@ public sealed partial class BattleClient
         if (Phase != BattlePhase.InMatch || MatchInfo is null || msg.MatchNumber != MatchInfo.MatchNumber || !HasZone) return;
         if (msg.Ring != _zoneRingCount || _zoneRingCount >= _zoneRings.Length) return;
         _zoneRings[_zoneRingCount++] = msg.Circle;
+    }
+
+    /// <summary>
+    /// The player ate a crate (stage 6 design §4.4): the crate is known and gone, and the pickup waits for the HUD. Another
+    /// match's, one outside a match, or one in a mode without crates changes nothing (a malformed one is a bad packet, like
+    /// any other). Allocation-free: the queue holds a match's worth of pickups; past that the oldest toast is dropped.
+    /// </summary>
+    private void HandleCrate(in CrateMessage msg)
+    {
+        if (Phase != BattlePhase.InMatch || MatchInfo is null || msg.MatchNumber != MatchInfo.MatchNumber || !ModeRules.HasCrates(MatchInfo.Mode)) return;
+        Crates.Take(msg.CrateId, msg.Kind, msg.Position);   // with what it was and where: it may never have been in a row
+        if (_pickups.Count >= CrateRules.MaxCrates) _pickups.Dequeue();
+        _pickups.Enqueue(msg);
     }
 
     private static Battlefield BuildField(MapData map)
@@ -202,6 +229,7 @@ public sealed partial class BattleClient
         if (_decodeScratch.Tick != Store.NewestTick) return;   // reordered: a baseline and an interpolation frame, but stale feedback
 
         BattleSnapshot snap = Store.Newest!;
+        Crates.Apply(snap);   // the newest word on what is in sight; an older one, reordered, must not fell or raise a crate
         Clock.OnServerFeedback(feedback.InputSlack, snap.Tick, _transport.Stats.RttMs / 1000.0);
         int n = BuildObstacles(snap);
         TankState? own = OwnState(snap);
@@ -209,7 +237,7 @@ public sealed partial class BattleClient
         if (own is not null) OwnTankId = snap.Own.Id;   // an own id without its entity is a lie; the interpolator must not hide that tank
     }
 
-    /// <summary>The own tank as the server has it, with the spec and team its entity carries.</summary>
+    /// <summary>The own tank as the server has it, with the spec and team its entity carries, and its crate layers (so the predictor reloads at the server's pace).</summary>
     private static TankState? OwnState(BattleSnapshot snap)
     {
         if (!snap.HasOwn || !snap.TryFind(snap.Own.Id, out BattleEntity e)) return null;
@@ -219,6 +247,7 @@ public sealed partial class BattleClient
             Id = o.Id, Spec = TankCatalog.All[e.Spec], Team = e.Team, Position = new Vector2(o.X, o.Z), Yaw = o.Yaw, Speed = o.Speed,
             TurretYaw = o.TurretYaw, GunPitch = o.GunPitch, Reload = o.Reload, ShotCount = o.ShotCount, LastFired = o.LastFired,
             Health = o.Health, IsDestroyed = o.Destroyed, ProtectedUntil = o.ProtectedUntil, Ammo = o.Ammo, ApLeft = o.ApLeft, HeLeft = o.HeLeft, Bloom = o.Bloom,
+            ArmorLayers = o.ArmorLayers, ReloadLayers = o.ReloadLayers, OpticsLayers = o.OpticsLayers,
         };
     }
 

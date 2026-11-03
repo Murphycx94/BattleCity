@@ -28,10 +28,13 @@ internal sealed class BattleHarness
     /// <summary>When set, called after each <see cref="BattleServer.Tick"/> that <see cref="Run"/> makes (outside <see cref="TickTimes"/>).</summary>
     public Action<BattleServer>? AfterServerTick { get; set; }
 
+    /// <summary>When set, each client <see cref="AddClient"/> makes talks through what this returns for its link (a test's sniffer); the link itself is still in <see cref="Links"/>.</summary>
+    public Func<IClientTransport, IClientTransport>? WrapTransport { get; set; }
+
     public BattleClient AddClient(string name, LinkConditions? up = null, LinkConditions? down = null, uint token = 0, int version = BattleProtocol.Version)
     {
         LoopbackClientTransport link = Net.Connect(up, down);
-        var client = new BattleClient(link, name, () => Net.Now, token, version);
+        var client = new BattleClient(WrapTransport?.Invoke(link) ?? link, name, () => Net.Now, token, version);
         Links.Add(link);
         Clients.Add(client);
         return client;

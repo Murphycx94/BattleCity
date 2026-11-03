@@ -11,7 +11,7 @@ namespace Tank.Net.Battle;
 
 /// <summary>
 /// The authoritative battle server (stage 4 design §5.8): a room of up to 16 seats (10 outside a royale) and, while a match runs, a
-/// <see cref="Simulation"/> with its <see cref="VisionTracker"/>, <see cref="MatchRules"/> and bots. Transport- and
+/// <see cref="Simulation"/> with its <see cref="VisionTracker"/>, <see cref="MatchRules"/> (a royale's zone and crates among them) and bots. Transport- and
 /// clock-agnostic: call <see cref="Tick"/> at exactly <see cref="SimConstants.TickRate"/> (see <see cref="ServerRunner"/>)
 /// or from a test with a virtual clock. Every client gets its own snapshots and events, holding only what it may see.
 /// </summary>
@@ -122,6 +122,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
 
     /// <summary>The running match's bots (tests); null between matches and in a match without bots.</summary>
     internal BotDirector? Director => _director;
+
     public int ConnectedCount => _seats.Count(s => s is { Connected: true });
 
     /// <summary>The map the room's next match is played on.</summary>
@@ -293,7 +294,10 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
         while (true);
     }
 
-    /// <summary>Empties a seat; a player in the match leaves it. Bots are removed with <see cref="RemoveBots"/> instead.</summary>
+    /// <summary>
+    /// Empties a seat; a player in the match leaves it, and what it knew of the crates goes with it (whoever takes the slot next
+    /// starts unknowing). Bots are removed with <see cref="RemoveBots"/> instead.
+    /// </summary>
     private void FreeSeat(byte slot)
     {
         BattleSeat? seat = _seats[slot];
@@ -304,5 +308,8 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
             seat.InMatch = false;
         }
         _seats[slot] = null;
+        _crateVisible[slot] = 0;
+        _crateKnown[slot] = 0;
+        _crateGone[slot] = 0;
     }
 }

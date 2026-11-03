@@ -110,6 +110,22 @@ public class MatchHudFrameTests
         Assert.Equal(0, plain.Results.Entrants);
     }
 
+    [Fact]
+    public void The_buffs_are_handed_on_as_given_and_are_none_by_default()
+    {
+        var settings = new HostSettings("Tester", "Tester's room", Port: 47108, BattleMode.FreeForAll, Bots: 0, Seed: 7, MatchSeconds: null);
+        using BattleSession session = BattleSession.HostLoopback(settings, _ => { });
+        var names = new string?[BattleProtocol.MaxPlayers];
+        var buffs = new BuffHud(1, 2, 0);
+
+        MatchHudFrame given = MatchHudFrame.From(session.Client, session, 0, names, 60, buffs: buffs);
+        MatchHudFrame plain = MatchHudFrame.From(session.Client, session, 0, names, 60);
+
+        Assert.Equal(buffs, given.Buffs);
+        Assert.Equal(default, plain.Buffs);
+        Assert.False(plain.Buffs.Any);
+    }
+
     /// <summary>A royale on the riverland, the player and three bots: the frame's results carry the four entrants from the start (deviation 8).</summary>
     [Fact]
     public void A_royale_frame_counts_its_entrants()

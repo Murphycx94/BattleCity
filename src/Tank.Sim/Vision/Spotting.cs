@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Vision;
@@ -106,7 +107,7 @@ public static class Spotting
     {
         float distance = Vector2.Distance(observer.Position, target.Position);
         if (distance <= DirectRange) return true;
-        float view = observer.Spec.ViewRange;
+        float view = CrateRules.ViewRange(observer);
         if (distance > view) return false;
         TankPose seer = TankPose.Compute(observer, field.Terrain), seen = TankPose.Compute(target, field.Terrain);
         Vector3 eye = TurretTop(observer, seer), hull = seen.HullBox(target.Spec).Center;
@@ -140,7 +141,7 @@ public static class Spotting
         int bushes = BushesHiding(field, eye, hull, target.Position);
         bool fired = FiredRecently(target, tick);
         float camo = EffectiveCamo(target.Spec.Camo, targetMoving, fired, bushes);
-        float range = DetectionRange(observer.Spec.ViewRange, camo);
+        float range = DetectionRange(CrateRules.ViewRange(observer), camo);
         bool lineClear = !field.Raycast(eye, hull, out _) || !field.Raycast(eye, turret, out _);
         bool spotted = distance <= DirectRange || (distance <= range && lineClear);
         return new Sighting(spotted, distance, range, camo, bushes, fired, lineClear);

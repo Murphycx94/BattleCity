@@ -53,8 +53,8 @@ public sealed class StandardWireTests
     [Fact]
     public void A_room_of_another_version_with_a_mode_we_do_not_know_is_still_listed()
     {
-        RoomInfoMessage other = ReadRoomInfo(HandMadeRoomInfo(version: 6, mode: 9));
-        Assert.Equal(6, other.ProtocolVersion);
+        RoomInfoMessage other = ReadRoomInfo(HandMadeRoomInfo(version: BattleProtocol.Version + 1, mode: 9));
+        Assert.Equal(BattleProtocol.Version + 1, other.ProtocolVersion);
         Assert.Equal(9, (byte)other.Mode);
         Assert.Equal(("老房", 2, 10, 27016, "riverland"), (other.RoomName, other.Players, other.MaxPlayers, other.Port, other.Map));
 
@@ -188,7 +188,7 @@ public sealed class StandardWireTests
 
         byte[] bytes = Encode(w => BattleMessages.Write(w, m));
         MatchStartMessage back = ReadMatchStart(bytes);
-        Assert.Equal(9 + 53053 + 7 + 1 + 1 + 2 * BaseBytes + 1, bytes.Length);   // header and flags · map · two prop states · tank · two bases · no zone: 53098
+        Assert.Equal(9 + 53053 + 7 + 1 + 1 + 2 * BaseBytes + 1 + 1, bytes.Length);   // header and flags · map · two prop states · tank · two bases · no zone · no crates: 53099
         Assert.Equal(2, back.Bases!.Count);
         for (int i = 0; i < 2; i++)
         {
@@ -204,7 +204,7 @@ public sealed class StandardWireTests
         // Without bases: one byte, read back as an empty array (never null).
         byte[] none = Encode(w => BattleMessages.Write(w, m with { Bases = null }));
         Assert.Equal(bytes.Length - 2 * BaseBytes, none.Length);
-        Assert.Equal(0, none[^2]);   // the base count; the ring count (none) follows
+        Assert.Equal(0, none[^3]);   // the base count; the ring count and the crate count (none) follow
         MatchStartMessage noneBack = ReadMatchStart(none);
         Assert.NotNull(noneBack.Bases);
         Assert.Empty(noneBack.Bases);
@@ -297,7 +297,7 @@ public sealed class StandardWireTests
         var m = new MatchStartMessage(BattleMode.Standard, 3, 150, 18150, null, new[] { new PropState(300, 0) }, 7, SandboxMap.Bases);
         byte[] whole = Encode(w => BattleMessages.Write(w, m));
         ReadMatchStart(whole);
-        int countAt = whole.Length - 1 - 2 * BaseBytes - 1;   // the ring count (none) last
+        int countAt = whole.Length - 1 - 1 - 2 * BaseBytes - 1;   // the ring count and the crate count (none) last
         Assert.Equal(2, whole[countAt]);
         for (int len = countAt; len < whole.Length; len++)
         {
@@ -336,8 +336,8 @@ public sealed class StandardWireTests
         new BattleSnapshotCodec().Write(w, s, null, new ClientFeedback { LastProcessedInputTick = 18003, InputSlack = -3 });
 
         Assert.True(w.ByteLength < BattleServer.MaxUnreliableBytes, $"{w.ByteLength} bytes");
-        Assert.Equal(815, w.ByteLength);
-        Assert.Equal(6515, w.BitLength);   // v4's 6235 (ten lines 5881, six more seats 59 bits each); v5: the entrants 8, a line 17 more (rank 5 bits, damage and lasted a byte each at 0)
+        Assert.Equal(816, w.ByteLength);
+        Assert.Equal(6528, w.BitLength);   // v4's 6235 (ten lines 5881, six more seats 59 bits each); v5: the entrants 8, a line 17 more (rank 5 bits, damage and lasted a byte each at 0); v6: the layers 6, an empty crate block 7
         Assert.Equal(1000, BattleServer.MaxUnreliableBytes);
         BattleSnapshot back = Decode(w.Data.ToArray());
         Assert.Equal(s.Match, back.Match);
@@ -422,6 +422,7 @@ public sealed class StandardWireTests
         w.WriteBits((uint)MatchEndReason.None, 2);
         w.WriteByte(0);        // no entrants
         w.WriteBool(false);    // no own tank
+        w.WriteBits(0, 7);     // no crates in sight (no baseline: no "same" bit)
         w.WriteBool(false);    // the scoreboard, in full
         w.WriteBool(true);     // slot 0
         w.WriteBits(0, 4);
@@ -466,6 +467,7 @@ public sealed class StandardWireTests
         w.WriteVarUInt(2);     // the client's tank
         bases(w);
         w.WriteByte(0);        // no zone
+        w.WriteByte(0);        // no crates
     });
 
     /// <summary>The bases part of a match start: the count, then each base's team, x, z and radius.</summary>

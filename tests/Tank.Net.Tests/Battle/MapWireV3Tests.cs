@@ -189,7 +189,7 @@ public sealed class MapWireV3Tests
         BattleMessages.Write(w2, m, encoded);
 
         Assert.Equal(w.Data.ToArray(), w2.Data.ToArray());
-        Assert.Equal(8 + 53053 + 7 + 1 + 1 + 1, w2.ByteLength);   // header and flags · map · two prop states · tank · no bases · no zone: 53071
+        Assert.Equal(8 + 53053 + 7 + 1 + 1 + 1 + 1, w2.ByteLength);   // header and flags · map · two prop states · tank · no bases · no zone · no crates: 53072
         Assert.InRange(w2.Capacity, w2.ByteLength, w2.ByteLength + 64);   // grown once, to what the message takes, not doubled past it
         Assert.Throws<ArgumentException>(() => BattleMessages.Write(new BitWriter(), m with { Map = null }, encoded));
     }
@@ -203,7 +203,7 @@ public sealed class MapWireV3Tests
 
         Assert.Equal(new byte[] { (byte)BattleMessage.MatchStart, (byte)BattleMode.FreeForAll, 4 }, w.Data[..3].ToArray());
         Assert.Equal(0, w.Data[3 + 2 + 3]);              // the flags after the two ticks (2 and 3 bytes): no map
-        Assert.Equal(19, w.ByteLength);                  // v3's 17, the base count (none) and the ring count (none)
+        Assert.Equal(20, w.ByteLength);                  // v3's 17, the base count (none), the ring count (none) and the crate count (none)
         var r = new BitReader(w.Data);
         r.ReadByte();
         MatchStartMessage back = BattleMessages.ReadMatchStart(ref r);

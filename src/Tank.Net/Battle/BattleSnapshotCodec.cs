@@ -6,9 +6,9 @@ namespace Tank.Net.Battle;
 
 /// <summary>
 /// Encodes a client's snapshot as a delta against a snapshot it has acknowledged (Quake 3 model): entities that
-/// changed carry a mask of changed fields, new ones every field, those gone a removal; the own tank and the
-/// scoreboard go in full when they changed. A lost packet never needs resending: the next snapshot is encoded against
-/// an older acknowledged baseline. Instances hold scratch buffers and are not thread-safe.
+/// changed carry a mask of changed fields, new ones every field, those gone a removal; the own tank, the crates in
+/// sight and the scoreboard go in full when they changed. A lost packet never needs resending: the next snapshot is
+/// encoded against an older acknowledged baseline. Instances hold scratch buffers and are not thread-safe.
 /// </summary>
 public sealed class BattleSnapshotCodec
 {
@@ -17,6 +17,10 @@ public sealed class BattleSnapshotCodec
     private const int MaskBits = 9;
     private const int EndReasonBits = 2;   // MatchEndReason: at most 3
     private const int CaptureBits = 7;     // a player's capture: 0–100
+    private const int CrateCountBits = 7;  // the crates in sight: 0–CrateRules.MaxCrates (64)
+    private const int CrateIdBits = 6;     // a crate's id: 0–63
+    private const int CrateKindBits = 3;   // CrateKind: at most 4
+    private const int LayerBits = 2;       // a buff's layers: 0–CrateRules.MaxLayers (3)
 
     /// <summary>
     /// A player's rank: 0 (none: every line while the match is on, and every line of a team mode) or 1–<see cref="BattleProtocol.MaxPlayers"/>
@@ -27,13 +31,20 @@ public sealed class BattleSnapshotCodec
     private readonly BattleEntity[] _changed = new BattleEntity[BattleSnapshot.MaxEntities];
     private readonly int[] _removed = new int[BattleSnapshot.MaxEntities];
 
+    /// <summary>
+    /// The crate block (v6) sits after the own tank and before the scoreboard: against a baseline one bit says the rows are
+    /// the same; otherwise the count (7 bits) and each row's id (6 bits, rising), standing bit, kind (3 bits) and x and z
+    /// in cm (VarUInt). The own tank ends with the three layers, 2 bits each.
+    /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// A scoreboard line the reader would refuse (a rank past <see cref="BattleProtocol.MaxPlayers"/>, negative damage or time
-    /// lasted): checked before a bit is written.
+    /// A scoreboard line or a crate block the reader would refuse (a rank past <see cref="BattleProtocol.MaxPlayers"/>, negative
+    /// damage or time lasted; more than <see cref="CrateRules.MaxCrates"/> crates, ids not rising, an unknown kind, a
+    /// coordinate off the wire's range): checked before a bit is written.
     /// </exception>
     public void Write(BitWriter w, BattleSnapshot current, BattleSnapshot? baseline, in ClientFeedback feedback)
     {
         CheckStats(current.Players);
+        CheckCrates(current);
         w.WriteByte((byte)BattleMessage.Snapshot);
         w.WriteVarUInt((uint)current.Tick);
         w.WriteVarUInt(baseline is null ? 0u : (uint)baseline.Tick);
@@ -48,6 +59,10 @@ public sealed class BattleSnapshotCodec
             w.WriteBool(same);
             if (!same) WriteOwn(w, current.Own);
         }
+
+        bool sameCrates = baseline is not null && baseline.CrateSpan.SequenceEqual(current.CrateSpan);
+        if (baseline is not null) w.WriteBool(sameCrates);
+        if (!sameCrates) WriteCrates(w, current.CrateSpan);
 
         bool sameStats = baseline is not null && baseline.Players.AsSpan().SequenceEqual(current.Players);
         w.WriteBool(sameStats);
@@ -110,6 +125,13 @@ public sealed class BattleSnapshotCodec
             else output.Own = ReadOwn(ref r);
         }
         else output.Own = default;
+
+        if (baseline is not null && r.ReadBool())
+        {
+            Array.Copy(baseline.Crates, output.Crates, baseline.CrateCount);
+            output.CrateCount = baseline.CrateCount;
+        }
+        else ReadCrates(ref r, output);
 
         if (r.ReadBool())
         {
@@ -311,7 +333,13 @@ public sealed class BattleSnapshotCodec
         w.WriteVarInt(o.ProtectedUntil);
         w.WriteVarInt(o.LastFired);
         w.WriteBool(o.Destroyed);
+        w.WriteBits(Layers(o.ArmorLayers), LayerBits);
+        w.WriteBits(Layers(o.ReloadLayers), LayerBits);
+        w.WriteBits(Layers(o.OpticsLayers), LayerBits);
     }
+
+    /// <summary>A buff's layers as the wire takes them: at most <see cref="CrateRules.MaxLayers"/>, what 2 bits hold (never cut to 0).</summary>
+    private static byte Layers(byte layers) => System.Math.Min(layers, (byte)CrateRules.MaxLayers);
 
     private static OwnTank ReadOwn(ref BitReader r) => new()
     {
@@ -332,7 +360,64 @@ public sealed class BattleSnapshotCodec
         ProtectedUntil = r.ReadVarInt(),
         LastFired = r.ReadVarInt(),
         Destroyed = r.ReadBool(),
+        ArmorLayers = (byte)r.ReadBits(LayerBits),   // every 2-bit value is a layer count
+        ReloadLayers = (byte)r.ReadBits(LayerBits),
+        OpticsLayers = (byte)r.ReadBits(LayerBits),
     };
+
+    /// <summary>
+    /// The crate rows are what <see cref="ReadCrates"/> takes: at most <see cref="CrateRules.MaxCrates"/>, ids strictly rising
+    /// (so at most 63), a kind below <see cref="CrateRules.Kinds"/>, coordinates from 0 to <see cref="BattleProtocol.MaxCoordinateCm"/>
+    /// (maps start at the origin; a VarUInt carries no sign). No allocation unless one isn't.
+    /// </summary>
+    private static void CheckCrates(BattleSnapshot s)
+    {
+        if (s.CrateCount < 0 || s.CrateCount > CrateRules.MaxCrates)
+            throw new ArgumentOutOfRangeException(nameof(s), s.CrateCount, $"A viewer sees at most {CrateRules.MaxCrates} crates.");
+        int prevId = -1;
+        foreach (ref readonly CrateView c in s.CrateSpan)
+        {
+            if (c.Id <= prevId || c.Id >= CrateRules.MaxCrates) throw new ArgumentOutOfRangeException(nameof(s), c.Id, "Crate ids rise, below the set's size.");
+            if ((byte)c.Kind >= CrateRules.Kinds) throw new ArgumentOutOfRangeException(nameof(s), c.Kind, "Unknown crate kind.");
+            if (c.X < 0 || c.X > BattleProtocol.MaxCoordinateCm || c.Z < 0 || c.Z > BattleProtocol.MaxCoordinateCm)
+                throw new ArgumentOutOfRangeException(nameof(s), (c.X, c.Z), "A crate lies within the wire's 0–100 km on either axis.");
+            prevId = c.Id;
+        }
+    }
+
+    private static void WriteCrates(BitWriter w, ReadOnlySpan<CrateView> crates)
+    {
+        w.WriteBits((uint)crates.Length, CrateCountBits);
+        foreach (ref readonly CrateView c in crates)
+        {
+            w.WriteBits(c.Id, CrateIdBits);
+            w.WriteBool(c.Standing);
+            w.WriteBits((uint)c.Kind, CrateKindBits);
+            w.WriteVarUInt((uint)c.X);
+            w.WriteVarUInt((uint)c.Z);
+        }
+    }
+
+    /// <summary>The crate block in full: a count up to <see cref="CrateRules.MaxCrates"/>, ids strictly rising, kinds known, coordinates on the map.</summary>
+    private static void ReadCrates(ref BitReader r, BattleSnapshot output)
+    {
+        uint count = r.ReadBits(CrateCountBits);
+        if (count > CrateRules.MaxCrates) throw new ProtocolException("Too many crates.");
+        int prevId = -1;
+        for (int i = 0; i < count; i++)
+        {
+            ref CrateView c = ref output.Crates[i];
+            c.Id = (byte)r.ReadBits(CrateIdBits);
+            if (c.Id <= prevId) throw new ProtocolException("Invalid crate id sequence.");
+            prevId = c.Id;
+            c.Standing = r.ReadBool();
+            uint kind = r.ReadBits(CrateKindBits);
+            c.Kind = kind < CrateRules.Kinds ? (CrateKind)kind : throw new ProtocolException("Unknown crate kind.");
+            c.X = AddCoordinate(0, BattleMessages.ReadNonNegative(ref r));
+            c.Z = AddCoordinate(0, BattleMessages.ReadNonNegative(ref r));
+        }
+        output.CrateCount = (int)count;
+    }
 
     /// <summary>The active lines' rank, damage and time lasted are what <see cref="ReadStats"/> takes; no allocation unless one isn't.</summary>
     private static void CheckStats(PlayerStats[] players)

@@ -114,6 +114,37 @@ internal static class TestMaps
         return TestWorld.Field(terrain, wall);
     }
 
+    // ---- crates on the stand-in, for the server's crate tests (stage 6 design §4.4; 6B task 5) ----
+
+    /// <summary>Ids into <see cref="StandInCrates"/>.</summary>
+    public const byte CrateAhead = 0, CrateBehind = 1, CrateEast = 2, CrateFar = 3;
+
+    /// <summary>
+    /// Four crates on <see cref="RoyaleStandIn"/>, as <see cref="StandInCratePlacer"/> lays them: west of the wall one 8 m ahead
+    /// of the western spawn (a medium's hull front is 3.25 m out, so 4 m of driving eats it) and one 10 m behind it (eaten by
+    /// reversing along the same line, with nothing to steer round); east of the wall one 30 m from the eastern spawn, which
+    /// the wall hides from the west; and one far to the north, which nobody sees — off the little map on purpose, since sight
+    /// is distance-gated first and nothing on a 200 m map is beyond a medium's 270 m. The one behind stands at a sub-centimetre
+    /// spot, as the riverland's do: the wire carries centimetres, and every path to the client must agree on them.
+    /// </summary>
+    public static readonly IReadOnlyList<Crate> StandInCrates = new Crate[]
+    {
+        new(CrateAhead, new Vector2(48, 100), CrateKind.Repair),
+        new(CrateBehind, new Vector2(30.004f, 100.247f), CrateKind.Armor),
+        new(CrateEast, new Vector2(160, 130), CrateKind.Ammo),
+        new(CrateFar, new Vector2(40, 500), CrateKind.Optics),
+    };
+
+    /// <summary>For <c>BattleServer.CratePlacerOverride</c>: <see cref="StandInCrates"/>, whatever the map, grid, spawns and seed.</summary>
+    public static Crate[] StandInCratePlacer(Battlefield field, Tank.Sim.Navigation.NavGrid grid, IReadOnlyList<SpawnPoint> spawns, uint seed) => StandInCrates.ToArray();
+
+    /// <summary>For <c>BattleServer.ZonePickerOverride</c>: six rings round the stand-in's middle, the smallest holding the whole map, so the zone never hurts anyone.</summary>
+    public static ZoneRing[] StandInWideZone(Battlefield field, Tank.Sim.Navigation.NavGrid grid, IReadOnlyList<SpawnPoint> spawns, uint seed)
+    {
+        var c = new Vector2(100, 100);
+        return new ZoneRing[] { new(c, 300), new(c, 290), new(c, 280), new(c, 270), new(c, 260), new(c, 250) };
+    }
+
     // ---- the mixed map: road, sand, water, trees and a house (riverland design §7) ----
 
     public const int MixedSamples = 151;

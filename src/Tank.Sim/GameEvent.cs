@@ -13,6 +13,7 @@ public enum GameEventType : byte
     TankRevived,
     PropDamaged,
     PropDestroyed,
+    CratePicked,
 }
 
 /// <summary>What a shell did to the armour it struck. <see cref="None"/> on events that aren't hits.</summary>
@@ -58,6 +59,9 @@ public enum KillCause : byte
 /// 0, by driving into it. <see cref="Position"/> is where: the point the shell struck or entered it, the burst, or for a
 /// tank the prop's centre on the ground. <see cref="Velocity"/> is the level unit direction it was pushed (the shell's
 /// flight, outward from the burst, the hull's travel): a fence falls that way.</item>
+/// <item><see cref="GameEventType.CratePicked"/>: <see cref="TankId"/> ate supply crate <see cref="PropId"/> (its id in the match's
+/// set, not a prop) at <see cref="Position"/> (on the ground); <see cref="Damage"/> is what it did, the take's first number
+/// (<c>CrateTake.Amount</c>: health restored, AP rounds added, or 1 for a layer; 0 when it did nothing). Never sent to clients.</item>
 /// </list>
 /// </summary>
 public readonly record struct GameEvent(

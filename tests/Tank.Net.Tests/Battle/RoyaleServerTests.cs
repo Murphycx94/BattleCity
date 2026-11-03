@@ -270,7 +270,7 @@ public sealed class RoyaleServerTests
     }
 
     /// <summary>The shooter's gun laid on the target's hull front, firing (as <see cref="StandardServerTests"/> does).</summary>
-    private static LocalCommand Attack(BattleHarness h, BattleClient shooter, BattleClient target)
+    internal static LocalCommand Attack(BattleHarness h, BattleClient shooter, BattleClient target)
     {
         Simulation sim = h.Server.Simulation!;
         int si = sim.SlotOf(h.Server.TankOf(shooter.Slot)), ti = sim.SlotOf(h.Server.TankOf(target.Slot));
@@ -283,7 +283,7 @@ public sealed class RoyaleServerTests
     }
 
     /// <summary>Fires at the target until the server has a hit on it, then until it is destroyed (a minute at most).</summary>
-    private static void Destroy(BattleHarness h, BattleClient shooter, BattleClient target, Action? afterFirstHit = null)
+    internal static void Destroy(BattleHarness h, BattleClient shooter, BattleClient target, Action? afterFirstHit = null)
     {
         int shooterIndex = h.Clients.IndexOf(shooter);
         bool hit = false;

@@ -73,7 +73,10 @@ public sealed class BotLoadTests
     /// riverland, the server's tick timed from a few seconds in to the match's end (or <see cref="MaxWindowSeconds"/>);
     /// the player's snapshots (size, mean and largest) and bytes in a second (the largest) printed beside it, apart while
     /// it is alive (it sees what it sees) and once it is destroyed (a free-for-all's dead watch everything: all sixteen
-    /// tanks, the most any seat is sent; batch C review follow-up).
+    /// tanks, the most any seat is sent; batch C review follow-up). From 6B the match has its 48 crates: the time the
+    /// server's crate sight passes took is printed too, with what sixteen human seats would cost a pass by that average (one
+    /// seat is looked for here, and the average takes in the passes after it died, which cast no rays: a lower bound; Sim's
+    /// <c>CrateSetVisibilityTimingTests</c> times sixteen live tanks from the spawns, the real number).
     /// </summary>
     [Fact]
     public void Fifteen_bots_in_a_royale_on_the_riverland_keep_the_server_tick_p99_under_2_ms()
@@ -97,6 +100,7 @@ public sealed class BotLoadTests
             foreach (ref readonly GameEvent e in sim.Events)
                 if (e.Type == GameEventType.TankHit) hits++;
         };
+        var gc = new GcWindow();   // so a one-off slow tick (31.6 ms was seen once, never again) can be laid at the collector's door or not
         while (h.Server.Rules is { Phase: MatchPhase.Playing } && h.TickTimes.Count < MaxWindowSeconds * Tps)
         {
             h.Run(Step);
@@ -112,9 +116,15 @@ public sealed class BotLoadTests
         double p50 = sorted[sorted.Length / 2], p99 = sorted[(int)(sorted.Length * 0.99)], max = sorted[^1];
         _output.WriteLine($"server tick with an idle player and fifteen bots in a royale on the riverland over {sorted.Length} ticks ({sorted.Length / (double)Tps:F0} s, " +
                           $"{(h.Server.Rules!.Phase == MatchPhase.Ended ? $"to the match's end, {h.Server.Rules.EndReason}" : "the match still on")}): " +
-                          $"p50 {p50:F3} ms, p99 {p99:F3} ms, max {max:F3} ms; {hits} hits, {wrecks} wrecks; bots: {h.Server.Director!.Summary()}");
+                          $"p50 {p50:F3} ms, p99 {p99:F3} ms, max {max:F3} ms ({gc}); {hits} hits, {wrecks} wrecks; bots: {h.Server.Director!.Summary()}");
         _output.WriteLine($"the player's snapshots, alive (the tanks it sees): {alive}");
         _output.WriteLine($"the player's snapshots, destroyed and watching (a free-for-all's dead see all sixteen: the busiest seat): {watching}");
+        double sightMs = h.Server.CrateSightTime.TotalMilliseconds, perPass = sightMs / Math.Max(1, h.Server.CrateSightPasses);
+        CrateSet crates = h.Server.Rules.Crates!;
+        _output.WriteLine($"crate sight: {h.Server.CrateSightPasses} passes over {crates.Count} crates for the one human seat took {sightMs:F1} ms in all, " +
+                          $"{perPass:F4} ms a pass averaged over every pass, those after the player died included (no rays then); sixteen human seats by that average {perPass * BattleProtocol.MaxPlayers:F3} ms a pass (5 a second), a lower bound — Sim's CrateSetVisibilityTimingTests has the sixteen-tank number; " +
+                          $"{crates.Count - crates.StandingCount} crates taken");
+        Assert.True(h.Server.CrateSightPasses > 0, "no crate sight pass was made");
         Assert.True(alive.Samples > 0, "the player got no snapshots");
         Assert.True(watching.Samples > 0, "the player was never destroyed: no snapshots of all sixteen");
         Assert.True(hits >= 10, $"only {hits} hits in the window: hardly any fighting");
@@ -131,6 +141,17 @@ public sealed class BotLoadTests
     {
         int slot = sim.SlotOf(tankId);
         return slot >= 0 && sim.Tanks[slot].IsDestroyed;
+    }
+
+    /// <summary>The garbage collector's work since this was made: collections by generation and the time the collector paused the process.</summary>
+    private sealed class GcWindow
+    {
+        private readonly int _gen0 = GC.CollectionCount(0), _gen1 = GC.CollectionCount(1), _gen2 = GC.CollectionCount(2);
+        private readonly TimeSpan _paused = GC.GetTotalPauseDuration();
+
+        public override string ToString() =>
+            $"GC in the window: {GC.CollectionCount(0) - _gen0} gen0, {GC.CollectionCount(1) - _gen1} gen1, {GC.CollectionCount(2) - _gen2} gen2, " +
+            $"{(GC.GetTotalPauseDuration() - _paused).TotalMilliseconds:F1} ms paused";
     }
 
     /// <summary>A client's snapshot sizes, sampled: mean and largest, and the most bytes in a second.</summary>

@@ -76,8 +76,12 @@ public sealed class MatchRules
     /// A royale's six rings (<see cref="ZoneSchedule.Check"/>: ArgumentException, param "zone"): ring 0, then rings 1–5. Null: no zone
     /// (unit tests; the server always passes one). Ignored outside a royale.
     /// </param>
+    /// <param name="crates">
+    /// The match's supply crates (<see cref="CrateSet"/>'s checks: ArgumentException, param "crates"). Null: none (unit tests; the
+    /// server always places them). Ignored outside the modes with crates (<see cref="ModeRules.HasCrates"/>).
+    /// </param>
     public MatchRules(BattleMode mode, Simulation sim, SpawnLayout spawns, int? durationTicks = null, IReadOnlyList<TeamBase>? bases = null,
-        uint seed = 0, IReadOnlyList<ZoneRing>? zone = null)
+        uint seed = 0, IReadOnlyList<ZoneRing>? zone = null, IReadOnlyList<Crate>? crates = null)
     {
         if (durationTicks is <= 0) throw new ArgumentOutOfRangeException(nameof(durationTicks), durationTicks, "A match lasts at least one tick.");
         if (ModeRules.HasBases(mode)) Capture = new BaseCapture(bases ?? Array.Empty<TeamBase>());   // checks them: ArgumentException, param "bases"
@@ -88,6 +92,7 @@ public sealed class MatchRules
         if (mode == BattleMode.Royale) _spawnOrder = ShuffledSpawns(spawns.Solo.Count, seed);
         if (ModeRules.HasZone(mode) && zone is not null) _zoneRings = ZoneSchedule.Check(zone, nameof(zone));   // a copy already
         ZoneRings = Array.AsReadOnly(_zoneRings);
+        if (ModeRules.HasCrates(mode) && crates is not null) Crates = new CrateSet(crates);
         UpdateZone();
     }
 
@@ -175,6 +180,9 @@ public sealed class MatchRules
     /// <summary>The rings the players know: <see cref="ZoneRings"/>[..<see cref="KnownRings"/>].</summary>
     public ReadOnlySpan<ZoneRing> AnnouncedRings => _zoneRings.AsSpan(0, KnownRings);
 
+    /// <summary>The match's supply crates (stage 6 design §4): null without crates, or outside the modes that have them.</summary>
+    public CrateSet? Crates { get; }
+
     /// <summary>Whether another player may be put into the match now.</summary>
     public bool AcceptsJoins => Phase == MatchPhase.Playing && (_sim.Tick == StartTick || ModeRules.JoinsMidMatch(Mode));
 
@@ -226,7 +234,8 @@ public sealed class MatchRules
     }
 
     /// <summary>
-    /// After each step: in a royale the zone hurts the tanks outside it on each whole second of the match; then this tick's
+    /// After each step: the crates the live hulls touch are eaten first (so a repair comes before the zone's bite on the same
+    /// second); in a royale the zone then hurts the tanks outside it on each whole second of the match; then this tick's
     /// kills (the zone's included, credited to no one) and damage are scored, base capture counted, the due respawned, and
     /// the result called when it is decided; last, each seat's health is noted for the next tick's damage. The room sees
     /// to it that a match starts with at least two players, one per team: with fewer, a no-respawn match is decided on
@@ -235,6 +244,7 @@ public sealed class MatchRules
     public void Update()
     {
         if (Phase == MatchPhase.Ended) return;
+        Crates?.Collect(_sim);
         UpdateZone();
         HurtOutsideZone();
         foreach (ref readonly GameEvent e in _sim.Events)
