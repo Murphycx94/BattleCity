@@ -816,7 +816,7 @@ public int CratesTaken { get; }     // crates this bot ran for and ate (TakenBy 
 - [x] 回归：原有四种模式快照 `CrateCount 0`、行为和截图不变；试驾场六张和 `base5d` 同量级；soak 五行通过；画廊原有的屏逐字节相同。（`mode-*.png`、`CrateServerTests` 团队战、试驾场在 worktree 漂移内、soak 五行、画廊九屏 `cmp` 相同）
 - [x] 画廊 `royale-crates`；真对局的箱子特写、拾取提示、叠层图标、小地图和全屏图上的箱子都看过。（`RESULTS.md` 截图清单）
 - [x] 文档 `docs/01`、`docs/03`、`docs/04`、README 已按代码更新；`docs/PROGRESS.md` 的“6B 节点记录”完整。（`9e8cf6e` 和批 E 跟进）
-- [ ] 每批两路审查和跟进提交都做了；squash 合入本地 main，合入后 main 上全部测试通过、0 警告；没有推远端。
+- [x] 每批两路审查和跟进提交都做了；squash 合入本地 main，合入后 main 上全部测试通过、0 警告；没有推远端。（A `577a097`、B `f22f7a5`、C `6014bf9`、D `dd2224b`、E `cb16915`；squash 合入本地 main `2ac211d`，合入后全过、0 警告）
 
 ---
 
