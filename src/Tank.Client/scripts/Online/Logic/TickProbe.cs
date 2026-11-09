@@ -5,9 +5,10 @@ namespace Tank.Client.Online;
 
 /// <summary>
 /// Times a threaded host's server ticks for the F3 panel's "服务器 tick 平均 · 最大" (blueprint §5 T10), standing between
-/// the <see cref="ServerRunner"/> and the server. The worst tick is the match's: the tick a match starts in builds the
-/// map (some 50 ms, once) and would hide every later spike, so that tick is left out and the worst starts over from it
-/// (<c>ServerRunner.MaxTickMs</c>, the worst since the thread started, only ever showed the map build). The average is
+/// the <see cref="ServerRunner"/> and the server. The worst tick is the match's: the tick a match starts in copies the
+/// prepared field (some 0.1 ms) and writes every seat's match start (the riverland's some 555 KB each), far more than
+/// a tick of play, and would hide every later spike, so that tick is left out and the worst starts over from it
+/// (<c>ServerRunner.MaxTickMs</c>, the worst since the thread started, would mostly show match starts). The average is
 /// the runner's own kind, an exponential one. Written on the runner thread, read on the main thread.
 /// </summary>
 public sealed class TickProbe : ITickServer

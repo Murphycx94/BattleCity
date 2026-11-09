@@ -2,6 +2,7 @@ using System.Numerics;
 using Tank.Sim.Combat;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 
 namespace Tank.Sim.Vehicles;
 
@@ -69,8 +70,9 @@ public static class TankStep
     }
 
     /// <summary>
-    /// Counts the reload down, swaps rounds if the input asks for the other type (which restarts the reload) and says
-    /// whether the gun wants to fire: asked, loaded, a round of that type left.
+    /// Counts the reload down, swaps rounds if the input asks for the other type (which restarts the reload, for the time the
+    /// tank's reload layers leave of it: <see cref="CrateRules.ReloadTime"/>) and says whether the gun wants to fire: asked,
+    /// loaded, a round of that type left.
     /// </summary>
     private static bool Reload(ref TankState tank, in InputCmd input)
     {
@@ -79,7 +81,7 @@ public static class TankStep
         if (input.Ammo != tank.Ammo)
         {
             tank.Ammo = input.Ammo;
-            tank.Reload = tank.Spec.ReloadTime;
+            tank.Reload = CrateRules.ReloadTime(tank.Spec, tank.ReloadLayers);
             return false;
         }
         return input.Fire && tank.Reload == 0 && tank.AmmoLeft(tank.Ammo) > 0;
@@ -101,7 +103,7 @@ public static class TankStep
             Caliber = tank.Spec.Caliber,
             Seed = seed,
         };
-        tank.Reload = tank.Spec.ReloadTime;
+        tank.Reload = CrateRules.ReloadTime(tank.Spec, tank.ReloadLayers);
         tank.ShotCount++;
         tank.LastFired = tick;
         tank.Bloom += tank.Spec.Bloom.Fire;

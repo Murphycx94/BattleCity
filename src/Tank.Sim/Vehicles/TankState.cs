@@ -57,5 +57,14 @@ public struct TankState
     /// <summary>How far the aim circle is opened up; 0 = fully aimed (see <see cref="Combat.Dispersion"/>).</summary>
     public float Bloom;
 
+    /// <summary>
+    /// Supply crate layers (stage 6 design §4.2), 0 … <c>CrateRules.MaxLayers</c> each: armour takes a tenth off every shell's
+    /// damage a layer, reload eight percent off the reload time, optics adds a tenth to the view range. Cleared with the rest
+    /// on a respawn or a change of vehicle; kept through a revive.
+    /// </summary>
+    public byte ArmorLayers;
+    public byte ReloadLayers;
+    public byte OpticsLayers;
+
     public readonly int AmmoLeft(AmmoType ammo) => ammo == AmmoType.HE ? HeLeft : ApLeft;
 }

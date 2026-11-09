@@ -7,8 +7,9 @@ using Tank.Sim.Vehicles;
 namespace Tank.Sim;
 
 /// <summary>
-/// What shells and tanks do to props (design §4.2, §5.5): shells wear walls down to rubble, knock fences flat and shoot
-/// bushes away; tanks knock fences flat, and a fast heavy tank rams brick walls down.
+/// What shells and tanks do to props (design §4.2, §5.5, riverland design §2.4–2.5): shells wear walls and houses down
+/// to rubble, knock fences flat, fell trees and shoot bushes away; tanks knock fences flat and fell trees, a fast heavy
+/// tank rams brick walls down and a fast medium or heavy tank rams houses down.
 /// </summary>
 public sealed partial class Simulation
 {
@@ -33,9 +34,10 @@ public sealed partial class Simulation
     }
 
     /// <summary>
-    /// Puts every destroyed or damaged prop back as it was (sandbox only for now), except a wall or fence with a tank, or a
-    /// wreck, on its footprint: that one stays as it is until a later call. Bushes block nothing, so they always come
-    /// back. No events: views follow <see cref="Battlefield.IsStanding"/> and <see cref="Battlefield.Durability"/>.
+    /// Puts every destroyed or damaged prop back as it was (sandbox only for now), except a wall, house, fence or tree
+    /// with a tank, or a wreck, on its footprint (a tree's trunk circle, not its square): that one stays as it is until a
+    /// later call. Bushes block nothing, so they always come back. No events: views follow
+    /// <see cref="Battlefield.IsStanding"/> and <see cref="Battlefield.Durability"/>.
     /// </summary>
     public void RestoreProps()
     {
@@ -44,37 +46,47 @@ public sealed partial class Simulation
             ref readonly Prop prop = ref Field.PropAt(i);
             // Full hit points means untouched: a prop that is down always has fewer (0).
             if (!prop.IsDestructible || Field.DurabilityAt(i) == prop.MaxDurability) continue;
-            if (prop.IsSolid && UnderATank(prop.Footprint)) continue;
+            if (prop.IsSolid && UnderATank(prop)) continue;
             Field.Restore(i);
         }
     }
 
-    private bool UnderATank(in Obb2 footprint)
+    /// <summary>
+    /// Whether a tank's hull (alive or a wreck) overlaps <paramref name="prop"/>: the circle of a round one (a tree's
+    /// trunk, as knocking it down tests), the footprint of any other.
+    /// </summary>
+    private bool UnderATank(in Prop prop)
     {
         for (int j = 0; j < TankCount; j++)
         {
             ref readonly TankState t = ref _tanks[j];
-            if (Obb2.TryGetPenetration(TankMotion.Footprint(t.Spec, t.Position, t.Yaw), footprint, out _)) return true;
+            Obb2 hull = TankMotion.Footprint(t.Spec, t.Position, t.Yaw);
+            bool covers = prop.IsRound
+                ? hull.IntersectsCircle(prop.Footprint.Center, prop.Footprint.HalfExtents.X)
+                : Obb2.TryGetPenetration(hull, prop.Footprint, out _);
+            if (covers) return true;
         }
         return false;
     }
 
     /// <summary>
-    /// Fences and bushes the shell's path enters before <paramref name="stopT"/> (where it stops this tick, or 1) go down;
-    /// the shell flies on. One the path starts inside is left standing: that is where the gun was when it fired (a tank
-    /// in a bush doesn't shoot its own cover away), since a shell that flew into one has knocked it down already.
+    /// Fences, bushes and trees the shell's path enters before <paramref name="stopT"/> (where it stops this tick, or 1) go
+    /// down; the shell flies on. A bush counts as its cylinder, a tree as its trunk's (the crown stops nothing). One the
+    /// path starts inside is left standing: that is where the gun was when it fired (a tank in a bush doesn't shoot its
+    /// own cover away), since a shell that flew into one has knocked it down already.
     /// </summary>
     private void KnockThrough(in Shell shell, Vector3 from, Vector3 to, float stopT)
     {
         Vector3 middle = (from + to) * 0.5f;
         float halfLength = Vector3.Distance(from, to) * 0.5f;
-        foreach (int i in Field.Flimsy)
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
+        foreach (int i in Field.Along(PropSet.Flimsy, new Vector2(from.X, from.Z), new Vector2(to.X, to.Z), 0f, buffer))
         {
             if (!Field.StandingAt(i)) continue;
             ref readonly Prop prop = ref Field.PropAt(i);
             Vector2 center = prop.Footprint.Center;
             if (Vector2.Distance(center, new Vector2(middle.X, middle.Z)) > halfLength + prop.Footprint.HalfExtents.Length()) continue;
-            bool crossed = prop.Kind == PropKind.Bush
+            bool crossed = prop.IsRound
                 ? Intersect.SegmentCylinder(center, prop.Footprint.HalfExtents.X, prop.Bottom, prop.Top, from, to, out float t)
                 : Intersect.SegmentPrism(prop.Footprint, prop.Bottom, prop.Top, from, to, out t);
             if (crossed && t > 0f && t <= stopT && Field.Destroy(i))
@@ -95,20 +107,22 @@ public sealed partial class Simulation
 
     /// <summary>
     /// An HE burst at <paramref name="at"/>: every other standing wall within the splash radius takes
-    /// <see cref="WallDamage.Splash"/>; every fence and bush within it goes down.
+    /// <see cref="WallDamage.Splash"/>; every fence, bush and tree within it goes down (a tree by its trunk, <see cref="Prop.DistanceTo"/>).
     /// </summary>
     private void SplashProps(in Shell shell, Vector3 at, int directProp)
     {
         float radius = shell.Round.SplashRadius;
         if (radius <= 0) return;
-        foreach (int i in Field.Walls)
+        var ground = new Vector2(at.X, at.Z);
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
+        foreach (int i in Field.Near(PropSet.Walls, ground, radius, buffer))
         {
             if (i == directProp || !Field.StandingAt(i)) continue;
             ref readonly Prop wall = ref Field.PropAt(i);
             int damage = WallDamage.Splash(shell.Round, wall.DistanceTo(at));
             if (damage > 0) HurtWall(shell, i, at, damage, Vector3.Zero, Outward(at, wall));
         }
-        foreach (int i in Field.Flimsy)
+        foreach (int i in Field.Near(PropSet.Flimsy, ground, radius, buffer))
         {
             if (!Field.StandingAt(i)) continue;
             ref readonly Prop prop = ref Field.PropAt(i);

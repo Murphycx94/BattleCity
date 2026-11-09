@@ -77,6 +77,57 @@ public class ShotPlanTests
         Assert.Empty(plan.Warnings);
     }
 
+    [Fact]
+    public void Outside_the_zone_comes_straight_from_the_caller_in_a_match()
+    {
+        ShotPlan plan = Match("--shot-after", "outside:2");
+        Assert.False(plan.TakeScreenshot(100));
+        plan.OnMoment(ShotMoment.Outside, 95);
+        plan.OnMoment(ShotMoment.Outside, 96);   // every frame outside repeats it; the first counts
+        Assert.False(plan.TakeScreenshot(96.9));
+        Assert.True(plan.TakeScreenshot(97.0));
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Fact]
+    public void Outside_the_zone_never_happens_in_the_sandbox()
+    {
+        ShotPlan plan = Sandbox("--shot-after", "outside:2");
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("'outside'", warning);
+        Assert.Contains("the sandbox", warning);
+        Assert.False(plan.TakeScreenshot(100));   // nothing in the sandbox ever notes the moment
+    }
+
+    [Fact]
+    public void The_first_pickup_comes_straight_from_the_caller_in_a_match()
+    {
+        ShotPlan plan = Match("--shot-after", "pickup:2");
+        Assert.Empty(plan.Warnings);
+        Assert.False(plan.TakeScreenshot(50));
+        plan.OnMoment(ShotMoment.Pickup, 40);
+        plan.OnMoment(ShotMoment.Pickup, 41);   // a second crate: the first counts
+        Assert.False(plan.TakeScreenshot(41.9));
+        Assert.True(plan.TakeScreenshot(42.0));
+        Assert.False(plan.TakeScreenshot(43));   // once
+    }
+
+    [Fact]
+    public void A_pickup_never_happens_in_the_sandbox()
+    {
+        ShotPlan plan = Sandbox("--shot-after", "pickup:2");
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("'pickup'", warning);
+        Assert.Contains("the sandbox", warning);
+    }
+
+    [Fact]
+    public void Pickup_is_the_last_moment_and_a_bad_one_names_it()
+    {
+        Assert.Equal(ShotMoment.Pickup, Enum.GetValues<ShotMoment>()[^1]);   // appended: the moments before keep their numbers
+        Assert.Contains("|outside|pickup:SECONDS", Assert.Single(LaunchOptions.Parse(new[] { "--shot-after", "crate:1" }).Warnings));
+    }
+
     [Theory]
     [InlineData(8.0)]    // the results stay 8 s: the scene is gone by then
     [InlineData(12.5)]
@@ -177,5 +228,46 @@ public class ShotPlanTests
         Assert.Contains("fire|hit|kill|prop|down|death|ended", warning);
         Assert.False(plan.TakeScreenshot(3.9));
         Assert.True(plan.TakeScreenshot(4.0));
+    }
+
+    [Fact]
+    public void A_due_screenshot_waits_for_the_map_and_is_taken_the_frame_it_is_ready()
+    {
+        ShotPlan plan = Sandbox("--screenshot", "s.png", "--screenshot-at", "6", "--quit-after", "8");
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(5.9, mapReady: false));
+        Assert.False(plan.HoldingForMap);                                          // not due yet: nothing held
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(6.0, mapReady: false));
+        Assert.True(plan.HoldingForMap);
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(9.0, mapReady: false));
+        Assert.False(plan.QuitDue(9.0));                                           // the quit waits with it
+        Assert.Equal(ShotCall.Take, plan.TakeScreenshot(9.5, mapReady: true));
+        Assert.False(plan.HoldingForMap);
+        Assert.True(plan.QuitDue(9.5));
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(10, mapReady: true));     // taken once
+    }
+
+    [Fact]
+    public void A_held_screenshot_is_taken_anyway_once_the_wait_runs_out()
+    {
+        ShotPlan plan = Match("--screenshot", "s.png", "--shot-after", "death:2", "--quit-after", "10");
+        plan.OnMoment(ShotMoment.Death, 3);
+        double due = 3 + 2;
+        Assert.Equal(ShotCall.None, plan.TakeScreenshot(due + ShotPlan.MapWaitSeconds - 0.01, mapReady: false));
+        Assert.False(plan.QuitDue(due + ShotPlan.MapWaitSeconds - 0.01));
+        Assert.Equal(ShotCall.TakeWithoutMap, plan.TakeScreenshot(due + ShotPlan.MapWaitSeconds, mapReady: false));
+        Assert.False(plan.HoldingForMap);
+        Assert.True(plan.QuitDue(due + ShotPlan.MapWaitSeconds));
+        Assert.Equal(20, ShotPlan.MapWaitSeconds);
+    }
+
+    [Fact]
+    public void A_spent_screenshot_holds_nothing_and_the_plain_call_never_waits()
+    {
+        ShotPlan taken = Sandbox("--screenshot-at", "1", "--quit-after", "4");
+        taken.MarkScreenshotTaken();
+        Assert.Equal(ShotCall.None, taken.TakeScreenshot(5, mapReady: false));
+        Assert.False(taken.HoldingForMap);                                       // spent elsewhere: no wait
+        Assert.True(taken.QuitDue(5));
+        Assert.True(Sandbox("--screenshot-at", "1").TakeScreenshot(1));         // the plain call: as before, no map to wait for
     }
 }

@@ -69,6 +69,42 @@ public class KillFeedTests
     }
 
     [Fact]
+    public void A_zone_kill_reads_victim_died_to_the_zone_and_is_told_from_a_hidden_shooter()
+    {
+        var feed = new KillFeed();
+        feed.AddZone("小林", Side.Enemy, now: 0);
+        feed.Add(null, Side.Enemy, "老周", Side.Enemy, friendly: false, now: 0);
+
+        ReadOnlySpan<FeedLine> lines = feed.Visible(0);
+
+        Assert.Equal(2, lines.Length);
+        FeedLine zone = lines[0], hidden = lines[1];
+        Assert.Equal("小林 死于毒圈", zone.Text);
+        Assert.Null(zone.Killer);
+        Assert.True(zone.Zone);
+        Assert.False(zone.Friendly);
+        Assert.Equal(Side.Enemy, zone.VictimSide);
+        Assert.Equal(KillFeed.Lifetime, zone.ExpiresAt);
+        Assert.Equal("老周 被击毁", hidden.Text);
+        Assert.False(hidden.Zone);
+        Assert.Equal("阿成 " + FeedLine.ZoneTail, new FeedLine(null, Side.Own, "阿成", Side.Own, false, 0, Zone: true).Text);
+    }
+
+    [Fact]
+    public void Zone_kills_count_against_the_five_lines_like_any_other()
+    {
+        var feed = new KillFeed();
+        for (int i = 0; i < 7; i++) feed.AddZone($"敌{i}", Side.Enemy, now: i * 0.1);
+
+        ReadOnlySpan<FeedLine> lines = feed.Visible(1);
+
+        Assert.Equal(KillFeed.Capacity, lines.Length);
+        Assert.Equal("敌2", lines[0].Victim);
+        Assert.Equal("敌6", lines[4].Victim);
+        Assert.All(lines.ToArray(), l => Assert.True(l.Zone));
+    }
+
+    [Fact]
     public void The_revision_moves_when_a_line_arrives_or_expires_and_not_otherwise()
     {
         var feed = new KillFeed();

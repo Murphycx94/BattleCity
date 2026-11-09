@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Vision;
@@ -8,14 +9,16 @@ namespace Tank.Sim.Vision;
 /// <summary>
 /// What one look from an observer at a target found (stage 3 design §2.2): whether it is <see cref="Seen"/>, how far
 /// away it is (ground distance between hull centres), the observer's <see cref="DetectionRange"/> against it, the
-/// target's effective concealment and what went into it (bushes, a recent shot), and whether a sight line is clear.
+/// target's effective concealment and what went into it (foliage, a recent shot), and whether a sight line is clear.
+/// <see cref="Bushes"/> counts bushes and tree crowns alike (riverland design §2.4).
 /// </summary>
 public readonly record struct Sighting(bool Seen, float Distance, float DetectionRange, float Camo, int Bushes, bool FiredRecently, bool LineClear);
 
 /// <summary>
 /// The spotting rules (design §6, stage 3 design §2.2), stateless. A target's effective concealment is its moving or
 /// still <see cref="Concealment"/>, times <see cref="FirePenalty"/> within <see cref="FirePenaltyTicks"/> of a shot,
-/// plus <see cref="BushBonus"/> for each bush hiding it (at most <see cref="MaxBushes"/>), capped at <see cref="MaxCamo"/>.
+/// plus <see cref="BushBonus"/> for each bush or tree crown hiding it (at most <see cref="MaxBushes"/> of them together),
+/// capped at <see cref="MaxCamo"/>.
 /// An observer spots it within <see cref="DirectRange"/> whatever stands between them; further out, within its
 /// <see cref="DetectionRange"/> and with one of two sight lines (its turret top to the target's hull centre, and to the
 /// target's turret top) clear of the ground, rocks and standing walls.
@@ -39,12 +42,12 @@ public static class Spotting
     public const int MaxBushes = 2;
     public const float MaxCamo = 0.9f;
 
-    /// <summary>Bushes on the sight line count only this close to the target, m.</summary>
+    /// <summary>Bushes and crowns on the sight line count only this close to the target, m.</summary>
     public const float BushReach = 15f;
 
     /// <summary>
-    /// A tank is in a bush when its hull centre is within this share of the bush's radius; a bush whose edge it only
-    /// touches hides it when the sight line runs through that inner part of it.
+    /// A tank is in a bush (or under a tree) when its hull centre is within this share of the bush's (crown's) radius; one
+    /// whose edge it only touches hides it when the sight line runs through that inner part of it.
     /// </summary>
     public const float InsideBush = 0.75f;
 
@@ -64,29 +67,31 @@ public static class Spotting
     }
 
     /// <summary>
-    /// How many standing bushes hide a target (up to <see cref="MaxBushes"/>), each once: those the sight line from
-    /// <paramref name="eye"/> to <paramref name="target"/> crosses within <see cref="BushReach"/> of the target, and the
-    /// one its hull centre <paramref name="ground"/> stands in. That one counts only when the sight line, its end
-    /// included, comes within <see cref="InsideBush"/> of its radius from its middle: a tank well inside it, or behind
-    /// its middle, is hidden; one on its rim, or with the bush behind it, is not (the line would otherwise always end
-    /// inside the bush it touches).
+    /// How many standing bushes and trees hide a target (up to <see cref="MaxBushes"/> together), each once. A tree hides
+    /// by its crown, an upright cylinder of <see cref="Prop.FoliageRadius"/> from its bottom to its top; a bush by its own
+    /// cylinder. Those count that the sight line from <paramref name="eye"/> to <paramref name="target"/> crosses within
+    /// <see cref="BushReach"/> of the target, and those its hull centre <paramref name="ground"/> stands in (or under).
+    /// Such a one counts only when the sight line, its end included, comes within <see cref="InsideBush"/> of its radius
+    /// from its middle: a tank well inside it, or behind its middle, is hidden; one on its rim, or with the bush behind
+    /// it, is not (the line would otherwise always end inside the bush it touches).
     /// </summary>
     public static int BushesHiding(Battlefield field, Vector3 eye, Vector3 target, Vector2 ground)
     {
         float length = Vector3.Distance(eye, target);
         Vector3 near = length > BushReach ? target + (eye - target) * (BushReach / length) : eye;
         int count = 0;
-        foreach (int i in field.Bushes)
+        Span<int> buffer = stackalloc int[Battlefield.QueryBufferSize];
+        foreach (int i in field.Near(PropSet.Foliage, ground, BushReach, buffer))
         {
             if (!field.StandingAt(i)) continue;
-            ref readonly Prop bush = ref field.PropAt(i);
-            Vector2 center = bush.Footprint.Center;
-            float radius = bush.Footprint.HalfExtents.X;
+            ref readonly Prop foliage = ref field.PropAt(i);
+            Vector2 center = foliage.Footprint.Center;
+            float radius = foliage.FoliageRadius;
             float apart = Vector2.Distance(center, ground);
             if (apart > BushReach + radius) continue;   // a cheap pre-check: nowhere near the last BushReach of the line
             bool hides = apart <= radius
                 ? GroundDistance(center, near, target) <= InsideBush * radius
-                : Intersect.SegmentCylinder(center, radius, bush.Bottom, bush.Top, near, target, out _);
+                : Intersect.SegmentCylinder(center, radius, foliage.Bottom, foliage.Top, near, target, out _);
             if (hides && ++count == MaxBushes) break;
         }
         return count;
@@ -94,7 +99,7 @@ public static class Spotting
 
     /// <summary>
     /// Whether <paramref name="observer"/> spots <paramref name="target"/>: the same answer as <see cref="Look"/>'s
-    /// <see cref="Sighting.Seen"/>, but it counts bushes and casts sight lines only when they can change it (within
+    /// <see cref="Sighting.Seen"/>, but it counts foliage and casts sight lines only when they can change it (within
     /// <see cref="DirectRange"/> or beyond the view range they can't; a target closer than the detection range at the
     /// highest concealment needs no bushes counted), and stops at the first clear line. For <see cref="VisionTracker"/>.
     /// </summary>
@@ -102,7 +107,7 @@ public static class Spotting
     {
         float distance = Vector2.Distance(observer.Position, target.Position);
         if (distance <= DirectRange) return true;
-        float view = observer.Spec.ViewRange;
+        float view = CrateRules.ViewRange(observer);
         if (distance > view) return false;
         TankPose seer = TankPose.Compute(observer, field.Terrain), seen = TankPose.Compute(target, field.Terrain);
         Vector3 eye = TurretTop(observer, seer), hull = seen.HullBox(target.Spec).Center;
@@ -136,7 +141,7 @@ public static class Spotting
         int bushes = BushesHiding(field, eye, hull, target.Position);
         bool fired = FiredRecently(target, tick);
         float camo = EffectiveCamo(target.Spec.Camo, targetMoving, fired, bushes);
-        float range = DetectionRange(observer.Spec.ViewRange, camo);
+        float range = DetectionRange(CrateRules.ViewRange(observer), camo);
         bool lineClear = !field.Raycast(eye, hull, out _) || !field.Raycast(eye, turret, out _);
         bool spotted = distance <= DirectRange || (distance <= range && lineClear);
         return new Sighting(spotted, distance, range, camo, bushes, fired, lineClear);

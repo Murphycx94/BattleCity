@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Tank.Client.Art;
+using Tank.Sim.Modes;
 
 namespace Tank.Art.Tests;
 
@@ -52,6 +53,19 @@ public class PaletteTests
     }
 
     [Fact]
+    public void House_colours_start_from_the_riverland_values()
+    {
+        Assert.Equal(Palette.Hex("F1E4C8"), Palette.Plaster);
+        Assert.Equal(Palette.Hex("B07A4A"), Palette.Planks);
+        Assert.Equal(Palette.Hex("CF5E45"), Palette.RoofTile);
+        Assert.Equal(Palette.Hex("5D6878"), Palette.RoofSlate);
+        Assert.Equal(Palette.Hex("7A4B2E"), Palette.Door);
+        Assert.Equal(Palette.Hex("A9DDF2"), Palette.WindowGlass);
+        Assert.Equal(Palette.Hex("EADBC0"), Palette.PlasterDust);
+        Assert.True(Vector3.Distance(Palette.Door, Palette.Planks) > 0.1f, "a door shows on a plank wall");
+    }
+
+    [Fact]
     public void Team_colours_keep_enemies_apart_from_everything_else_on_the_field()
     {
         Assert.Equal(Palette.TargetBody, Palette.AllyBody);
@@ -69,6 +83,64 @@ public class PaletteTests
         Assert.Equal(Palette.Hex("73E68C"), Palette.UiGood);
         Assert.Equal(Palette.HitPierced, Palette.UiDanger);
         Assert.Equal(Palette.Hex("D8344A"), Palette.EnemyBody);
+    }
+
+    [Fact]
+    public void The_zone_wall_is_a_light_blue_apart_from_the_sky_the_water_and_both_sides_tanks()
+    {
+        Assert.Equal(Palette.Hex("7CCBFF"), Palette.ZoneWall);
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.SkyTop) >= 0.2f, "the wall shows against the sky");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.SkyHorizon) >= 0.3f, "the wall shows against the horizon");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.WaterShallow) >= 0.12f, "the wall is not the shallows' turquoise");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.WaterDeep) >= 0.3f, "the wall is not the deep water");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.AllyBody) >= 0.3f, "the wall is not a teammate's blue-grey");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.EnemyBody) >= 0.5f, "the wall is not an enemy's red");
+        Assert.True(Vector3.Distance(Palette.ZoneWall, Palette.TankBody) >= 0.5f, "the wall is not the player's orange");
+    }
+
+    [Fact]
+    public void The_crate_colours_are_the_designed_ones()
+    {
+        Assert.Equal(Palette.Hex("4CCB5A"), Palette.CrateRepair);
+        Assert.Equal(Palette.Hex("F0B429"), Palette.CrateAmmo);
+        Assert.Equal(Palette.Hex("9A8FD0"), Palette.CrateArmor);
+        Assert.Equal(Palette.Hex("C65BD1"), Palette.CrateReload);
+        Assert.Equal(Palette.Hex("2EC4B6"), Palette.CrateOptics);
+    }
+
+    private static readonly Vector3[] CrateColours = { Palette.CrateRepair, Palette.CrateAmmo, Palette.CrateArmor, Palette.CrateReload, Palette.CrateOptics };
+
+    [Fact]
+    public void The_five_crate_colours_are_apart_from_each_other()
+    {
+        for (int a = 0; a < CrateColours.Length; a++)
+        for (int b = a + 1; b < CrateColours.Length; b++)
+            Assert.True(Vector3.Distance(CrateColours[a], CrateColours[b]) >= 0.25f, $"crate colours {a} and {b} are too alike to tell on a sign");
+    }
+
+    [Fact]
+    public void The_crate_colours_are_apart_from_the_zone_wall_both_sides_tanks_and_the_grass()
+    {
+        for (int k = 0; k < CrateColours.Length; k++)
+        {
+            Assert.True(Vector3.Distance(CrateColours[k], Palette.ZoneWall) >= 0.2f, $"crate colour {k} is the zone wall's blue");
+            // 0.19, not 0.2: the armour crate's lilac (9A8FD0, from the design) sits 0.199 from the ally's blue-grey; a sign is not a hull
+            Assert.True(Vector3.Distance(CrateColours[k], Palette.AllyBody) >= 0.19f, $"crate colour {k} is a teammate's blue-grey");
+            Assert.True(Vector3.Distance(CrateColours[k], Palette.EnemyBody) >= 0.2f, $"crate colour {k} is an enemy's red");
+            Assert.True(Vector3.Distance(CrateColours[k], Palette.GrassLight) >= 0.2f, $"crate colour {k} is the grass's light green");
+            Assert.True(Vector3.Distance(CrateColours[k], Palette.GrassDark) >= 0.2f, $"crate colour {k} is the grass's dark green");
+        }
+    }
+
+    [Fact]
+    public void Crate_maps_each_kind_to_its_colour()
+    {
+        Assert.Equal(Palette.CrateRepair, Palette.Crate(CrateKind.Repair));
+        Assert.Equal(Palette.CrateAmmo, Palette.Crate(CrateKind.Ammo));
+        Assert.Equal(Palette.CrateArmor, Palette.Crate(CrateKind.Armor));
+        Assert.Equal(Palette.CrateReload, Palette.Crate(CrateKind.Reload));
+        Assert.Equal(Palette.CrateOptics, Palette.Crate(CrateKind.Optics));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Palette.Crate((CrateKind)5));
     }
 
     /// <summary>Relative luminance (Rec. 709 weights on the linear colour) of an sRGB palette entry.</summary>

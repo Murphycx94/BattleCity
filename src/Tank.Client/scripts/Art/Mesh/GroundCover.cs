@@ -16,15 +16,40 @@ public static class GroundCover
     private const float SlopeNoiseScale = 0.35f, SlopeNoiseDegrees = 6f;
     private const float DirtNoiseScale = 2.2f, DirtNoiseAmount = 0.45f;
 
+    /// <summary>The rock layer fades in from this far below <see cref="RockMinSlopeDegrees"/> (noisy slope) to this far above it, degrees.</summary>
+    private const float RockFadeBelow = 4f, RockFadeAbove = 3f;
+
     /// <summary>Weight (0..1) the terrain gives its grass layer at a point. <paramref name="normalY"/> is the surface normal's Y; <paramref name="dirtMask"/> the baked patch mask there.</summary>
     public static float GrassWeight(float x, float z, float normalY, float dirtMask)
     {
-        float slope = SlopeDegrees(normalY) + (ValueNoise2(x * SlopeNoiseScale, z * SlopeNoiseScale) - 0.5f) * SlopeNoiseDegrees;
-        float dirtPatch = SmoothStep(0.25f, 0.95f, dirtMask + (ValueNoise2(x * DirtNoiseScale, z * DirtNoiseScale) - 0.5f) * DirtNoiseAmount);
-        float rock = SmoothStep(RockMinSlopeDegrees - 4f, RockMinSlopeDegrees + 3f, slope);
+        float slope = NoisySlope(x, z, normalY);
+        float dirtPatch = DirtPatch(dirtMask + (ValueNoise2(x * DirtNoiseScale, z * DirtNoiseScale) - 0.5f) * DirtNoiseAmount);
+        float rock = RockOf(slope);
         float dirt = MathF.Max(SmoothStep(GrassMaxSlopeDegrees - 2f, GrassMaxSlopeDegrees + 6f, slope), dirtPatch) * (1f - rock);
         return MathF.Max(1f - dirt - rock, 0f);
     }
+
+    /// <summary>
+    /// Weight (0..1) the terrain gives its rock layer at a point: the same noisy slope <see cref="GrassWeight"/> reads, so
+    /// the two agree on where rock takes over. <paramref name="normalY"/> is the surface normal's Y.
+    /// </summary>
+    public static float RockWeight(float x, float z, float normalY) => RockOf(NoisySlope(x, z, normalY));
+
+    /// <summary>The slope in degrees, moved up or down by the shader's slope noise (±<see cref="SlopeNoiseDegrees"/>/2).</summary>
+    private static float NoisySlope(float x, float z, float normalY) =>
+        SlopeDegrees(normalY) + (ValueNoise2(x * SlopeNoiseScale, z * SlopeNoiseScale) - 0.5f) * SlopeNoiseDegrees;
+
+    private static float RockOf(float noisySlope) => SmoothStep(RockMinSlopeDegrees - RockFadeBelow, RockMinSlopeDegrees + RockFadeAbove, noisySlope);
+
+    /// <summary>
+    /// The least and most grass weight flat ground can get for a dirt-mask value, over every value the patch noise takes:
+    /// what the mask alone guarantees wherever the point is.
+    /// </summary>
+    internal static (float Least, float Most) FlatGrassWeightRange(float dirtMask) =>
+        (1f - DirtPatch(dirtMask + DirtNoiseAmount / 2f), 1f - DirtPatch(dirtMask - DirtNoiseAmount / 2f));
+
+    /// <summary>The dirt patch weight of a noisy mask value (the shader's <c>smoothstep(0.25, 0.95, dirt_patch + …)</c>).</summary>
+    private static float DirtPatch(float noisyMask) => SmoothStep(0.25f, 0.95f, noisyMask);
 
     public static float SlopeDegrees(float normalY) => MathF.Acos(Math.Clamp(normalY, 0f, 1f)) * (180f / MathF.PI);
 

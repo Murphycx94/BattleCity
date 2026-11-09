@@ -8,7 +8,7 @@ public class ScoreboardModelTests
 {
     private static readonly string?[] Names = { "阿成", "小林", "老周", "小雨", "机器人 1", "机器人 2", "机器人 3", "机器人 4", null, null };
 
-    private static string? NameOf(byte slot) => Names[slot];
+    private static string? NameOf(byte slot) => slot < Names.Length ? Names[slot] : null;   // a royale's seats past the tenth get "玩家 N"
 
     private static PlayerStats[] Field(params (byte Team, int Kills, int Deaths, bool Alive)[] seats)
     {
@@ -20,6 +20,105 @@ public class ScoreboardModelTests
 
     private static IReadOnlyList<ScoreRow> Team(PlayerStats[] players, byte ownSlot = 0, byte ownTeam = 0, int respawnIn = 0) =>
         ScoreboardModel.Build(BattleMode.TeamBattle, ownSlot, ownTeam, players, NameOf, ended: false, respawnIn);
+
+    [Fact]
+    public void Standard_rows_carry_each_players_capture()
+    {
+        PlayerStats[] players = Field((0, 1, 0, true), (1, 0, 0, true));
+        players[0].Capture = 41;
+
+        var rows = ScoreboardModel.Build(BattleMode.Standard, 0, 0, players, NameOf, ended: false, 0);
+
+        Assert.Equal(new[] { 41, 0 }, rows.Select(r => r.Capture));
+        Assert.Equal(new byte[] { 0, 1 }, rows.Select(r => r.Slot));   // ordered like the team modes
+    }
+
+    [Fact]
+    public void The_capture_cell_leaves_enemies_blank_until_the_match_has_ended()
+    {
+        var own = new ScoreRow(0, "阿成", 0, "中坦", 0, 0, true, 1, Side.Own, "存活", Capture: 41);
+        var ally = own with { Slot = 1, Side = Side.Ally, Capture = 0 };
+        var enemy = own with { Slot = 2, Team = 1, Side = Side.Enemy, Capture = 0 };
+
+        Assert.Equal(("41", "0", ""), (ScoreboardModel.CaptureCell(own, ended: false), ScoreboardModel.CaptureCell(ally, false),
+            ScoreboardModel.CaptureCell(enemy, false)));
+        Assert.Equal(("41", "0", "12"), (ScoreboardModel.CaptureCell(own, ended: true), ScoreboardModel.CaptureCell(ally, true),
+            ScoreboardModel.CaptureCell(enemy with { Capture = 12 }, true)));
+        Assert.Equal("100", ScoreboardModel.CaptureCell(own with { Capture = 100 }, false));
+        Assert.Same(ScoreboardModel.CaptureCell(own, false), ScoreboardModel.CaptureCell(own, false));   // no string per frame
+    }
+
+    /// <summary>Sixteen royale seats, each its own team: slot i has i kills and 100 i damage; the first <paramref name="alive"/> are standing.</summary>
+    private static PlayerStats[] RoyaleField(int alive, bool ended = false)
+    {
+        var players = new PlayerStats[BattleProtocol.MaxPlayers];
+        for (int i = 0; i < players.Length; i++)
+        {
+            players[i] = new PlayerStats { Active = true, Team = (byte)i, TankId = i + 1, Kills = i, Alive = i < alive, Damage = ended || i == 0 ? 100 * i : 0, Lasted = ended ? 600 - 30 * i : 0 };
+            if (ended) players[i].Rank = (byte)(BattleProtocol.MaxPlayers - i);   // slot 15 first, slot 0 last
+        }
+        return players;
+    }
+
+    [Fact]
+    public void Royale_rows_carry_damage_and_time_lasted_and_sixteen_fit()
+    {
+        var rows = ScoreboardModel.Build(BattleMode.Royale, 0, 0, RoyaleField(alive: 12, ended: true), NameOf, ended: true, 0);
+
+        Assert.Equal(16, rows.Count);
+        Assert.Equal(Enumerable.Range(1, 16), rows.Select(r => r.Rank));                      // the server's ranks, in order
+        Assert.Equal(new byte[] { 15, 14, 13, 12 }, rows.Take(4).Select(r => r.Slot));
+        Assert.Equal(1500, rows[0].Damage);
+        Assert.Equal(600 - 30 * 15, rows[0].Lasted);
+        Assert.Equal(0, rows[15].Damage);
+        Assert.Single(rows, r => r.Side == Side.Own);
+        Assert.All(rows.Where(r => r.Side != Side.Own), r => Assert.Equal(Side.Enemy, r.Side));
+    }
+
+    [Fact]
+    public void A_royale_while_it_runs_puts_the_living_first_like_a_free_for_all()
+    {
+        var rows = ScoreboardModel.Build(BattleMode.Royale, 0, 0, RoyaleField(alive: 12), NameOf, ended: false, 0);
+
+        Assert.Equal(16, rows.Count);
+        Assert.True(rows.Take(12).All(r => r.Alive) && rows.Skip(12).All(r => !r.Alive));
+        Assert.Equal(11, rows[0].Slot);   // the most kills among the living
+        Assert.Equal(Enumerable.Range(1, 16), rows.Select(r => r.Rank));
+    }
+
+    [Fact]
+    public void The_damage_cell_leaves_an_enemys_blank_until_the_match_has_ended()
+    {
+        var own = new ScoreRow(0, "阿成", 0, "中坦", 3, 0, true, 1, Side.Own, "存活", Damage: 1240, Lasted: 552);
+        var enemy = own with { Slot = 1, Team = 1, Side = Side.Enemy, Damage = 0 };
+        var ally = own with { Slot = 2, Side = Side.Ally, Damage = 0 };
+
+        Assert.Equal(("1240", "", "0"), (ScoreboardModel.DamageCell(own, ended: false), ScoreboardModel.DamageCell(enemy, false), ScoreboardModel.DamageCell(ally, false)));
+        Assert.Equal(("1240", "0", "870"), (ScoreboardModel.DamageCell(own, ended: true), ScoreboardModel.DamageCell(enemy, true), ScoreboardModel.DamageCell(ally with { Damage = 870 }, true)));
+        Assert.Equal("0", ScoreboardModel.DamageCell(own with { Damage = 0 }, false));
+    }
+
+    [Fact]
+    public void Every_damage_cell_is_a_number_once_a_royale_has_ended_and_only_the_own_one_before()
+    {
+        var running = ScoreboardModel.Build(BattleMode.Royale, 0, 0, RoyaleField(alive: 12), NameOf, ended: false, 0);
+        var over = ScoreboardModel.Build(BattleMode.Royale, 0, 0, RoyaleField(alive: 1, ended: true), NameOf, ended: true, 0);
+
+        Assert.Equal("0", ScoreboardModel.DamageCell(running.Single(r => r.Side == Side.Own), ended: false));
+        Assert.All(running.Where(r => r.Side != Side.Own), r => Assert.Equal("", ScoreboardModel.DamageCell(r, ended: false)));
+        Assert.All(over, r => Assert.Equal(r.Damage.ToString(System.Globalization.CultureInfo.InvariantCulture), ScoreboardModel.DamageCell(r, ended: true)));
+    }
+
+    [Theory]
+    [InlineData(552, "9:12")]
+    [InlineData(48, "0:48")]
+    [InlineData(0, "0:00")]
+    [InlineData(600, "10:00")]
+    public void The_lasted_cell_is_the_seconds_as_a_clock(int lasted, string expected)
+    {
+        var row = new ScoreRow(0, "阿成", 0, "中坦", 0, 0, false, 1, Side.Own, "已毁", Lasted: lasted);
+        Assert.Equal(expected, ScoreboardModel.LastedCell(row));
+    }
 
     [Fact]
     public void Team_modes_list_the_own_team_first_then_the_other()
@@ -184,18 +283,21 @@ public class ScoreboardModelTests
     [Fact]
     public void Building_into_a_buffer_allocates_nothing_once_warm()
     {
-        PlayerStats[] players = Field((0, 3, 1, true), (1, 2, 0, true), (0, 1, 2, false), (1, 0, 3, true), (0, 4, 0, true), (1, 5, 1, false));
-        var buffer = new ScoreRow[BattleProtocol.MaxPlayers];
-        Func<byte, string?> nameOf = NameOf;
-        for (int i = 0; i < 10; i++) ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
+        Allocation.AssertNone(() =>
+        {
+            PlayerStats[] players = Field((0, 3, 1, true), (1, 2, 0, true), (0, 1, 2, false), (1, 0, 3, true), (0, 4, 0, true), (1, 5, 1, false));
+            var buffer = new ScoreRow[BattleProtocol.MaxPlayers];
+            Func<byte, string?> nameOf = NameOf;
+            for (int i = 0; i < 10; i++) ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        int count = 0;
-        for (int i = 0; i < 100; i++) count = ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+            Allocation.Window window = Allocation.Start();
+            int count = 0;
+            for (int i = 0; i < 100; i++) count = ScoreboardModel.Build(BattleMode.TeamBattle, 0, 0, players, nameOf, false, 0, buffer);
+            Allocation.Measured measured = window.Stop();
 
-        Assert.Equal(6, count);
-        Assert.Equal(before, after);
+            Assert.Equal(6, count);
+            return measured;
+        });
     }
 
     [Fact]

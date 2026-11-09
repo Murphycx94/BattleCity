@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using Tank.Sim.Modes;
 
 namespace Tank.Client.Art;
 
@@ -53,6 +54,38 @@ public static class Palette
     public static readonly Vector3 Wood = Hex("B9844F");         // fences, and the chips off them
     public static readonly Vector3 BrickDust = Hex("E0A88C");    // dust off a brick wall
 
+    // The ground of a map with ground kinds (riverland design §6.2): the terrain shader's layered mode.
+    public static readonly Vector3 Sand = Hex("E6D3A0");         // river banks, the lake beach, the dunes
+    public static readonly Vector3 Road = Hex("9A948C");         // a grey gravel road
+    public static readonly Vector3 Riverbed = Hex("B49A6E");     // the ground under the water: a darker wet sand
+    public static readonly Vector3 WetSand = Hex("CDB585");      // the band along the water's edge
+    public static readonly Vector3 Earth = Hex("A88B65");        // bare earth: the forest floor and the other dirt cells
+
+    // The cartoon water (riverland design §6.3): the water shader runs from shallow to deep with the depth.
+    public static readonly Vector3 WaterShallow = Hex("7FD6D8"); // a light turquoise over the shallows and fords
+    public static readonly Vector3 WaterDeep = Hex("3E9CC4");    // a deeper blue in the river's middle and the lake
+    public static readonly Vector3 Foam = Hex("F4FBFF");         // the white band along the shore and the ripple patches
+
+    // The cartoon houses (riverland design §6.5): plaster or plank walls under a tiled or slate roof.
+    public static readonly Vector3 Plaster = Hex("F1E4C8");      // cream plaster walls, and the chunks off them
+    public static readonly Vector3 Planks = Hex("B07A4A");       // plank walls, a little darker than the fences
+    public static readonly Vector3 RoofTile = Hex("CF5E45");     // red clay tiles
+    public static readonly Vector3 RoofSlate = Hex("5D6878");    // blue-grey slates
+    public static readonly Vector3 Door = Hex("7A4B2E");         // dark wooden doors
+    public static readonly Vector3 WindowGlass = Hex("A9DDF2");  // a pale sky blue
+    public static readonly Vector3 PlasterDust = Hex("EADBC0");  // the cloud of a house coming down
+
+    // The royale's zone (stage 6 design §3.3): a light blue apart from the sky, the water and both sides' tanks.
+    public static readonly Vector3 ZoneWall = Hex("7CCBFF");     // the wall, the safe circle on the map, the outside tint
+
+    // The supply crates (stage 6 design §4): the sign of each kind, its minimap dot and its pickup flash. Five hues apart
+    // from each other, from the zone wall, from both sides' tanks and from the grass.
+    public static readonly Vector3 CrateRepair = Hex("4CCB5A");  // a green
+    public static readonly Vector3 CrateAmmo = Hex("F0B429");    // an amber
+    public static readonly Vector3 CrateArmor = Hex("9A8FD0");   // a lilac
+    public static readonly Vector3 CrateReload = Hex("C65BD1");  // a magenta
+    public static readonly Vector3 CrateOptics = Hex("2EC4B6");  // a teal
+
     // Team colours in a match, seen from the player's seat (the player's own tank is TankBody). Declared after the
     // entries they alias: static initialisers run in textual order.
     public static readonly Vector3 AllyBody = TargetBody;        // a teammate: the same blue-grey as the practice targets
@@ -63,6 +96,17 @@ public static class Palette
     public static readonly Vector3 UiDim = Hex("8C94A3");        // secondary text, disabled controls
     public static readonly Vector3 UiGood = Hex("73E68C");       // ready, joinable, a win
     public static readonly Vector3 UiDanger = HitPierced;        // errors, a loss: the same red as damage numbers
+
+    /// <summary>The colour of a crate kind's sign (sRGB); ArgumentOutOfRangeException for a kind the set doesn't have.</summary>
+    public static Vector3 Crate(CrateKind kind) => kind switch
+    {
+        CrateKind.Repair => CrateRepair,
+        CrateKind.Ammo => CrateAmmo,
+        CrateKind.Armor => CrateArmor,
+        CrateKind.Reload => CrateReload,
+        CrateKind.Optics => CrateOptics,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a crate kind."),
+    };
 
     /// <summary>"RRGGBB" (an optional leading '#') to sRGB 0–1.</summary>
     public static Vector3 Hex(string hex)

@@ -34,7 +34,7 @@ public partial class Main : Node
     {
         _options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
         foreach (string warning in _options.Warnings) GD.PushWarning(warning);
-        GetWindow().Title = AppTitle;
+        WindowTitle.Set(this, MapText.AppTitle);
         _menu = new MenuScreen();
         _menu.HostRequested += Host;
         _menu.JoinRequested += Join;
@@ -140,6 +140,8 @@ public partial class Main : Node
             Error err = image.SavePng(path);
             GD.Print(err == Error.Ok ? $"screenshot saved: {path}" : $"screenshot failed: {err}");
         }
-        if (_options.QuitAfter > 0 && _time >= _options.QuitAfter) GetTree().Quit();
+        // A scene holding its due screenshot for the map's picture holds the quit too (ShotPlan.MapWaitSeconds at most).
+        bool holding = _matchView is { HoldingScreenshot: true } || _sandbox is { HoldingScreenshot: true };
+        if (_options.QuitAfter > 0 && _time >= _options.QuitAfter && !holding) GetTree().Quit();
     }
 }

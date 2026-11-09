@@ -63,6 +63,31 @@ public sealed class BitWriter
         foreach (byte b in bytes) WriteByte(b);
     }
 
+    /// <summary>
+    /// Appends <paramref name="bytes"/> as they are, without a length: for bytes another writer already encoded (a
+    /// prepared map). The writer must stand on a byte boundary.
+    /// </summary>
+    public void WriteAligned(ReadOnlySpan<byte> bytes)
+    {
+        if ((_bitPos & 7) != 0) throw new InvalidOperationException($"WriteAligned needs a byte boundary; the writer is at bit {_bitPos}.");
+        EnsureCapacity(checked(bytes.Length * 8));
+        bytes.CopyTo(_buffer.AsSpan(_bitPos >> 3));
+        _bitPos += bytes.Length * 8;
+    }
+
+    /// <summary>
+    /// Makes room for <paramref name="extraBytes"/> more bytes at once, so a big message about to be written grows the
+    /// buffer once, to what it needs, rather than doubling its way there.
+    /// </summary>
+    public void Reserve(int extraBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(extraBytes);
+        EnsureCapacity(checked(extraBytes * 8));
+    }
+
+    /// <summary>The buffer's size in bytes (tests: how far it has grown).</summary>
+    internal int Capacity => _buffer.Length;
+
     private void EnsureCapacity(int extraBits)
     {
         int needed = (_bitPos + extraBits + 7) >> 3;

@@ -208,42 +208,49 @@ public sealed class VisionTrackerTests
     [Fact]
     public void Updating_allocates_nothing()
     {
-        var world = new World(100f);
-        for (int k = 0; k < 6; k++) world.Add(TankCatalog.Heavy, new Vector2(60 + 15 * k, 120), 0f, (byte)(k % 2));
-        world.Run(12);
-        InputCmd[] hold = Enumerable.Range(0, world.Sim.TankCount).Select(_ => TestWorld.Cmd()).ToArray();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 120; i++)
+        Allocation.AssertNone(() =>
         {
-            world.Sim.Step(hold);
-            world.Vision.Update();
-        }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+            var world = new World(100f);
+            for (int k = 0; k < 6; k++) world.Add(TankCatalog.Heavy, new Vector2(60 + 15 * k, 120), 0f, (byte)(k % 2));
+            world.Run(12);
+            InputCmd[] hold = Enumerable.Range(0, world.Sim.TankCount).Select(_ => TestWorld.Cmd()).ToArray();
+            Allocation.Window window = Allocation.Start();
+            for (int i = 0; i < 120; i++)
+            {
+                world.Sim.Step(hold);
+                world.Vision.Update();
+            }
+            return window.Stop();
+        });
     }
 
     [Fact]
     public void Updating_on_the_sandbox_map_allocates_nothing()
     {
-        // Rocks, bushes and walls in the sight lines, nine tanks of two teams, one of them driving round.
-        var sim = new Simulation(SandboxMap.Create());
-        sim.AddTank(TankCatalog.Medium, new Vector2(224, 352), 0f, team: 0);   // in sight of the bush patch east of the spawn
-        foreach (TargetSpot spot in SandboxMap.TargetSpots) sim.AddTank(spot.Spec, spot.Position, spot.Yaw, team: 1);
-        sim.AddTank(TankCatalog.Light, SandboxMap.BushPatches[2] + new Vector2(-20, 0), 0f, team: 1);
-        var vision = new VisionTracker(sim);
-        var inputs = new InputCmd[sim.TankCount];
-        for (int i = 0; i < inputs.Length; i++) inputs[i] = TestWorld.Cmd(throttle: (sbyte)(i == inputs.Length - 1 ? 1 : 0), steer: (sbyte)(i == inputs.Length - 1 ? 1 : 0));
-        for (int i = 0; i < 30; i++) { sim.Step(inputs); vision.Update(); }
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        int seen = 0;
-        for (int i = 0; i < 300; i++)
+        Allocation.AssertNone(() =>
         {
-            sim.Step(inputs);
-            vision.Update();
-            foreach (TankState t in sim.Tanks) if (vision.IsVisible(t.Id, 0)) seen++;
-            if (vision.Inspect(sim.Tanks[0].Id, sim.Tanks[^1].Id).Bushes > 0) seen++;
-        }
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.True(seen > 300, "some of them were seen");
+            // Rocks, bushes and walls in the sight lines, nine tanks of two teams, one of them driving round.
+            var sim = new Simulation(SandboxMap.Create());
+            sim.AddTank(TankCatalog.Medium, new Vector2(224, 352), 0f, team: 0);   // in sight of the bush patch east of the spawn
+            foreach (TargetSpot spot in SandboxMap.TargetSpots) sim.AddTank(spot.Spec, spot.Position, spot.Yaw, team: 1);
+            sim.AddTank(TankCatalog.Light, SandboxMap.BushPatches[2] + new Vector2(-20, 0), 0f, team: 1);
+            var vision = new VisionTracker(sim);
+            var inputs = new InputCmd[sim.TankCount];
+            for (int i = 0; i < inputs.Length; i++) inputs[i] = TestWorld.Cmd(throttle: (sbyte)(i == inputs.Length - 1 ? 1 : 0), steer: (sbyte)(i == inputs.Length - 1 ? 1 : 0));
+            for (int i = 0; i < 30; i++) { sim.Step(inputs); vision.Update(); }
+            Allocation.Window window = Allocation.Start();
+            int seen = 0;
+            for (int i = 0; i < 300; i++)
+            {
+                sim.Step(inputs);
+                vision.Update();
+                foreach (TankState t in sim.Tanks) if (vision.IsVisible(t.Id, 0)) seen++;
+                if (vision.Inspect(sim.Tanks[0].Id, sim.Tanks[^1].Id).Bushes > 0) seen++;
+            }
+            Allocation.Measured measured = window.Stop();
+            Assert.True(seen > 300, "some of them were seen");
+            return measured;
+        });
     }
 
     [Fact]

@@ -39,7 +39,7 @@ public partial class MatchMain
                 break;
             case GameEventType.ShellExploded:
                 bool aboveGround = e.Position.Y > field.Terrain.HeightAt(e.Position.X, e.Position.Z) + GroundBurstHeight;
-                _fx.Explosion(e.Position.ToGodot(), aboveGround ? PuffColor.Grey : PuffColor.White);
+                _fx.ShellBurst(e.Position.ToGodot(), aboveGround ? PuffColor.Grey : PuffColor.White);
                 break;
             case GameEventType.TankHit when e.Ammo == AmmoType.AP:   // HE gets its own ShellExploded
                 _fx.Explosion(e.Position.ToGodot(), PuffColor.Grey, ArmorHitSize);
@@ -58,7 +58,7 @@ public partial class MatchMain
         }
         _combat.OnShotEvent(e);
         _world!.OnEvent(e);
-        PropFx.OnEvent(e, field, _fx);
+        PropFx.OnEvent(e, field, _fx, _world.Forests);
     }
 
     /// <summary>
@@ -97,7 +97,8 @@ public partial class MatchMain
 
     /// <summary>
     /// A kill for the feed (blueprint §3.3): names from the scoreboard's tank ids by room slot, sides from the teams as the
-    /// scene colours tanks. A shooter the server hid (id 0), or one that has since left, gives a line without a killer.
+    /// scene colours tanks. A shooter the server hid (id 0), or one that has since left, gives a line without a killer;
+    /// a tank the zone finished (<see cref="KillCause.Zone"/>) a "死于毒圈" line.
     /// </summary>
     private void FeedKill(in GameEvent e)
     {
@@ -105,10 +106,29 @@ public partial class MatchMain
         if (players is null) return;
         byte ownTeam = OwnTeam(_client.Own);
         (string victim, Side victimSide) = Describe(players, e.TargetTankId, ownTeam);
+        if (e.Cause == KillCause.Zone)
+        {
+            _hud.OnZoneKill(victim, victimSide, _time);   // "victim 死于毒圈": nobody's kill (the event's TankId is 0)
+            return;
+        }
         string? killer = null;
         Side killerSide = Side.Enemy;
         if (MatchHudFrame.SlotOf(players, e.TankId) >= 0) (killer, killerSide) = Describe(players, e.TankId, ownTeam);
         _hud.OnKill(killer, killerSide, victim, victimSide, killer is not null && KillFeed.IsFriendly(killerSide, victimSide), _time);
+    }
+
+    /// <summary>
+    /// The player ate a crate (the server's word, to the eater alone): a toast, the crate's flash (this frame's
+    /// <see cref="CrateViews.Sync"/> sees it gone and, told it was the player's own, flashes it even unseen), the
+    /// <c>pickup</c> moment for the automation, and one log line (acceptance reads it; only on a pickup, so the string
+    /// costs nothing per frame).
+    /// </summary>
+    private void OnPickup(in CrateMessage m)
+    {
+        _hud.OnPickup(m, _time);
+        _crates?.NoteOwnPickup(m.CrateId);
+        _automation.NotifyPickup(_time);
+        GD.Print($"[match] picked up {CrateRules.Id(m.Kind)} {m.Amount}/{m.Amount2} layers {m.Layers}");
     }
 
     private (string Name, Side Side) Describe(PlayerStats[] players, int tankId, byte ownTeam)

@@ -1,6 +1,6 @@
 # main 上 build.json 的 version 变了（远端还没有 tag v<version>）就自动发布：
 #   plan    → 判断要不要发
-#   build   → macOS runner 上跑测试、导出三平台客户端、发布四平台专用服务器（tools/ship.sh build）
+#   build   → macOS runner 上跑测试、导出 macOS 客户端、发布 macOS 专用服务器（arm64、x64）（tools/ship.sh build）
 #   publish → 建 tag 和 GitHub Release、上传附件（tools/ship.sh github），
 #             再把客户端发到公开仓库 Murphycx94/BattleCity-updates 并推送签名清单（tools/ship.sh feed，游戏内在线升级用）
 # 在线升级需要两个仓库 secret（没配就跳过这一步，并给出警告）：
@@ -70,7 +70,7 @@ jobs:
           path: |
             ~/godot
             ~/Library/Application Support/Godot/export_templates
-          key: godot-${{ env.GODOT_VERSION }}-stable-mono-macos-templates-v1
+          key: godot-${{ env.GODOT_VERSION }}-stable-mono-macos-templates-v2
 
       - name: Install Godot (.NET) and export templates
         if: steps.godot-cache.outputs.cache-hit != 'true'
@@ -81,9 +81,8 @@ jobs:
           curl -fsSL --retry 3 -o "$dl/editor.zip" "$base/Godot_v${GODOT_VERSION}-stable_mono_macos.universal.zip"
           ditto -x -k "$dl/editor.zip" "$HOME/godot"
           curl -fsSL --retry 3 -o "$dl/templates.tpz" "$base/Godot_v${GODOT_VERSION}-stable_mono_export_templates.tpz"
-          # 只留导出 macOS / Windows x86_64 / Linux x86_64 用得到的模板（整包 1.1 GB）
-          unzip -q "$dl/templates.tpz" 'templates/macos.zip' 'templates/windows_*_x86_64*' \
-            'templates/linux_*.x86_64' 'templates/version.txt' 'templates/icudt_godot.dat' -d "$dl"
+          # 只支持 macOS：只留导出 macOS 用得到的模板（整包 1.1 GB）
+          unzip -q "$dl/templates.tpz" 'templates/macos.zip' 'templates/version.txt' 'templates/icudt_godot.dat' -d "$dl"
           dest="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable.mono"
           mkdir -p "$dest"
           mv "$dl"/templates/* "$dest/"

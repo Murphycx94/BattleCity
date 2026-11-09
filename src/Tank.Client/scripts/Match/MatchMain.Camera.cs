@@ -5,8 +5,8 @@ using Tank.Client.Driving;
 using Tank.Client.World;
 using Tank.Net.Battle;
 using Tank.Sim.Maps;
-using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
+using SN = System.Numerics;
 
 namespace Tank.Client.Match;
 
@@ -15,7 +15,8 @@ namespace Tank.Client.Match;
 /// and the gun is laid where it looks, unless a fixed preset frames the shot or the player holds free look; a wreck's gun
 /// stays put. Dead, the camera walks the spectate chain (<see cref="SpectateState"/>): the wreck close-up, a followed
 /// tank, or the free focus WASD drives. The mouse is captured on entering (not in scripted or captured runs), let go by
-/// Esc — which brings up the pause layer — or by losing focus, and taken again by 继续 or a click.
+/// Esc — which brings up the pause layer — or by losing focus, and taken again by 继续 or a click. M opens and closes
+/// the full map, which Esc closes first; it neither takes the mouse nor pauses.
 /// </summary>
 public partial class MatchMain
 {
@@ -55,6 +56,21 @@ public partial class MatchMain
         }
         // The scope is the gun's: not for the dead (they hold Shift to speed the free camera), nor paused, on the results or before the own tank is there.
         if (e.IsActionPressed(DriveInput.SniperToggle) && _camera is not null && _client.HasTank && !_dead && !Paused && !_resultsShown) _camera.ToggleSniper();
+        // M opens and closes the full map (not over the pause layer or the results, nor while loading hides the map); it
+        // neither pauses nor takes the mouse.
+        if (e.IsActionPressed(DriveInput.MapToggle) && _minimap is { Visible: true } && !Paused && !_resultsShown)
+        {
+            _minimap.ToggleFull();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        // Esc closes an open full map first, and that is all it does.
+        if (e.IsActionPressed(DriveInput.UiCancel) && _minimap is { FullOpen: true })
+        {
+            _minimap.CloseFull();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (e.IsActionPressed(DriveInput.UiCancel) && !_resultsShown)
         {
             if (Paused) Resume();
@@ -68,6 +84,7 @@ public partial class MatchMain
     {
         Input.MouseMode = Input.MouseModeEnum.Visible;
         _input.ReleaseAll();
+        _minimap?.CloseFull();
         if (_pause is null)
         {
             _pause = new PauseOverlay(_client.IsHost);
@@ -100,7 +117,14 @@ public partial class MatchMain
     /// </summary>
     private (TankState?, TankPose?) UpdateView(bool hasTank, in TankState own, TankPose pose, Battlefield field, float fdt)
     {
-        if (!hasTank) return (null, null);
+        if (!hasTank)
+        {
+            // The zone and crate presets need no tank: with none they look from the side of the wall, or at the crate, nearest the middle of the map.
+            var middle = new SN.Vector2(field.Terrain.SizeX / 2f, field.Terrain.SizeZ / 2f);
+            if (_automation.HasPreset && _automation.Preset == ZoneCamera.Preset) LookAtZoneWall(middle);
+            else if (_automation.HasPreset && _automation.Preset == CrateCamera.Preset) LookAtCrate(middle);
+            return (null, null);
+        }
         if (!_dead || _automation.HasPreset)
         {
             UpdateCamera(own, pose, field);
@@ -114,11 +138,22 @@ public partial class MatchMain
     {
         if (_automation.CameraAngles(own.Yaw) is { } angles) _camera.SetAngles(angles.Yaw, angles.Pitch);
         Vector3 pivot = pose.Position.ToGodot();
-        _camera.Follow(pivot, (pose.Trunnion(own.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain);
+        _camera.Follow(pivot, (pose.Trunnion(own.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain, field.WaterLevel);
         if (_automation.HasPreset)
         {
-            var (eye, target) = CameraPresets.Get(_automation.Preset!, pivot, own.Yaw, _time, _groundAt, targetIndex: 0);
-            _camera.Camera.LookAtFromPosition(eye, target, Vector3.Up);
+            string preset = _automation.Preset!;
+            if (preset == ZoneCamera.Preset)
+            {
+                LookAtZoneWall(own.Position);
+                return;
+            }
+            if (preset == CrateCamera.Preset)
+            {
+                LookAtCrate(own.Position);   // nothing known yet: the follow camera above stays
+                return;
+            }
+            var (eye, target) = CameraPresets.Get(preset, pivot, own.Yaw, _time, _groundAt, targetIndex: 0, site: _site);
+            _mapViewOn = CameraPresets.Look(_camera.Camera, preset, eye, target, _site, _world!, _mapViewOn);
         }
         else if (!own.IsDestroyed && !_input.FreeLook)
         {
@@ -126,20 +161,37 @@ public partial class MatchMain
         }
     }
 
+    /// <summary>The zone preset (a royale only): from inside this frame's safe circle, on the side nearest <paramref name="near"/>, looking out at the wall (<see cref="ZoneCamera.Pose"/>).</summary>
+    private void LookAtZoneWall(SN.Vector2 near)
+    {
+        var (eye, target) = ZoneCamera.Pose(_zone.Current, near, _groundAt);
+        _mapViewOn = CameraPresets.Look(_camera.Camera, ZoneCamera.Preset, eye.ToGodot(), target.ToGodot(), _site, _world!, _mapViewOn);
+    }
+
+    /// <summary>The crate preset (a royale only): the known, standing crate nearest <paramref name="near"/> up close (<see cref="CrateCamera.TryPose"/>); none known, the camera is left as it is.</summary>
+    private void LookAtCrate(SN.Vector2 near)
+    {
+        if (!CrateCamera.TryPose(_client.Crates, near, _groundAt, out SN.Vector3 eye, out SN.Vector3 focus)) return;
+        _mapViewOn = CameraPresets.Look(_camera.Camera, CrateCamera.Preset, eye.ToGodot(), focus.ToGodot(), _site, _world!, _mapViewOn);
+    }
+
     /// <summary>
     /// One spectating frame (blueprint §5 T8): Q, E and a click step through the living candidates, F frees the camera
-    /// (free-for-all only), and <see cref="SpectateState"/> runs the close-up and the fallbacks. Returns what the world
+    /// (free-for-all and royale; duos once no team-mate is left, <see cref="SpectateCandidates.MayRoam"/>), and
+    /// <see cref="SpectateState"/> runs the close-up and the fallbacks. Returns what the world
     /// should treat as the followed tank.
     /// </summary>
     private (TankState?, TankPose?) UpdateSpectate(in TankState own, TankPose ownPose, Battlefield field, float fdt)
     {
-        FillCandidates();
+        byte ownTeam = OwnTeam(_client.Own);
+        SpectateCandidates.Fill(Mode, ownTeam, _client.Others, _candidates);
         ReadOnlySpan<int> candidates = CollectionsMarshal.AsSpan(_candidates);
         int step = _input.TakeSpectateStep() + (_input.TakeSpectateClick() ? 1 : 0);
         if (step != 0) _spectate.Step(step, candidates);
-        bool freeForAll = Mode == BattleMode.FreeForAll;
-        if (_input.TakeSpectateFree() && freeForAll) _spectate.GoFree();
-        _spectate.Update(fdt, candidates, freeWhenNone: freeForAll);
+        // Free-for-all and royale, or duos with the team-mate gone: the dead may roam, and do when nobody is left to follow.
+        bool mayRoam = SpectateCandidates.MayRoam(Mode, ownTeam, _client.Others);
+        if (_input.TakeSpectateFree() && mayRoam) _spectate.GoFree();
+        _spectate.Update(fdt, candidates, freeWhenNone: mayRoam);
 
         (_spectateName, _spectateFree) = (null, false);
         if (_spectate.Current == SpectateState.Mode.Follow && TryFindRemote(_spectate.TargetId, out RemoteTank remote))
@@ -148,7 +200,7 @@ public partial class MatchMain
             TankPose pose = TankPose.Compute(target, field.Terrain);
             _focus = target.Position;
             _spectateName = SpectateNameOf(target.Id);
-            _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(target.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain);
+            _camera.Follow(pose.Position.ToGodot(), (pose.Trunnion(target.Spec) + pose.Up * SniperEyeAboveTrunnion).ToGodot(), field.Terrain, field.WaterLevel);
             return (target, pose);
         }
         if (_spectate.Current == SpectateState.Mode.Free)
@@ -156,27 +208,15 @@ public partial class MatchMain
             _spectateFree = true;
             var (throttle, steer, _) = Paused ? default : _input.Peek();
             _focus = SpectateState.MoveFocus(_focus, _camera.Yaw, throttle, steer, _input.SpectateFast, fdt, field);
-            Vector3 point = _focus.Ground(field.Terrain.HeightAt(_focus.X, _focus.Y));
-            _camera.Follow(point, point, field.Terrain);
+            // The focus rides on the water where there is some (stage 5 design §2), so the camera never sinks into it.
+            float surface = field.Terrain.HeightAt(_focus.X, _focus.Y);
+            if (field.WaterLevel is { } water) surface = MathF.Max(surface, water);
+            Vector3 point = _focus.Ground(surface);
+            _camera.Follow(point, point, field.Terrain, field.WaterLevel);
             return (null, null);
         }
         UpdateCamera(own, ownPose, field);   // the wreck close-up (and the odd frame a followed tank just vanished)
         return (own, ownPose);
-    }
-
-    /// <summary>The tanks a dead player may watch, in the interpolator's order: living teammates in a team mode, everyone alive in a free-for-all.</summary>
-    private void FillCandidates()
-    {
-        _candidates.Clear();
-        bool teams = ModeRules.HasTeams(Mode);
-        byte ownTeam = OwnTeam(_client.Own);
-        IReadOnlyList<RemoteTank> others = _client.Others;
-        for (int i = 0; i < others.Count; i++)
-        {
-            BattleEntity entity = others[i].Entity;
-            if (entity.Has(TankFlags.Destroyed) || (teams && entity.Team != ownTeam)) continue;
-            _candidates.Add(entity.Id);
-        }
     }
 
     private bool TryFindRemote(int tankId, out RemoteTank remote)

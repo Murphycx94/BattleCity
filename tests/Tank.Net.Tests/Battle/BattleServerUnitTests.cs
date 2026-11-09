@@ -67,7 +67,7 @@ public sealed class BattleServerUnitTests
     public void A_viewer_sees_its_team_wrecks_and_what_its_team_spots()
     {
         var (sim, vision, me, mate, near, far) = World();
-        var viewer = new Viewer(0, me, false, FreeForAll: false);
+        var viewer = new Viewer(0, me, false, SeesAllWhenDead: false);
         Assert.True(viewer.SeesTank(me, sim, vision));
         Assert.True(viewer.SeesTank(mate, sim, vision));
         Assert.True(viewer.SeesTank(near, sim, vision));
@@ -80,10 +80,10 @@ public sealed class BattleServerUnitTests
     public void A_dead_viewer_in_a_free_for_all_sees_everything_a_dead_team_viewer_does_not()
     {
         var (sim, vision, me, _, _, far) = World();
-        Assert.False(new Viewer(0, me, OwnDestroyed: true, FreeForAll: false).SeesTank(far, sim, vision));
-        Assert.True(new Viewer(0, me, OwnDestroyed: true, FreeForAll: true).SeesTank(far, sim, vision));
-        Assert.True(new Viewer(0, 0, false, FreeForAll: true).SeesTank(far, sim, vision), "no tank yet: watching");
-        Assert.False(new Viewer(0, me, false, FreeForAll: true).SeesTank(far, sim, vision), "alive: own eyes only");
+        Assert.False(new Viewer(0, me, OwnDestroyed: true, SeesAllWhenDead: false).SeesTank(far, sim, vision));
+        Assert.True(new Viewer(0, me, OwnDestroyed: true, SeesAllWhenDead: true).SeesTank(far, sim, vision));
+        Assert.True(new Viewer(0, 0, false, SeesAllWhenDead: true).SeesTank(far, sim, vision), "no tank yet: watching");
+        Assert.False(new Viewer(0, me, false, SeesAllWhenDead: true).SeesTank(far, sim, vision), "alive: own eyes only");
     }
 
     [Fact]

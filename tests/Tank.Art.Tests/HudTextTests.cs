@@ -234,6 +234,59 @@ public class HudTextTests
         Assert.Equal("对局结束", HudText.Results(BattleMode.FreeForAll, 0, 0, Verdict(winnerSlot: 4), default, players, new string?[BattleProtocol.MaxPlayers]).Title);
     }
 
+    private static PlayerStats[] RoyaleField(byte ownRank, int alive = 1)
+    {
+        var players = new PlayerStats[BattleProtocol.MaxPlayers];
+        for (int i = 0; i < players.Length; i++) players[i] = new PlayerStats { Active = true, Team = (byte)i, Alive = i < alive, Rank = (byte)(i + 1) };
+        players[0].Rank = ownRank;
+        return players;
+    }
+
+    private static ResultsParts RoyaleResults(byte ownRank, int entrants = 16) =>
+        HudText.Results(BattleMode.Royale, 0, 0, new ResultsInfo(MatchRules.NoTeam, 0, 0, false, MatchEndReason.Eliminated, entrants), default, RoyaleField(ownRank),
+            new string?[BattleProtocol.MaxPlayers]);
+
+    [Fact]
+    public void Coming_first_in_a_royale_is_the_chicken_dinner()
+    {
+        ResultsParts parts = RoyaleResults(ownRank: 1);
+
+        Assert.Equal(("吃鸡！", "共 16 名", ResultTone.Win), (parts.Title, parts.Subtitle, parts.Tone));
+        Assert.Equal(HudText.RoyaleWinTitle, parts.Title);
+    }
+
+    [Fact]
+    public void Any_other_place_in_a_royale_is_the_place_of_the_entrants()
+    {
+        ResultsParts parts = RoyaleResults(ownRank: 7);
+
+        Assert.Equal(("第 7 名", "共 16 名", ResultTone.Neutral), (parts.Title, parts.Subtitle, parts.Tone));
+        Assert.Equal("共 4 名", RoyaleResults(ownRank: 2, entrants: 4).Subtitle);
+        Assert.Equal(("第 7 名", ""), (RoyaleResults(ownRank: 7, entrants: 0).Title, RoyaleResults(ownRank: 7, entrants: 0).Subtitle));   // no count rather than "共 0 名"
+    }
+
+    [Fact]
+    public void No_rank_in_a_royale_just_says_the_match_is_over()
+    {
+        ResultsParts parts = RoyaleResults(ownRank: 0);
+
+        Assert.Equal(("对局结束", "共 16 名", ResultTone.Neutral), (parts.Title, parts.Subtitle, parts.Tone));
+    }
+
+    [Fact]
+    public void A_royale_plate_is_the_own_kills_and_the_field_left_like_a_free_for_all()
+    {
+        PlayerStats[] players = RoyaleField(ownRank: 0, alive: 12);
+        for (int i = 0; i < players.Length; i++) players[i].Rank = 0;
+        players[0].Kills = 3;
+
+        PlateValues plate = HudText.Plate(BattleMode.Royale, ownSlot: 0, ownTeam: 0, default, players);
+        PlateParts parts = HudText.Parts(plate);
+
+        Assert.Equal(new PlateValues(PlateKind.SoloKills, 3, 0, 12, 16), plate);
+        Assert.Equal(("击毁", "3", "存活", "12/16"), (parts.LeftCaption, parts.LeftValue, parts.RightCaption, parts.RightValue));
+    }
+
     [Theory]
     [InlineData(8 * Hz, false, "8 秒后返回房间")]
     [InlineData(8 * Hz - 1, false, "8 秒后返回房间")]

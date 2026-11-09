@@ -3,15 +3,18 @@ namespace Tank.Client.Match;
 /// <summary>
 /// One line of the kill feed: who knocked out whom, each with the side they are on (for the colours). A shooter the
 /// server hid from the player (id 0) has no name: the line then reads "victim 被击毁". <c>Friendly</c> is a kill within one side.
+/// <c>Zone</c> is a tank the zone finished (stage 6 design §3.2; no killer either): "victim 死于毒圈".
 /// </summary>
-public readonly record struct FeedLine(string? Killer, Side KillerSide, string Victim, Side VictimSide, bool Friendly, double ExpiresAt)
+public readonly record struct FeedLine(string? Killer, Side KillerSide, string Victim, Side VictimSide, bool Friendly, double ExpiresAt, bool Zone = false)
 {
-    public const string KilledVerb = "击毁", FriendlyVerb = "误伤", HiddenShooterTail = "被击毁";
+    public const string KilledVerb = "击毁", FriendlyVerb = "误伤", HiddenShooterTail = "被击毁", ZoneTail = "死于毒圈";
 
     /// <summary>The whole line as text; allocates, so read it when the feed changed.</summary>
-    public string Text => Killer is null
-        ? $"{Victim} {HiddenShooterTail}"
-        : $"{Killer} {(Friendly ? FriendlyVerb : KilledVerb)} {Victim}";
+    public string Text => Zone
+        ? $"{Victim} {ZoneTail}"
+        : Killer is null
+            ? $"{Victim} {HiddenShooterTail}"
+            : $"{Killer} {(Friendly ? FriendlyVerb : KilledVerb)} {Victim}";
 }
 
 /// <summary>
@@ -36,14 +39,21 @@ public sealed class KillFeed
 
     /// <param name="killer">The shooter's name, or null when the shooter is unknown (id 0).</param>
     /// <param name="now">Seconds on the clock the caller reads <see cref="Visible"/> with.</param>
-    public void Add(string? killer, Side killerSide, string victim, Side victimSide, bool friendly, double now)
+    public void Add(string? killer, Side killerSide, string victim, Side victimSide, bool friendly, double now) =>
+        Push(new FeedLine(killer, killerSide, victim, victimSide, friendly, now + Lifetime));
+
+    /// <summary>A tank the zone finished: "<paramref name="victim"/> 死于毒圈", nobody's kill.</summary>
+    public void AddZone(string victim, Side victimSide, double now) =>
+        Push(new FeedLine(null, victimSide, victim, victimSide, Friendly: false, now + Lifetime, Zone: true));
+
+    private void Push(in FeedLine line)
     {
         if (_count == Capacity)
         {
             Array.Copy(_lines, 1, _lines, 0, Capacity - 1);
             _count--;
         }
-        _lines[_count++] = new FeedLine(killer, killerSide, victim, victimSide, friendly, now + Lifetime);
+        _lines[_count++] = line;
         Revision++;
     }
 

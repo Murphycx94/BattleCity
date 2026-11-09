@@ -9,8 +9,9 @@ namespace Tank.Client.Overlay;
 /// as a big outlined number and a shell icon with the reload state ("就绪" in the accent colour, or the seconds left);
 /// and two ammo chips, "1 穿甲 40" and "2 高爆 15", the loaded one outlined in the accent colour, an empty one greyed.
 /// The vehicle's name ("中型坦克") sits just above the panel, and the "被点亮" lamp on its top-right corner: dark, or
-/// lit warm yellow with a glow, rays and the words "被点亮" while an enemy sees the player (stage 3 design §4.3). Icons are
-/// drawn with primitives, no image files. Redraws only when something it shows changes.
+/// lit warm yellow with a glow, rays and the words "被点亮" while an enemy sees the player (stage 3 design §4.3). Over
+/// the name, a smaller ground hint ("公路 ×1.15", <see cref="GroundText"/>) while the ground changes the top speed
+/// (riverland design §6.7). Icons are drawn with primitives, no image files. Redraws only when something it shows changes.
 /// </summary>
 public partial class StatusPanel : Control
 {
@@ -26,6 +27,8 @@ public partial class StatusPanel : Control
     private const int ChipSize = 22;
     private const int NameSize = 24;
     private const float NameGap = 10f;   // between the name's baseline and the panel's top
+    private const int GroundSize = 20;
+    private const float GroundRise = 30f;   // the ground hint's baseline sits this far above the name's
     private const float HealthRow = 34f, GaugeRow = 64f, ChipRow = 40f, RowGap = 4f;
     private const float BarHeight = 16f;
     private const float ChipPad = 10f, ChipGap = 12f;
@@ -59,6 +62,7 @@ public partial class StatusPanel : Control
     private int _health = -1, _maxHealth = 1;
     private string _healthText = "";
     private string _vehicle = "";
+    private string? _ground;
     private AmmoType _ammo;
     private int _apLeft = -1, _heLeft = -1;
     private string _apText = "", _heText = "";
@@ -84,6 +88,14 @@ public partial class StatusPanel : Control
     {
         if (name == _vehicle) return;
         _vehicle = name;
+        QueueRedraw();
+    }
+
+    /// <summary>The ground hint drawn over the vehicle name; null hides it. Redraws only when it changes.</summary>
+    public void SetGround(string? text)
+    {
+        if (text == _ground) return;
+        _ground = text;
         QueueRedraw();
     }
 
@@ -119,6 +131,7 @@ public partial class StatusPanel : Control
         var origin = new Vector2(Margin, Size.Y - Margin - PanelHeight);
         DrawStyleBox(_box, new Rect2(origin, new Vector2(_panelWidth, PanelHeight)));
         HudStyle.DrawOutlined(this, new Vector2(origin.X + Pad, origin.Y - NameGap), _vehicle, NameSize, HudStyle.Text, 4);
+        if (_ground != null) HudStyle.DrawOutlined(this, new Vector2(origin.X + Pad, origin.Y - NameGap - GroundRise), _ground, GroundSize, HudStyle.Text, 4);
         DrawLamp(new Vector2(origin.X + _panelWidth - Pad - LampRadius, origin.Y - LampRise));
         float y = origin.Y + Pad;
         DrawHealth(origin.X, y + HealthRow / 2);

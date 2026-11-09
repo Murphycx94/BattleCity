@@ -4,6 +4,7 @@ using Godot;
 using Tank.Client.Match;
 using Tank.Client.Online;
 using Tank.Client.Sandbox;
+using Tank.Client.UI;
 using Tank.Net.Battle;
 using Tank.Sim.Modes;
 
@@ -12,12 +13,16 @@ namespace Tank.Client.Bootstrap;
 /// <summary>Main's transitions: hosting and joining, leaving, entering and leaving the match, and the sandbox.</summary>
 public partial class Main
 {
-    private const string AppTitle = "坦克 3D";
+    private readonly SeatTokens _seatTokens = new();
+    private (string Host, int Port)? _joined;   // the room the session joined, for its token; null when hosting
 
     private void Host(string name)
     {
         LeaveOld();
-        var settings = new HostSettings(name, $"{name}的房间", _options.Port, _options.Mode ?? BattleMode.TeamBattle, _options.Bots, _options.Seed, _options.MatchSeconds);
+        _joined = null;
+        // A room opens on the mode's own map when it has one (a royale: the riverland), else on --map when given, else on the riverland (stage 5 design §2).
+        var settings = new HostSettings(name, $"{name}的房间", _options.Port, _options.Mode ?? BattleMode.TeamBattle, _options.Bots, _options.Seed,
+            _options.MatchSeconds, _options.HostMap);
         try
         {
             BattleSession session = _options.Loopback
@@ -43,12 +48,18 @@ public partial class Main
         Join(_menu.PlayerName, address, port);
     }
 
+    /// <summary>
+    /// Joins the room at <paramref name="host"/>:<paramref name="port"/> with the token it gave this game last time, if
+    /// any (<see cref="SeatTokens"/>): in any mode a player back within the grace period gets the seat still held, and
+    /// one who left a match without respawns can't come back into it with a fresh tank.
+    /// </summary>
     private void Join(string name, string host, int port)
     {
         LeaveOld();
+        _joined = (host, port);
         try
         {
-            StartSession(BattleSession.Join(host, port, name), $"正在连接 {host}:{port}…");
+            StartSession(BattleSession.Join(host, port, name, _seatTokens.For(host, port)), $"正在连接 {host}:{port}…");
         }
         catch (Exception ex) when (ex is InvalidOperationException or SocketException or ArgumentException)
         {
@@ -71,7 +82,7 @@ public partial class Main
         _session = session;
         _reconnect = new Reconnector();
         // --bots is only a request when given; 0 is also the default, and the host's own settings already carry it.
-        _auto = new AutoRoom(_options.Tank, _options.Mode, _options.Bots > 0 ? _options.Bots : null, _options.AutoStart);
+        _auto = new AutoRoom(_options.Tank, _options.Mode, _options.Bots > 0 ? _options.Bots : null, _options.AutoStart, _options.Team);
         _room.Bind(session.Client, LocalAddresses(session));
         _menu.SetStatus(status);
     }
@@ -80,6 +91,7 @@ public partial class Main
     private void LeaveSession(string? message, bool error = false)
     {
         if (_matchView is not null) LeaveMatch();
+        if (_session is { IsHosting: false } joined && _joined is { } room) _seatTokens.Remember(room.Host, room.Port, joined.Client.SessionToken);
         _session?.Dispose();
         _session = null;
         _reconnect = null;
@@ -97,6 +109,7 @@ public partial class Main
             _room.Visible = true;
         }
         _auto?.Next(client.Room, client.Slot, client.IsHost, _options.Players).SendTo(client);
+        if (_auto?.TakeWarning() is { } warning) GD.PushWarning(warning);
         _room.Refresh();
     }
 
@@ -105,7 +118,7 @@ public partial class Main
     {
         _menu.Visible = false;
         _room.Visible = false;
-        GD.Print($"[match] entered match {client.Room?.Mode} as slot {client.Slot}");
+        GD.Print($"[match] entered match {client.Room?.Mode} on {client.Room?.Map} as slot {client.Slot}");
         var match = new MatchMain();
         match.Setup(_session!, _options, _screenshotTaken);
         _matchEntered = true;   // from now on the matches own the screenshot (RunAutomation)
@@ -123,7 +136,7 @@ public partial class Main
         _matchView?.QueueFree();
         _matchView = null;
         Input.MouseMode = Input.MouseModeEnum.Visible;
-        GetWindow().Title = AppTitle;
+        WindowTitle.Set(this, MapText.AppTitle);
         _auto?.Reset();
     }
 
@@ -194,7 +207,7 @@ public partial class Main
         _sandbox?.QueueFree();
         _sandbox = null;
         Input.MouseMode = Input.MouseModeEnum.Visible;
-        GetWindow().Title = AppTitle;
+        WindowTitle.Set(this, MapText.AppTitle);
         _menu.Visible = true;
         _menu.SetStatus("");
     }

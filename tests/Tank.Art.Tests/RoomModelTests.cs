@@ -13,6 +13,17 @@ public class RoomModelTests
         new(mode, host, (byte)bots, running, players);
 
     [Fact]
+    public void A_standard_room_is_titled_by_its_mode_and_map_with_the_modes_rule()
+    {
+        var room = new RoomStateMessage(BattleMode.Standard, 0, 0, false, new[] { P(0, "Ann", 0) }, "riverland");
+
+        RoomModel model = RoomModel.Build(room, 0);
+
+        Assert.Equal("标准战 · 河谷", model.Title);
+        Assert.Equal(ModeText.Rule(BattleMode.Standard), model.RuleLine);
+    }
+
+    [Fact]
     public void Team_columns_are_mine_and_theirs_whatever_the_team_number()
     {
         RoomStateMessage room = Room(BattleMode.TeamBattle, 0, 0, false,

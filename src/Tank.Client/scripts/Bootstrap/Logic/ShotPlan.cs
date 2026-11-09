@@ -23,6 +23,21 @@ public enum ShotMoment
     Death,
     /// <summary>The results came up (a match only).</summary>
     Ended,
+    /// <summary>The player's own live tank was first outside the zone's safe circle (a royale or duos match only).</summary>
+    Outside,
+    /// <summary>The player first ate a supply crate (its own Crate message; a royale or duos match only).</summary>
+    Pickup,
+}
+
+/// <summary>What <see cref="ShotPlan.TakeScreenshot(double, bool)"/> says to do this frame.</summary>
+public enum ShotCall
+{
+    /// <summary>Nothing: not due, already taken, or held for the map.</summary>
+    None,
+    /// <summary>Take it now.</summary>
+    Take,
+    /// <summary>Take it now, though the map's picture is still not there: the wait (<see cref="ShotPlan.MapWaitSeconds"/>) ran out.</summary>
+    TakeWithoutMap,
 }
 
 /// <summary>
@@ -35,6 +50,8 @@ public enum ShotMoment
 /// or one its run can never reach (<c>death</c> in the sandbox, say, or <c>ended</c> later than the results stay up), is
 /// a line in <see cref="Warnings"/>, never silently swallowed; an unmappable one falls back to the start schedule.
 /// A run takes one screenshot: a plan told it was already taken elsewhere (<see cref="MarkScreenshotTaken"/>) takes none.
+/// A scene whose map is still baking holds a due screenshot (<see cref="TakeScreenshot(double, bool)"/>) up to
+/// <see cref="MapWaitSeconds"/> past its time, and the quit waits with it: under load the bake can outlast the shot's moment.
 /// </summary>
 public sealed class ShotPlan
 {
@@ -44,8 +61,11 @@ public sealed class ShotPlan
     /// <summary>How long the results stay up before the server sends everyone back to the room (and the match scene goes).</summary>
     public const double ResultsStaySeconds = ModeRules.ResultsTicks / (double)SimConstants.TickRate;
 
+    /// <summary>How long past its due time a screenshot waits for the scene's map picture before it is taken anyway, s.</summary>
+    public const double MapWaitSeconds = 20;
+
     private static readonly ShotMoment[] SandboxMoments = { ShotMoment.Fire, ShotMoment.Hit, ShotMoment.Kill, ShotMoment.Prop, ShotMoment.Down };
-    private static readonly ShotMoment[] MatchMoments = { ShotMoment.Fire, ShotMoment.Hit, ShotMoment.Kill, ShotMoment.Death, ShotMoment.Ended };
+    private static readonly ShotMoment[] MatchMoments = { ShotMoment.Fire, ShotMoment.Hit, ShotMoment.Kill, ShotMoment.Death, ShotMoment.Ended, ShotMoment.Outside, ShotMoment.Pickup };
 
     private readonly double[] _firstSeen = NotSeenYet();   // per ShotMoment: when it first happened, s; -1 not yet
     private readonly double _countFrom;
@@ -53,6 +73,7 @@ public sealed class ShotPlan
     private readonly ShotMoment _shotAfter;
     private readonly double _shotDelay;
     private bool _screenshotTaken;
+    private bool _holdingForMap;   // the last TakeScreenshot held a due screenshot for the map
 
     private ShotPlan(LaunchOptions options, string where, ShotMoment[] supported)
     {
@@ -113,16 +134,33 @@ public sealed class ShotPlan
         if (time >= _countFrom && _firstSeen[(int)moment] < 0) _firstSeen[(int)moment] = time;
     }
 
-    /// <summary>True exactly once, the frame the screenshot falls due.</summary>
-    public bool TakeScreenshot(double time)
+    /// <summary>True exactly once, the frame the screenshot falls due (a scene with nothing to wait for).</summary>
+    public bool TakeScreenshot(double time) => TakeScreenshot(time, mapReady: true) != ShotCall.None;
+
+    /// <summary>
+    /// Once a frame while there is a screenshot to take: <see cref="ShotCall.Take"/> exactly once, the first frame it is
+    /// due with <paramref name="mapReady"/> (the scene has no map, or its picture is up); a due screenshot whose map is not
+    /// ready is held (<see cref="HoldingForMap"/>) until it is, or until <see cref="MapWaitSeconds"/> past its time, when it
+    /// is <see cref="ShotCall.TakeWithoutMap"/>.
+    /// </summary>
+    public ShotCall TakeScreenshot(double time, bool mapReady)
     {
-        if (_screenshotTaken || !ScreenshotDue(time)) return false;
+        _holdingForMap = false;
+        if (_screenshotTaken || !ScreenshotDue(time)) return ShotCall.None;
+        if (!mapReady && time < DueTime + MapWaitSeconds)
+        {
+            _holdingForMap = true;
+            return ShotCall.None;
+        }
         _screenshotTaken = true;
-        return true;
+        return mapReady ? ShotCall.Take : ShotCall.TakeWithoutMap;
     }
 
-    /// <summary>Whether <c>--quit-after</c> has run out.</summary>
-    public bool QuitDue(double time) => _quitAfter > 0 && time >= _quitAfter;
+    /// <summary>Whether the last <see cref="TakeScreenshot(double, bool)"/> held a due screenshot for the map (the quit waits for it).</summary>
+    public bool HoldingForMap => _holdingForMap;
+
+    /// <summary>Whether <c>--quit-after</c> has run out, and no screenshot is held for the map.</summary>
+    public bool QuitDue(double time) => _quitAfter > 0 && time >= _quitAfter && !_holdingForMap;
 
     /// <summary>--shot-after waits for its moment, --fx-shot for the player's first shot, otherwise --screenshot-at counts from the start.</summary>
     private static (ShotMoment After, double Delay) PlanScreenshot(LaunchOptions options, string where, ShotMoment[] supported, List<string> warnings)
@@ -138,7 +176,7 @@ public sealed class ShotPlan
                         $"--shot-after ended:{options.ShotAfterDelay} falls after the results have gone (they stay {ResultsStaySeconds} s); the screenshot will not be taken."));
                 return (moment, options.ShotAfterDelay);
             }
-            warnings.Add($"Unknown --shot-after moment '{awaited}'; use fire|hit|kill|prop|down|death|ended. Using --screenshot-at.");
+            warnings.Add($"Unknown --shot-after moment '{awaited}'; use fire|hit|kill|prop|down|death|ended|outside|pickup. Using --screenshot-at.");
         }
         if (options.FxShotDelay is { } fxDelay) return (ShotMoment.Fire, fxDelay);
         return (ShotMoment.Start, options.ScreenshotAt);
@@ -155,16 +193,17 @@ public sealed class ShotPlan
             "down" => (true, ShotMoment.Down),
             "death" => (true, ShotMoment.Death),
             "ended" => (true, ShotMoment.Ended),
+            "outside" => (true, ShotMoment.Outside),
+            "pickup" => (true, ShotMoment.Pickup),
             _ => (false, ShotMoment.Start),
         };
         return known;
     }
 
-    private bool ScreenshotDue(double time)
-    {
-        double since = _firstSeen[(int)_shotAfter];
-        return since >= 0 && time >= since + _shotDelay;
-    }
+    private bool ScreenshotDue(double time) => _firstSeen[(int)_shotAfter] >= 0 && time >= DueTime;
+
+    /// <summary>When the screenshot falls due; meaningful once its moment has been seen.</summary>
+    private double DueTime => _firstSeen[(int)_shotAfter] + _shotDelay;
 
     /// <summary>Every moment unseen (-1), but the start, which is at 0.</summary>
     private static double[] NotSeenYet()

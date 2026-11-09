@@ -11,7 +11,7 @@ public class LanRoomRowTests
     private static LanRoomRow Row(string name = "Alpha", BattleMode mode = BattleMode.TeamBattle, int players = 3, bool running = false,
         int version = BattleProtocol.Version, int ping = 7) =>
         LanRoomRow.From(new DiscoveredRoom(new IPEndPoint(IPAddress.Parse("192.168.1.20"), 47001),
-            new RoomInfoMessage(version, name, mode, players, BattleProtocol.MaxPlayers, running, 47001), ping, 0));
+            new RoomInfoMessage(version, name, mode, players, ModeRules.MaxPlayersFor(mode), running, 47001), ping, 0));
 
     [Fact]
     public void A_waiting_room_with_space_is_joinable_and_its_line_shows_the_columns()
@@ -41,7 +41,7 @@ public class LanRoomRowTests
     [Fact]
     public void A_full_room_cannot_be_joined()
     {
-        LanRoomRow row = Row(players: BattleProtocol.MaxPlayers);
+        LanRoomRow row = Row(players: ModeRules.MaxPlayersFor(BattleMode.TeamBattle));
         Assert.False(row.Joinable);
         Assert.Equal("房间已满", row.WhyNot);
     }
@@ -49,7 +49,7 @@ public class LanRoomRowTests
     [Fact]
     public void A_version_mismatch_is_reported_before_a_full_room()
     {
-        Assert.Contains("版本不符", Row(players: BattleProtocol.MaxPlayers, version: 1).WhyNot);
+        Assert.Contains("版本不符", Row(players: ModeRules.MaxPlayersFor(BattleMode.TeamBattle), version: 1).WhyNot);
     }
 
     [Fact]

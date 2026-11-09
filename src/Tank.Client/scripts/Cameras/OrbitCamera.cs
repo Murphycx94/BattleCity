@@ -1,5 +1,7 @@
 using Godot;
+using Tank.Client.Minimap;
 using Tank.Sim.Terrain;
+using SN = System.Numerics;
 
 namespace Tank.Client.Cameras;
 
@@ -77,9 +79,28 @@ public partial class OrbitCamera : Node3D
 
     public void ToggleSniper() => Sniper = !Sniper;
 
+    /// <summary>
+    /// The camera's heading on the ground as it is drawn (<see cref="MinimapEyes.CameraYaw"/>): the orbit's yaw, or a
+    /// fixed preset's, which sets the camera itself; looking straight down, its screen's up.
+    /// </summary>
+    public float GroundHeading()
+    {
+        Basis basis = _camera.GlobalBasis;
+        Vector3 forward = -basis.Z, up = basis.Y;
+        return MinimapEyes.CameraYaw(new SN.Vector3(forward.X, forward.Y, forward.Z), new SN.Vector3(up.X, up.Y, up.Z));
+    }
+
+    /// <summary>The camera's horizontal half-angle, radians, for the viewport's visible rectangle: narrower through the scope.</summary>
+    public float HalfFov()
+    {
+        Vector2 size = GetViewport().GetVisibleRect().Size;
+        return MinimapEyes.HalfFov(_camera.Fov, size.Y > 0 ? size.X / size.Y : 1f);
+    }
+
     /// <param name="pivot">Hull origin the orbit circles.</param>
     /// <param name="sniperEye">Eye position in sniper mode, just above the gun.</param>
-    public void Follow(Vector3 pivot, Vector3 sniperEye, HeightField terrain)
+    /// <param name="waterLevel">The map's water surface, if it has one: the eye stays above it as it does above the ground.</param>
+    public void Follow(Vector3 pivot, Vector3 sniperEye, HeightField terrain, float? waterLevel = null)
     {
         _camera.Rotation = new Vector3(-Pitch, Yaw, 0);
         if (Sniper)
@@ -91,7 +112,9 @@ public partial class OrbitCamera : Node3D
         _camera.Fov = BaseFov;
         Vector3 look = -_camera.Basis.Z;
         Vector3 eye = pivot + Vector3.Up * FocusHeight - look * Distance;
-        float floor = terrain.HeightAt(eye.X, eye.Z) + GroundClearance;
+        float surface = terrain.HeightAt(eye.X, eye.Z);
+        if (waterLevel is { } water) surface = MathF.Max(surface, water);
+        float floor = surface + GroundClearance;
         if (eye.Y < floor) eye.Y = floor;
         _camera.Position = eye;
     }

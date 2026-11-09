@@ -83,8 +83,14 @@ public partial class ScorePlate : HudPanel
         HudStyle.DrawOutlinedCentered(this, centerX, top + ValueBaseline, value, ValueSize, color);
     }
 
-    /// <summary>The player's side in blue-grey and the enemy's in red for the team modes; the player's kills in the accent colour for a free-for-all.</summary>
-    private static (Color Left, Color Right) SideColors(PlateKind kind) => kind == PlateKind.SoloKills
-        ? (HudStyle.Accent, HudStyle.Text)
-        : (MatchColors.Ui(Side.Ally).ToColor(), MatchColors.Ui(Side.Enemy).ToColor());
+    /// <summary>
+    /// The player's side in blue-grey and the enemy's in red for the team modes; the player's kills in the accent colour for
+    /// a free-for-all; duos the own team's kills in blue-grey and the teams left in plain white (they are everyone's, not an enemy's).
+    /// </summary>
+    private static (Color Left, Color Right) SideColors(PlateKind kind) => kind switch
+    {
+        PlateKind.SoloKills => (HudStyle.Accent, HudStyle.Text),
+        PlateKind.DuoTeams => (MatchColors.Ui(Side.Ally).ToColor(), HudStyle.Text),
+        _ => (MatchColors.Ui(Side.Ally).ToColor(), MatchColors.Ui(Side.Enemy).ToColor()),
+    };
 }

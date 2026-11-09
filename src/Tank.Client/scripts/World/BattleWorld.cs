@@ -1,4 +1,5 @@
 using Godot;
+using Tank.Client.Art.Meshes;
 using Tank.Client.Vehicles;
 using Tank.Sim;
 using Tank.Sim.Geometry;
@@ -10,10 +11,11 @@ namespace Tank.Client.World;
 
 /// <summary>
 /// The scenery of a battle (the sandbox's or a match's), built once from the battlefield: sky and sun, terrain, rocks,
-/// bushes, walls and fences, grass and the tree line. Each frame <see cref="Update"/> lays the grass flat under the
-/// followed tank (sized for whichever tank it is now), streams grass detail around the view, lets the bushes part
-/// around the hull, and shows the props as they stand now (rubble, fallen fences, bushes shot away). With no tank to
-/// follow (a free camera) nothing is flattened and the detail streams around the camera.
+/// bushes, walls and fences, water, the forests, the houses, grass and the tree line. Each frame <see cref="Update"/> lays
+/// the grass flat under the followed tank (sized for whichever tank it is now), streams grass detail around the view, lets
+/// the bushes part around the hull, shows the props as they stand now (rubble, fallen fences and trees, collapsing houses
+/// and their ruins, bushes shot away) and makes the bushes, trees and houses in the way see-through. With no tank to follow (a free camera) nothing is flattened and the
+/// detail streams around the camera.
 /// </summary>
 public partial class BattleWorld : Node3D
 {
@@ -24,24 +26,36 @@ public partial class BattleWorld : Node3D
     private GrassField _grass = null!;
     private BushField _bushes = null!;
     private WallViews _walls = null!;
+    private ForestViews _forest = null!;
+    private HouseViews _houses = null!;
+    private WorldEnvironment _environment = null!;
+    private TreeLine _treeLine = null!;
     private SN.Vector2 _flatHalfExtents;
+    private IReadOnlyList<TreeFit.ConiferRegion> _forests = Array.Empty<TreeFit.ConiferRegion>();
     private TankSpec? _flatFor;
     private bool _streamsAroundCamera;
+    private Battlefield? _syncedField;   // the battlefield and state version the bushes and walls were last synced to
+    private int _syncedVersion;
 
     /// <param name="focus">The tank in view, for the first patch of grass streamed in.</param>
-    /// <param name="style">The grass islands and dirt seed of this map.</param>
+    /// <param name="style">The grass islands and dirt seed of this map, used when the field has no ground kinds or water of
+    /// its own, and which map it is: the forests' trees are conifers or broadleaves by its regions.</param>
     /// <param name="streamsAroundCamera">The camera is a fixed far-away preset: stream detail around its eye, not the tank.</param>
     public void Build(Battlefield field, in TankState focus, MapStyle style, bool streamsAroundCamera)
     {
         _field = field;
+        (_syncedField, _syncedVersion) = (null, 0);   // the views below are new: the next frame syncs them, whatever was synced before
         _streamsAroundCamera = streamsAroundCamera;
-        AddChild(Scenery.CreateEnvironment());
+        _environment = Scenery.CreateEnvironment();
+        AddChild(_environment);
         AddChild(Scenery.CreateSun());
         Scenery.ConfigureViewport(GetViewport());
         var terrain = new TerrainMesh();
         AddChild(terrain);
-        var dirt = new DirtMask(field.Terrain.SizeX, field.Terrain.SizeZ, style.GrassIslands, style.Seed);
-        terrain.Build(field.Terrain, dirt);
+        // A map with ground kinds or water brings its own ground; the sandbox's grass islands come from the style.
+        DirtMask dirt = DirtMask.FromField(field) ?? new DirtMask(field.Terrain.SizeX, field.Terrain.SizeZ, style.GrassIslands, style.Seed);
+        GroundMask = dirt;
+        terrain.Build(field.Terrain, dirt, field.WaterLevel);
         var rocks = new RockMeshes();
         AddChild(rocks);
         rocks.Build(field.Props, field.Terrain);
@@ -51,15 +65,45 @@ public partial class BattleWorld : Node3D
         _walls = new WallViews();
         AddChild(_walls);
         _walls.Build(field);
+        var water = new WaterSurface();
+        AddChild(water);
+        water.Build(field);
+        _forests = TreeFit.ForestsOf(style.MapId);
+        _forest = new ForestViews();
+        AddChild(_forest);
+        _forest.Build(field, _forests);
+        _houses = new HouseViews();
+        AddChild(_houses);
+        _houses.Build(field);
         _grass = new GrassField();
         AddChild(_grass);
         _grass.Build(field.Terrain, dirt, field.Props);
         if (!streamsAroundCamera)
             _grass.Update(new Vector3(focus.Position.X, 0, focus.Position.Y), int.MaxValue);   // fill what is in range before the first frame
-        var trees = new TreeLine();
-        AddChild(trees);
-        trees.Build(field);
+        _treeLine = new TreeLine();
+        AddChild(_treeLine);
+        _treeLine.Build(field);
     }
+
+    /// <summary>
+    /// For the top-down "map" preset, which looks at the whole map from far above: no fog, and the tree line and the
+    /// forests drawn however far they are from the camera.
+    /// </summary>
+    public void UseMapView()
+    {
+        _environment.Environment.FogEnabled = false;
+        _treeLine.SetFarView(true);
+        _forest.SetFarView(true);
+    }
+
+    /// <summary>
+    /// The bare-ground mask the terrain and the grass were built with (<see cref="Build"/>), for the minimap's ground; null
+    /// before <see cref="Build"/>. Read-only: the scenery shares it.
+    /// </summary>
+    public DirtMask? GroundMask { get; private set; }
+
+    /// <summary>The map's forests the trees were sorted into conifers and broadleaves by (<see cref="TreeFit.ForestsOf"/>), for the effects.</summary>
+    public IReadOnlyList<TreeFit.ConiferRegion> Forests => _forests;
 
     /// <summary>A resync swapped the battlefield instance; the geometry is the same, only the props' current state is read from it.</summary>
     public void SetField(Battlefield field) => _field = field;
@@ -72,9 +116,9 @@ public partial class BattleWorld : Node3D
         {
             _grass.ClearTankFootprint();
             _grass.Update(cameraPos);
-            _bushes.SyncStanding(_field);
+            SyncProps(delta);
             _bushes.Update(cameraPos, null, delta);
-            _walls.Sync(_field, delta);
+            SyncMapLayers(cameraPos, null, delta);
             return;
         }
         if (player.Spec != _flatFor) (_flatFor, _flatHalfExtents) = (player.Spec, FlatHalfExtents(player.Spec));
@@ -84,13 +128,45 @@ public partial class BattleWorld : Node3D
         Vector3 tankPos = ground.Position.ToGodot();
         _grass.Update(_streamsAroundCamera ? cameraPos
             : new Vector3(Mathf.Lerp(tankPos.X, cameraPos.X, GrassCameraLean), 0f, Mathf.Lerp(tankPos.Z, cameraPos.Z, GrassCameraLean)));
-        _bushes.SyncStanding(_field);
-        _bushes.Update(cameraPos, TankMotion.Footprint(player.Spec, player.Position, player.Yaw), delta);
-        _walls.Sync(_field, delta);
+        SyncProps(delta);
+        Obb2 hull = TankMotion.Footprint(player.Spec, player.Position, player.Yaw);
+        _bushes.Update(cameraPos, hull, delta);
+        SyncMapLayers(cameraPos, hull, delta);
     }
 
-    /// <summary>Lets the walls see which way a fence was pushed down.</summary>
-    public void OnEvent(in GameEvent e) => _walls.OnEvent(e);
+    /// <summary>Lets the walls, the forests and the houses see which way a fence, a tree or a house was pushed down.</summary>
+    public void OnEvent(in GameEvent e)
+    {
+        _walls.OnEvent(e);
+        _forest.OnEvent(e);
+        _houses.OnEvent(e);
+    }
+
+    /// <summary>
+    /// Shows the bushes, walls and fences as the battlefield has them: every one is looked at only when the battlefield
+    /// instance (a resync) or its <see cref="Battlefield.StateVersion"/> changed since the last look; the fences on their way
+    /// down move on every frame.
+    /// </summary>
+    private void SyncProps(float delta)
+    {
+        if (!ReferenceEquals(_field, _syncedField) || _field.StateVersion != _syncedVersion)
+        {
+            (_syncedField, _syncedVersion) = (_field, _field.StateVersion);
+            _bushes.SyncStanding(_field);
+            _walls.SyncStanding(_field);
+        }
+        _walls.Fall(delta);
+    }
+
+    /// <summary>
+    /// The map's props drawn beyond the sandbox's kinds: the forests' trees fall and the houses come down, and both clear
+    /// the view to <paramref name="hull"/> (null: a free camera).
+    /// </summary>
+    private void SyncMapLayers(Vector3 cameraPos, Obb2? hull, float delta)
+    {
+        _forest.Sync(_field, cameraPos, hull, delta);
+        _houses.Sync(_field, cameraPos, hull, delta);
+    }
 
     /// <summary>Half-size of the patch a tank lays flat: its hull and tracks, plus a margin.</summary>
     private static SN.Vector2 FlatHalfExtents(TankSpec spec)

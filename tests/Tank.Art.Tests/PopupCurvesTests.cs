@@ -24,6 +24,17 @@ public class PopupCurvesTests
     }
 
     [Fact]
+    public void Pickup_pops_in_and_settles_at_full_size()
+    {
+        float peak = 0f;
+        for (float t = 0; t < PopupCurves.PickupSettle; t += 0.005f) peak = MathF.Max(peak, PopupCurves.PickupScale(t));
+        Assert.InRange(peak, 1.15f, PopupCurves.VerdictScale(0.12f));
+        Assert.True(PopupCurves.PickupScale(0f) < 0.5f);
+        Assert.Equal(1f, PopupCurves.PickupScale(PopupCurves.PickupSettle));
+        Assert.Equal(1f, PopupCurves.PickupScale(2.5f));
+    }
+
+    [Fact]
     public void Alpha_holds_then_fades_to_nothing()
     {
         Assert.Equal(1f, PopupCurves.Alpha(0.2f, PopupCurves.VerdictLife));

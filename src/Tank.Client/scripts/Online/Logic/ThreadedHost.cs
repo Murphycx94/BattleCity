@@ -3,6 +3,7 @@ using Tank.Net.Battle;
 using Tank.Net.Timing;
 using Tank.Net.Transport;
 using Tank.Sim;
+using Tank.Sim.Maps;
 
 namespace Tank.Client.Online;
 
@@ -40,6 +41,8 @@ internal sealed class ThreadedHost : IHostBackend
                 OwnerToken = ownerToken,
                 Seed = settings.Seed,
                 MatchSeconds = settings.MatchSeconds,
+                Map = MapCatalog.Get(settings.Map),
+                PrepareMapsInBackground = true,   // the riverland takes about a tenth of a second in Release (some 0.4 s in Debug): the room is up meanwhile and says so
             }, log);
             _probe = new TickProbe(server, () => server!.MatchRunning);
             _runner = new ServerRunner(_probe, log, SimConstants.TickRate);

@@ -5,6 +5,21 @@ namespace Tank.Net.Tests.Protocol;
 public sealed class BitStreamTests
 {
     [Fact]
+    public void Reserve_grows_the_buffer_once_and_writes_nothing()
+    {
+        var w = new BitWriter(16);
+        w.WriteByte(7);
+        w.Reserve(1000);
+        Assert.Equal(1001, w.Capacity);    // what is needed, not the doubling's 32
+        Assert.Equal(8, w.BitLength);
+        w.Reserve(500);                    // already room: nothing changes
+        Assert.Equal(1001, w.Capacity);
+        w.WriteAligned(new byte[1000]);
+        Assert.Equal(1001, w.Capacity);
+        Assert.Throws<ArgumentOutOfRangeException>(() => w.Reserve(-1));
+    }
+
+    [Fact]
     public void BitWriter_RoundTripsMixedFields()
     {
         var w = new BitWriter(4);

@@ -15,7 +15,7 @@ public partial class TerrainMesh : Node3D
     public const float FarGroundY = -0.3f;
     private const int ChunkCells = 32;
     private const float FarGroundSize = 4000f;
-    private const float EdgeFadeMetres = 8f; // outside the 10 m playable border, so purely visual
+    private const float EdgeFadeMetres = 8f; // outside the 10 m playable border, so purely visual; terrain_toon fades its wet band over the same 8 m
 
     /// <summary>Weight of the real terrain: 0 on the map edge, 1 from <see cref="EdgeFadeMetres"/> inwards.</summary>
     private static float EdgeWeight(HeightField field, float x, float z)
@@ -46,13 +46,20 @@ public partial class TerrainMesh : Node3D
         return System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(-dx, 1f, -dz));
     }
 
-    public void Build(HeightField field, DirtMask dirt)
+    /// <param name="dirt">The dirt mask; a layered one (a map with ground kinds) switches the shader to its layered mode.</param>
+    /// <param name="waterLevel">The map's water surface, for the riverbed and the wet band along the shore (layered mode only).</param>
+    public void Build(HeightField field, DirtMask dirt, float? waterLevel = null)
     {
         ShaderMaterial material = Materials.FromShader("terrain_toon")
             .With("dirt_mask", dirt.ToTexture())
             .With("map_size", new Vector2(field.SizeX, field.SizeZ))
             .With("grass_max_slope", GroundCover.GrassMaxSlopeDegrees)   // one source of truth with the grass scatter rules
             .With("rock_min_slope", GroundCover.RockMinSlopeDegrees);
+        if (dirt.IsLayered)
+        {
+            material.With("layered", true);
+            if (waterLevel is { } level) material.With("water_level", level);
+        }
         int cellsX = field.SamplesX - 1, cellsZ = field.SamplesZ - 1;
         for (int z0 = 0; z0 < cellsZ; z0 += ChunkCells)
         for (int x0 = 0; x0 < cellsX; x0 += ChunkCells)

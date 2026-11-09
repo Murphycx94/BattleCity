@@ -45,12 +45,31 @@ public sealed class HeightField
         return near * (1 - v) + far * v;
     }
 
+    /// <summary>The ground's normal at (x, z), from the heights half a cell either side: smooth across sample lines.</summary>
     public Vector3 NormalAt(float x, float z)
     {
         float e = CellSize * 0.5f;
         float dx = HeightAt(x + e, z) - HeightAt(x - e, z);
         float dz = HeightAt(x, z + e) - HeightAt(x, z - e);
         return Vector3.Normalize(new Vector3(-dx, 2 * e, -dz));
+    }
+
+    /// <summary>
+    /// The normal of the bilinear surface itself at (x, z), within the cell holding the point (the one after it on a
+    /// sample line): where the slope bends at a sample line, as at a cliff's foot, it changes there and not over the
+    /// metre either side that <see cref="NormalAt"/> spreads it across. Flat outside the grid, as the ground is there.
+    /// </summary>
+    public Vector3 SurfaceNormalAt(float x, float z)
+    {
+        float fx = x / CellSize, fz = z / CellSize;
+        float cx = System.Math.Clamp(fx, 0, SamplesX - 1), cz = System.Math.Clamp(fz, 0, SamplesZ - 1);
+        int i = System.Math.Min((int)cx, SamplesX - 2);
+        int j = System.Math.Min((int)cz, SamplesZ - 2);
+        float u = cx - i, v = cz - j;
+        float h00 = Sample(i, j), h10 = Sample(i + 1, j), h01 = Sample(i, j + 1), h11 = Sample(i + 1, j + 1);
+        float dx = fx == cx ? (h10 - h00) * (1 - v) + (h11 - h01) * v : 0f;
+        float dz = fz == cz ? (h01 - h00) * (1 - u) + (h11 - h10) * u : 0f;
+        return Vector3.Normalize(new Vector3(-dx, CellSize, -dz));
     }
 
     /// <summary>

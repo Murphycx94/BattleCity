@@ -6,11 +6,12 @@ namespace Tank.Client.Match;
 /// <summary>
 /// What the camera does while the player's tank is a wreck (blueprint §5 T8). The kill close-up holds the wreck for
 /// <see cref="CloseUpSeconds"/>; a mode with no respawn then follows the first living candidate on its own, a respawning
-/// one stays on the wreck until the player steps away. Q, E and a click step through the candidates (teammates in a team
-/// mode, everyone alive in a free-for-all), wrapping at both ends; F frees the camera (free-for-all only). A followed
-/// tank that dies is swapped for the next, and when nobody is left a free-for-all turns to the free camera, a team mode
-/// back to the wreck. Pure logic: the scene owns the camera and feeds the candidates (living tank ids, in a stable
-/// order) each frame.
+/// one stays on the wreck until the player steps away. Q, E and a click step through the candidates (live team-mates in a
+/// mode with them, everyone alive in a free-for-all or royale — <see cref="SpectateCandidates.Fill"/>), wrapping at both
+/// ends; F frees the camera where <see cref="SpectateCandidates.MayRoam"/> allows (free-for-all, royale, and duos once the
+/// own team is out). A followed tank that dies is swapped for the next, and when nobody is left the camera goes free where
+/// it may roam, back to the wreck in a team mode. Pure logic: the scene owns the camera and feeds the candidates (living
+/// tank ids, in a stable order) each frame.
 /// </summary>
 public sealed class SpectateState
 {
@@ -66,7 +67,10 @@ public sealed class SpectateState
         Current = Mode.Follow;
     }
 
-    /// <summary>F in a free-for-all: the free camera (the scene seeds the focus where the view was).</summary>
+    /// <summary>
+    /// F where <see cref="SpectateCandidates.MayRoam"/> allows it (free-for-all, royale, duos once the own team is out): the
+    /// free camera (the scene seeds the focus where the view was).
+    /// </summary>
     public void GoFree()
     {
         Current = Mode.Free;
@@ -76,7 +80,7 @@ public sealed class SpectateState
     /// <summary>
     /// Once per frame while dead. The close-up runs down and, if it is to hand over, follows the first candidate; a
     /// followed tank no longer among <paramref name="candidates"/> is swapped for the next. With no candidates at all,
-    /// <paramref name="freeWhenNone"/> (a free-for-all) goes to the free camera, a team mode back to the wreck.
+    /// <paramref name="freeWhenNone"/> (<see cref="SpectateCandidates.MayRoam"/>) goes to the free camera, otherwise back to the wreck.
     /// </summary>
     public void Update(float dt, ReadOnlySpan<int> candidates, bool freeWhenNone)
     {

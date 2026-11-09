@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Geometry;
 using Tank.Sim.Maps;
+using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
 
@@ -105,21 +106,11 @@ public sealed class SpottingTests
         Assert.True(look.Seen);
     }
 
-    /// <summary>Flat ground with a bank <paramref name="height"/> m high and 8 m wide across the line of sight at <paramref name="z"/>.</summary>
-    private static Battlefield Ridge(float z, float height)
-    {
-        var heights = new float[TestWorld.Samples * TestWorld.Samples];
-        for (int j = 0; j < TestWorld.Samples; j++)
-        for (int i = 0; i < TestWorld.Samples; i++)
-            heights[j * TestWorld.Samples + i] = MathF.Abs(j * TestWorld.Cell - z) <= 4f ? height : 0f;
-        return TestWorld.Field(new Terrain.HeightField(TestWorld.Samples, TestWorld.Samples, TestWorld.Cell, heights));
-    }
-
     [Fact]
     public void A_rise_in_the_ground_between_hides_a_tank_in_range()
     {
-        Assert.False(Spotting.Look(Observer(), Target(60f), Ridge(160f, 5f), Tick, false).Seen);
-        Sighting low = Spotting.Look(Observer(), Target(60f), Ridge(160f, 1f), Tick, false);   // under both sight lines
+        Assert.False(Spotting.Look(Observer(), Target(60f), TestWorld.RidgeField(160f, 5f), Tick, false).Seen);
+        Sighting low = Spotting.Look(Observer(), Target(60f), TestWorld.RidgeField(160f, 1f), Tick, false);   // under both sight lines
         Assert.True(low.LineClear);
         Assert.True(low.Seen);
     }
@@ -251,5 +242,20 @@ public sealed class SpottingTests
         Vector3 top = Spotting.TurretTop(medium, TankPose.Compute(medium, TestWorld.Flat()));
         Assert.Equal(TankCatalog.Medium.TurretArmor.Top, top.Y, 1e-4f);
         Assert.Equal(ObserverAt.Y - TankCatalog.Medium.TurretOffset, top.Z, 1e-4f);
+    }
+
+    [Fact]
+    public void Without_optics_layers_the_view_range_is_the_specs_and_the_numbers_are_as_they_were()
+    {
+        TankState observer = Observer();
+        Assert.Equal(0, observer.OpticsLayers);
+        Assert.Equal(TankCatalog.Medium.ViewRange, CrateRules.ViewRange(observer));
+        Assert.Equal(168f, Look(Target(160f)).DetectionRange, 1e-3f);
+        Assert.Equal(193.5f, Look(Target(175f), moving: true).DetectionRange, 1e-3f);
+        Battlefield field = TestWorld.FlatField();
+        Assert.True(Spotting.Sees(observer, Target(160f), field, Tick, false));
+        Assert.False(Spotting.Sees(observer, Target(175f), field, Tick, false));
+        Assert.True(Spotting.Sees(observer, Target(175f), field, Tick, true));
+        Assert.False(Spotting.Sees(observer, Target(200f), field, Tick, true));
     }
 }

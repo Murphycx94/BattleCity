@@ -36,6 +36,42 @@ public class ModeTextTests
     }
 
     [Fact]
+    public void The_standard_battle_is_called_standard_and_its_rule_names_the_clock_and_the_points()
+    {
+        Assert.Equal("标准战", ModeText.Name(BattleMode.Standard));
+        Assert.Contains("10 分钟", ModeText.Rule(BattleMode.Standard));
+        Assert.Contains("100 分", ModeText.Rule(BattleMode.Standard));
+    }
+
+    [Fact]
+    public void The_royale_is_called_chicken_dinner_and_its_rule_names_the_zone_and_the_numbers()
+    {
+        Assert.Equal("吃鸡", ModeText.Name(BattleMode.Royale));
+        Assert.Contains("毒圈", ModeText.Rule(BattleMode.Royale));
+        Assert.Contains("最多 16 辆车", ModeText.Rule(BattleMode.Royale));
+        Assert.Contains("缩小 5 次", ModeText.Rule(BattleMode.Royale));
+        Assert.Contains("10 分钟", ModeText.Rule(BattleMode.Royale));
+    }
+
+    [Fact]
+    public void Duos_is_called_duo_chicken_dinner_and_its_rule_names_the_pairs_and_the_numbers()
+    {
+        Assert.Equal("双人吃鸡", ModeText.Name(BattleMode.Duos));
+        Assert.Equal("最多 16 辆车，两人一队共 8 队，队友共享视野；毒圈缩小 5 次，圈外掉血；一队两人都被击毁才出局，最后留下的一队吃鸡，10 分钟后按剩余血量定名次。",
+            ModeText.Rule(BattleMode.Duos));
+        Assert.Contains("两人一队", ModeText.Rule(BattleMode.Duos));
+    }
+
+    [Fact]
+    public void A_mode_from_another_version_has_a_name_and_no_rule()
+    {
+        var unknown = (BattleMode)200;
+
+        Assert.Equal("200", ModeText.Name(unknown));
+        Assert.Equal(string.Empty, ModeText.Rule(unknown));
+    }
+
+    [Fact]
     public void Every_catalog_tank_has_a_name_and_an_unknown_index_does_not_throw()
     {
         for (int i = 0; i < TankCatalog.All.Count; i++) Assert.Equal(TankCatalog.All[i].Name, ModeText.TankName(i));
