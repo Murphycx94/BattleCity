@@ -347,6 +347,7 @@ public sealed class PathServiceTests
 
 /// <summary>What a call of <see cref="PathService.Run"/> costs with its whole budget spent (Release limits; Debug only loose ones).</summary>
 [Collection(TimingCollection.Name)]
+[Trait("Category", "Benchmark")]   // wall-clock limits; CI skips them (coverage and shared runners, docs/04 §5)
 public sealed class PathServiceTimingTests
 {
     private const int Repeats = 3;

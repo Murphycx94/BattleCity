@@ -23,6 +23,7 @@ public sealed class TimingCollection
 /// load on the machine doesn't fail it, while a slower generator or tick still does.
 /// </summary>
 [Collection(TimingCollection.Name)]
+[Trait("Category", "Benchmark")]   // wall-clock limits; CI skips them (coverage and shared runners, docs/04 §5)
 public sealed class RiverlandPerformanceTests
 {
     private const int Repeats = 3;

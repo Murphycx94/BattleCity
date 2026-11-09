@@ -142,7 +142,7 @@ client.Update(dt, cmd)                              // 预测、对账、插值�
 
 ## 5. 测试
 
-全部测试不需要 Godot，`dotnet test` 就能跑。CI（`.github/workflows/ci.yml`）推到 main 和每个 PR 都跑四个测试项目（收集覆盖率，没有门禁）、soak，再编译专用服务器和客户端程序集。
+全部测试不需要 Godot，`dotnet test` 就能跑。CI（`.github/workflows/ci.yml`）推到 main 和每个 PR 都跑四个测试项目（收集覆盖率，没有门禁）、soak，再编译专用服务器和客户端程序集。`Tank.Sim.Tests` 里只量耗时的两组（`RiverlandPerformanceTests`、`PathServiceTimingTests`，标了 `Category=Benchmark`）CI 不跑：覆盖率插桩和共享机器让耗时翻几倍，这两组的上限只在本机量，验收时按 Release 量。
 
 | 项目 | 内容 | 例子 |
 |---|---|---|
