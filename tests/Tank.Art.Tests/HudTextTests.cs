@@ -262,6 +262,7 @@ public class HudTextTests
 
         Assert.Equal(("第 7 名", "共 16 名", ResultTone.Neutral), (parts.Title, parts.Subtitle, parts.Tone));
         Assert.Equal("共 4 名", RoyaleResults(ownRank: 2, entrants: 4).Subtitle);
+        Assert.Equal(("第 7 名", ""), (RoyaleResults(ownRank: 7, entrants: 0).Title, RoyaleResults(ownRank: 7, entrants: 0).Subtitle));   // no count rather than "共 0 名"
     }
 
     [Fact]

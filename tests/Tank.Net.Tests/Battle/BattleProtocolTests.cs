@@ -327,7 +327,7 @@ public sealed class BattleProtocolTests
     [Fact]
     public void The_protocol_constants_are_the_designs_numbers()
     {
-        Assert.Equal(6, BattleProtocol.Version);
+        Assert.Equal(7, BattleProtocol.Version);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);
         Assert.Equal(16, BattleProtocol.MaxPlayers);
         Assert.Equal(64, BattleSeat.HistorySize);

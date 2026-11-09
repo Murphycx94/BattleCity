@@ -1,6 +1,7 @@
 using System.Numerics;
 using Tank.Sim.Modes;
 using Tank.Sim.Navigation;
+using Tank.Sim.Vehicles;
 
 namespace Tank.Sim.Ai;
 
@@ -129,13 +130,25 @@ public sealed partial class BotDirector
     /// turns it by another <see cref="GoldenAngle"/>): at angle (tank id + attempt) × <see cref="GoldenAngle"/>,
     /// <see cref="ZoneRunShare"/> of the radius (of <see cref="ZoneArriveRadius"/> for a smaller ring) from the centre, moved
     /// to the nearest open cell within <see cref="ZoneSnap"/> that is still well inside (<see cref="WellInside"/>); else the
-    /// centre's nearest open cell, if well inside; else the point itself.
+    /// centre's nearest open cell, if well inside; else the point itself. In duos (stage 6C plan, task 5) the angle goes by the
+    /// lower tank id of the bot's team (its team-mate's, wreck or not, when that is lower), so the two run for one point, and a
+    /// follower's (<see cref="Follows"/>) lies <see cref="ZoneMateSpread"/> nearer the centre, half the way there at most.
     /// </summary>
     internal Vector2 ZonePoint(Bot bot, in ZoneRing target, int attempt)
     {
-        float angle = (bot.TankId + attempt) * GoldenAngle;
+        int key = bot.TankId;
+        float distance = ZoneRunShare * MathF.Max(target.Radius, ZoneArriveRadius);
+        int slot = _duos ? Sim.SlotOf(bot.TankId) : -1;
+        if (slot >= 0)
+        {
+            ref readonly TankState me = ref Sim.Tanks[slot];
+            int mate = MateSlotOf(me);
+            if (mate >= 0) key = Math.Min(key, Sim.Tanks[mate].Id);
+            if (Follows(bot, me)) distance -= MathF.Min(ZoneMateSpread, 0.5f * distance);
+        }
+        float angle = (key + attempt) * GoldenAngle;
         (float sin, float cos) = MathF.SinCos(angle);
-        Vector2 p = target.Centre + new Vector2(cos, sin) * (ZoneRunShare * MathF.Max(target.Radius, ZoneArriveRadius));
+        Vector2 p = target.Centre + new Vector2(cos, sin) * distance;
         return SnapInside(p, target);
     }
 

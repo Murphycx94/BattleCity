@@ -96,13 +96,18 @@ internal sealed class BotArena
     /// salt) and the crates placed (<see cref="CratePlacer"/>, with its salt) before any tank, then the rules with the seed,
     /// the rings and the crates, and the director on the same grid.
     /// </summary>
-    public static BotArena Royale(MapDefinition map, uint seed)
+    public static BotArena Royale(MapDefinition map, uint seed) => Zoned(map, seed, BattleMode.Royale);
+
+    /// <summary>Duos on <paramref name="map"/> as the server starts one (stage 6C plan, task 5): as <see cref="Royale"/>, the mode duos.</summary>
+    public static BotArena Duos(MapDefinition map, uint seed) => Zoned(map, seed, BattleMode.Duos);
+
+    private static BotArena Zoned(MapDefinition map, uint seed, BattleMode mode)
     {
         Battlefield field = map.NewBattlefield();
         NavGrid grid = map.NewNavGrid();
         ZoneRing[] rings = ZonePicker.Pick(field, grid, map.Spawns.Solo, seed ^ ZonePicker.SeedSalt);
         Crate[] crates = CratePlacer.Place(field, grid, map.Spawns.Solo, seed ^ CratePlacer.SeedSalt);
-        return new BotArena(map, field, grid, BattleMode.Royale, null, seed, rings, crates);
+        return new BotArena(map, field, grid, mode, null, seed, rings, crates);
     }
 
     public MapDefinition Map { get; }

@@ -30,9 +30,9 @@ public sealed class CrateWireTests
     private static readonly Crate C40 = new(40, new Vector2(1024f, 852f), CrateKind.Optics);
 
     [Fact]
-    public void The_protocol_is_version_6_with_a_crate_message()
+    public void The_protocol_has_a_crate_message()
     {
-        Assert.Equal(6, BattleProtocol.Version);
+        Assert.Equal(7, BattleProtocol.Version);   // v6: the crates; v7: duos (DuoWireTests)
         Assert.Equal(27, (byte)BattleMessage.Crate);
         Assert.Equal(10, BattleMessages.CrateBytes);
         Assert.Equal(64, CrateRules.MaxCrates);

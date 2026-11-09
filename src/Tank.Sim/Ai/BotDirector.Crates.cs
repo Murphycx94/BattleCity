@@ -46,10 +46,12 @@ public sealed partial class BotDirector
     /// the ray (<see cref="CrateSight.LineClear"/>) cast last, and only for a crate that would beat the best so far). By
     /// priority: a repair crate below <see cref="CrateHealthShare"/> of the health, then an ammo crate below
     /// <see cref="CrateAmmoShare"/> of the rounds, then any useful one; then the nearer; then the lower id. Without a zone
-    /// (a royale given no rings) the ring and the time are not looked at. A wreck gets none. A loop over the table: no
-    /// allocation, no random numbers (plan, deviation 15: the old seeds replay).
+    /// (a royale given no rings) the ring and the time are not looked at. A wreck gets none. Given <paramref name="nearSlot"/>
+    /// (≥ 0: a follower's team-mate in duos, its slot in <c>Sim.Tanks</c>), only a crate within <see cref="MateRange"/> of
+    /// that tank will do (6C batch C review follow-up: a follower's crate runs took it up to 150 m from its team-mate). A
+    /// loop over the table: no allocation, no random numbers (plan, deviation 15: the old seeds replay).
     /// </summary>
-    internal int CrateFor(in TankState me, ulong shunned)
+    internal int CrateFor(in TankState me, ulong shunned, int nearSlot = -1)
     {
         CrateSet? crates = Crates;
         if (crates is null || me.IsDestroyed) return -1;
@@ -60,6 +62,7 @@ public sealed partial class BotDirector
         bool hurt = me.Health < CrateHealthShare * me.Spec.MaxHealth;
         bool low = me.ApLeft + me.HeLeft < CrateAmmoShare * (me.Spec.Ap.Capacity + me.Spec.He.Capacity);
         float range = MathF.Min(CrateRange, CrateRules.ViewRange(me));
+        Vector2 near = nearSlot >= 0 ? Sim.Tanks[nearSlot].Position : default;
         Vector3 eye = Spotting.TurretTop(me, TankPose.Compute(me, Sim.Field.Terrain));
         int best = -1, bestPriority = int.MaxValue;
         float bestDistance = float.MaxValue;
@@ -73,6 +76,7 @@ public sealed partial class BotDirector
             if (distanceSquared > range * range) continue;
             int priority = crate.Kind == CrateKind.Repair && hurt ? 0 : crate.Kind == CrateKind.Ammo && low ? 1 : 2;
             if (priority > bestPriority || (priority == bestPriority && distanceSquared >= bestDistance)) continue;
+            if (nearSlot >= 0 && Vector2.DistanceSquared(crate.Position, near) > MateRange * MateRange) continue;
             if (zoneOn)
             {
                 if (!InRing(crate.Position, target)) continue;

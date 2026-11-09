@@ -80,9 +80,11 @@ public sealed partial class BattleServer
 
     /// <summary>
     /// A new player's seat, or null with the room full: the server has <see cref="BattleProtocol.MaxPlayers"/> (16) seats, but a
-    /// room takes only <see cref="ModeRules.MaxPlayersFor"/> its mode (10 outside a royale, deviation 22). Every taken seat counts
-    /// — players connected or within the reconnect grace, and during a match the bots — so a 10-seat match never holds an 11th
-    /// tank; in the room, with no bots seated, that is the players alone.
+    /// room takes only <see cref="ModeRules.MaxPlayersFor"/> its mode (10 outside a royale or duos, deviation 22). Every taken
+    /// seat counts — players connected or within the reconnect grace, and during a match the bots — so a 10-seat match never
+    /// holds an 11th tank; in the room, with no bots seated, that is the players alone. The seat's team: in duos the lowest
+    /// empty one, else the lowest single (<see cref="DuoSeating.ForPerson"/>; the room has a seat for it, so never none), in
+    /// every other mode the thinner of the two.
     /// </summary>
     private BattleSeat? AllocateSeat(uint? token = null)
     {
@@ -90,7 +92,7 @@ public sealed partial class BattleServer
         for (byte slot = 0; slot < _seats.Length; slot++)
         {
             if (_seats[slot] is not null) continue;
-            var seat = new BattleSeat(slot, token ?? NewToken(), isBot: false) { Team = ThinnerTeam(slot) };
+            var seat = new BattleSeat(slot, token ?? NewToken(), isBot: false) { Team = ModeRules.IsDuos(_mode) ? DuoTeamForPerson() : ThinnerTeam(slot) };
             _seats[slot] = seat;
             return seat;
         }
@@ -133,8 +135,8 @@ public sealed partial class BattleServer
         // takes digits only, and an unknown tank id or mode changes nothing.
         switch (cmd.Kind)
         {
-            case RoomCommandKind.SetTeam when !seat.InMatch && ModeRules.HasTeams(_mode):   // in the room, or waiting out a match
-                if (byte.TryParse(cmd.Arg, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out byte team) && team <= 1) seat.Team = team;
+            case RoomCommandKind.SetTeam when !seat.InMatch && ModeRules.TeamsFor(_mode) > 0:   // in the room, or waiting out a match; not where nobody picks
+                if (byte.TryParse(cmd.Arg, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out byte team) && MayMoveTo(seat, team)) seat.Team = team;
                 break;
             case RoomCommandKind.SetTank when !seat.InMatch:
                 int index = IndexOfTank(cmd.Arg);
@@ -150,7 +152,7 @@ public sealed partial class BattleServer
                 if (int.TryParse(cmd.Arg, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int bots)) _bots = System.Math.Clamp(bots, 0, ModeRules.MaxBotsFor(_mode));
                 break;
             case RoomCommandKind.SetMap when isHost && _sim is null:
-                if (FindMap(cmd.Arg) is { } map && ModeRules.AllowsMap(_mode, map.Id))   // a royale stays on the riverland
+                if (FindMap(cmd.Arg) is { } map && ModeRules.AllowsMap(_mode, map.Id))   // a royale or duos stays on the riverland
                 {
                     // Prepared first: nothing if it was before; in the foreground a generator that throws leaves the map
                     // Failed (logged, never thrown here), and the room says so. In the background it says Generating until then.
@@ -171,10 +173,11 @@ public sealed partial class BattleServer
     }
 
     /// <summary>
-    /// The host's switch to <paramref name="mode"/>, if the room can make it: no more players than the mode seats (a royale
-    /// room of 11 or more stays one), and for a mode with a map of its own (a royale: the riverland) that map among
+    /// The host's switch to <paramref name="mode"/>, if the room can make it: no more players than the mode seats (a royale or
+    /// duos room of 11 or more stays one of the two), and for a mode with a map of its own (a royale, duos: the riverland) that map among
     /// <see cref="BattleServerOptions.Maps"/>, which the room then moves to (prepared first, as <c>SetMap</c> does). The
-    /// bots are cut to what the mode seats.
+    /// bots are cut to what the mode seats. Into duos from another mode everyone is teamed afresh, out of it split over teams
+    /// 0 and 1 again (<see cref="TeamPlayersForDuos"/>, <see cref="SplitPlayersOverTwoTeams"/>); any other switch moves nobody.
     /// </summary>
     private void SwitchMode(BattleMode mode)
     {
@@ -195,8 +198,77 @@ public sealed partial class BattleServer
             _maps.Prepare(map);
             _roomMap = map;
         }
+        bool wasDuos = ModeRules.IsDuos(_mode);
         _mode = mode;
         _bots = System.Math.Min(_bots, ModeRules.MaxBotsFor(mode));
+        if (ModeRules.IsDuos(mode) && !wasDuos) TeamPlayersForDuos();
+        else if (wasDuos && !ModeRules.IsDuos(mode)) SplitPlayersOverTwoTeams();
+    }
+
+    /// <summary>
+    /// The room turned duos: every player, in slot order, as if coming in afresh (<see cref="DuoSeating.ForPerson"/>), so
+    /// the first eight get a team each and the rest partner them in turn. The room has no bots (they are seated only for a match).
+    /// </summary>
+    private void TeamPlayersForDuos()
+    {
+        foreach (BattleSeat? s in _seats)
+            if (s is { IsBot: false }) s.Team = MatchRules.NoTeam;   // counted on no team until placed
+        foreach (BattleSeat? s in _seats)
+            if (s is { IsBot: false }) s.Team = DuoTeamForPerson();
+    }
+
+    /// <summary>
+    /// The room left duos: every player, in slot order, onto the thinner of teams 0 and 1 of those placed before it (team 0
+    /// on a tie), as <see cref="ThinnerTeam"/> places a newcomer. A free-for-all or a royale ignores the team, but outside
+    /// duos no seat's team is above 1.
+    /// </summary>
+    private void SplitPlayersOverTwoTeams()
+    {
+        int onTeam0 = 0, onTeam1 = 0;
+        foreach (BattleSeat? s in _seats)
+        {
+            if (s is not { IsBot: false }) continue;
+            s.Team = BotSeating.ThinnerTeam(onTeam0, onTeam1);
+            if (s.Team == 0) onTeam0++;
+            else onTeam1++;
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="seat"/> may move to <paramref name="team"/>: in duos a team 0–7 with room for it
+    /// (<see cref="DuoSeating.HasRoom"/>), in a two-team mode team 0 or 1.
+    /// </summary>
+    private bool MayMoveTo(BattleSeat seat, byte team)
+    {
+        if (!ModeRules.IsDuos(_mode)) return team < ModeRules.TeamsFor(_mode);
+        Span<int> counts = stackalloc int[ModeRules.DuoTeams];
+        CountDuoTeams(counts);
+        return DuoSeating.HasRoom(counts, team, seat.Team);
+    }
+
+    /// <summary>The duos team for a player coming in now (<see cref="DuoSeating.ForPerson"/> of the seats taken).</summary>
+    private byte DuoTeamForPerson()
+    {
+        Span<int> counts = stackalloc int[ModeRules.DuoTeams];
+        CountDuoTeams(counts);
+        return DuoSeating.ForPerson(counts);
+    }
+
+    /// <summary>
+    /// The seats on each duos team now (<paramref name="counts"/>: <see cref="ModeRules.DuoTeams"/> long): every taken seat —
+    /// players, those within the reconnect grace and, during a match or while one is being started, the bots — by its team. A
+    /// seat on no team yet (<see cref="MatchRules.NoTeam"/>) counts nowhere.
+    /// </summary>
+    /// <remarks>
+    /// Intended: during a duos match the counts include the match's bots, so a newcomer waiting for the next match is placed
+    /// (<see cref="DuoSeating.ForPerson"/>) and may <c>SetTeam</c> only against them — the bots leave with the match and are seated
+    /// afresh at the next start, partnering whoever is single then.
+    /// </remarks>
+    private void CountDuoTeams(Span<int> counts)
+    {
+        counts.Clear();
+        foreach (BattleSeat? s in _seats)
+            if (s is not null && s.Team < counts.Length) counts[s.Team]++;
     }
 
     /// <summary>The map of <see cref="BattleServerOptions.Maps"/> with the id <paramref name="id"/> (ignoring case), or null.</summary>
@@ -227,12 +299,16 @@ public sealed partial class BattleServer
         return BotSeating.ThinnerTeam(a, b);
     }
 
+    /// <summary>
+    /// The room to everyone: each seat's team where seats are teamed (the two-team modes, duos: 0–7), its slot where they
+    /// aren't (a free-for-all, a royale: each tank its own side).
+    /// </summary>
     private void BroadcastRoom()
     {
         _roomDirty = false;
         var players = new List<RoomPlayer>();
         foreach (BattleSeat? s in _seats)
-            if (s is not null) players.Add(new RoomPlayer(s.Slot, s.Name, ModeRules.HasTeams(_mode) ? s.Team : s.Slot, s.TankIndex, s.Ready, s.Connected || s.IsBot, s.IsBot));
+            if (s is not null) players.Add(new RoomPlayer(s.Slot, s.Name, ModeRules.TeamsFor(_mode) > 0 ? s.Team : s.Slot, s.TankIndex, s.Ready, s.Connected || s.IsBot, s.IsBot));
         _sentMapState = RoomMapState;
         _writer.Reset();
         BattleMessages.Write(_writer, new RoomStateMessage(_mode, _hostSlot, (byte)_bots, MatchRunning, players, _roomMap.Id, _sentMapState));

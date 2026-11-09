@@ -17,7 +17,9 @@ namespace Tank.Sim.Ai;
 /// (BotDirector.Roles.cs); outside one every bot wanders between the
 /// map's waypoints along searched paths (design §4.2), retreating to a team mate when badly hurt; in a royale they run
 /// into the ring they must be in and wander inside it (stage 6 design §3.4: BotDirector.Zone.cs, Bot.Zone.cs), fetching the
-/// useful supply crates they see on the way (stage 6 design §4.5: BotDirector.Crates.cs, Bot.Crates.cs).
+/// useful supply crates they see on the way (stage 6 design §4.5: BotDirector.Crates.cs, Bot.Crates.cs); in duos they
+/// play the royale's way and keep with their team-mate, running for one point of the ring and preferring the enemy it
+/// fights (stage 6 design §5: BotDirector.Duo.cs, Bot.Duo.cs).
 /// </summary>
 /// <remarks>
 /// The server's tick: <see cref="Update"/> once, then <see cref="Command"/> for each bot's tank, then the step. Everything
@@ -128,6 +130,7 @@ public sealed partial class BotDirector
         Bots = new ReadOnlyCollection<Bot>(_bots);
         SetUpStandard();
         SetUpZone();
+        SetUpDuos();
     }
 
     /// <summary>The bots, in ascending tank id.</summary>
@@ -229,11 +232,21 @@ public sealed partial class BotDirector
     /// <summary>The hits and revivals in the last step's events.</summary>
     private void Hear()
     {
-        foreach (ref readonly GameEvent e in Sim.Events)
+        foreach (ref readonly GameEvent e in Sim.Events) HearEvent(e);
+    }
+
+    /// <summary>
+    /// One of the step's events: a hit reaches the target picker of the bot hit (and, in duos, is noted as the attacker's
+    /// last: BotDirector.Duo.cs); a revived bot starts its leg afresh.
+    /// </summary>
+    internal void HearEvent(in GameEvent e)
+    {
+        if (e.Type is GameEventType.TankHit or GameEventType.SplashDamage)
         {
-            if (e.Type is GameEventType.TankHit or GameEventType.SplashDamage) Find(e.TargetTankId)?.Picker.NoteHit(e.TankId, e.Tick);
-            else if (e.Type == GameEventType.TankRevived && Find(e.TargetTankId) is { } bot && IsAlive(bot, out Vector2 at)) bot.Revived(at);
+            Find(e.TargetTankId)?.Picker.NoteHit(e.TankId, e.Tick);
+            NoteLastHit(e.TankId, e.TargetTankId, e.Tick);
         }
+        else if (e.Type == GameEventType.TankRevived && Find(e.TargetTankId) is { } bot && IsAlive(bot, out Vector2 at)) bot.Revived(at);
     }
 
     /// <summary>
@@ -277,12 +290,13 @@ public sealed partial class BotDirector
     /// <summary>
     /// What the bots did, for the log at the end of the match (allocates): "team 0 fell back 2 times, team 1 0 times;
     /// 3 stucks; 412 paths, 2 not found" (the fall-backs in a standard battle only, of the teams that have bots; a royale
-    /// starts with the crates and the zone runs: "12 crate runs, 9 fetched; 31 zone runs; 3 stucks; …").
+    /// starts with the crates and the zone runs: "12 crate runs, 9 fetched; 31 zone runs; 3 stucks; …", duos the same with
+    /// the times the bots headed for their team-mates after the zone runs: "…; 31 zone runs; 40 regroups; 3 stucks; …").
     /// </summary>
     public string Summary()
     {
         int stucks = 0;
         foreach (Bot bot in _bots) stucks += bot.Stucks;
-        return $"{CrateRunsText()}{ZoneRunsText()}{(_standard ? FallBacksText() : "")}{stucks} stucks; {Paths.Searches} paths, {Paths.Failures} not found";
+        return $"{CrateRunsText()}{ZoneRunsText()}{RegroupsText()}{(_standard ? FallBacksText() : "")}{stucks} stucks; {Paths.Searches} paths, {Paths.Failures} not found";
     }
 }

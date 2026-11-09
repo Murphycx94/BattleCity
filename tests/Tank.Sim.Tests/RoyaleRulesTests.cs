@@ -86,17 +86,17 @@ public sealed class RoyaleRulesTests
     public void The_royale_is_the_fifth_mode_with_its_own_numbers()
     {
         Assert.Equal(4, (byte)BattleMode.Royale);
-        Assert.Equal(new[] { BattleMode.TeamBattle, BattleMode.Annihilation, BattleMode.FreeForAll, BattleMode.Standard, BattleMode.Royale }, ModeRules.All);
+        Assert.Equal(new[] { BattleMode.TeamBattle, BattleMode.Annihilation, BattleMode.FreeForAll, BattleMode.Standard, BattleMode.Royale, BattleMode.Duos }, ModeRules.All);
         Assert.Equal("royale", ModeRules.Id(BattleMode.Royale));
         Assert.True(ModeRules.TryParse("ROYALE", out BattleMode royale) && royale == BattleMode.Royale);
-        Assert.Equal(BattleMode.Royale, ModeRules.LastMode);
+        Assert.Equal(BattleMode.Duos, ModeRules.LastMode);
         Assert.Equal(18000, ModeRules.DurationTicks(BattleMode.Royale));
         Assert.Equal(10 * 60 * Tps, ModeRules.DurationTicks(BattleMode.Royale));
         Assert.False(ModeRules.HasTeams(BattleMode.Royale));
         Assert.False(ModeRules.Respawns(BattleMode.Royale));
         Assert.False(ModeRules.JoinsMidMatch(BattleMode.Royale));
         Assert.False(ModeRules.HasBases(BattleMode.Royale));
-        foreach (BattleMode mode in ModeRules.All) Assert.Equal(mode == BattleMode.Royale, ModeRules.HasZone(mode));
+        foreach (BattleMode mode in ModeRules.All) Assert.Equal(mode is BattleMode.Royale or BattleMode.Duos, ModeRules.HasZone(mode));
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class RoyaleRulesTests
         Assert.Equal(10, ModeRules.DefaultMaxPlayers);
         Assert.Equal(16, ModeRules.MaxPlayersFor(BattleMode.Royale));
         Assert.Equal(15, ModeRules.MaxBotsFor(BattleMode.Royale));
-        foreach (BattleMode mode in ModeRules.All.Where(m => m != BattleMode.Royale))
+        foreach (BattleMode mode in ModeRules.All.Where(m => m is not (BattleMode.Royale or BattleMode.Duos)))
         {
             Assert.Equal(10, ModeRules.MaxPlayersFor(mode));
             Assert.Equal(9, ModeRules.MaxBotsFor(mode));
@@ -120,7 +120,7 @@ public sealed class RoyaleRulesTests
     {
         Assert.Equal("riverland", ModeRules.OnlyMap(BattleMode.Royale));
         Assert.Equal(RiverlandMap.Id, ModeRules.OnlyMap(BattleMode.Royale));
-        foreach (BattleMode mode in ModeRules.All.Where(m => m != BattleMode.Royale)) Assert.Null(ModeRules.OnlyMap(mode));
+        foreach (BattleMode mode in ModeRules.All.Where(m => m is not (BattleMode.Royale or BattleMode.Duos))) Assert.Null(ModeRules.OnlyMap(mode));
         Assert.True(ModeRules.AllowsMap(BattleMode.Royale, "Riverland"));
         Assert.True(ModeRules.AllowsMap(BattleMode.Royale, "riverland"));
         Assert.False(ModeRules.AllowsMap(BattleMode.Royale, "sandbox"));

@@ -8,8 +8,9 @@ namespace Tank.Sim.Ai;
 /// Fetching supply crates in a royale (stage 6 design §4.5; stage 6B plan, task 6). Every <see cref="VisionTracker.UpdateInterval"/>
 /// ticks (spread by tank id, as the spotting is: plan, deviation 16) a bot that is wandering (a <see cref="Leg.Waypoint"/>, a
 /// wander <see cref="Leg.Zone"/> or <see cref="Leg.Arrived"/>), neither running the zone nor hurrying, and that had neither a
-/// target nor an enemy too close the tick before, asks the director for a crate (<see cref="BotDirector.CrateFor"/>) and
-/// drives for it (<see cref="Leg.Crate"/>), to stop on it: the hull over the crate eats it (<see cref="CrateSet.Collect"/>).
+/// target nor an enemy too close the tick before, asks the director for a crate (<see cref="BotDirector.CrateFor"/>; in duos
+/// a follower one within <see cref="BotDirector.MateRange"/> of its team-mate: 6C batch C review follow-up) and drives for
+/// it (<see cref="Leg.Crate"/>), to stop on it: the hull over the crate eats it (<see cref="CrateSet.Collect"/>).
 /// On the way it stops to fight as ever and goes on afterwards (a crate leg isn't one it keeps to under fire). The run is
 /// over (<see cref="CrateRunOver"/>) when the crate is gone (eaten by it, or by someone else first), when the tank has
 /// stopped on the crate's spot (or at the end of a whole path to it) without eating it, or after
@@ -45,7 +46,8 @@ public sealed partial class Bot
         if (crates is null || (tick + TankId) % VisionTracker.UpdateInterval != 0) return;
         if (_cratesShunned != 0 && tick >= _shunUntil) _cratesShunned = 0;
         if (RunningToZone || ZoneUrgent || Picker.TargetId != 0 || Picker.TooClose != 0 || _leg is not (Leg.Waypoint or Leg.Zone or Leg.Arrived)) return;
-        int id = director.CrateFor(me, _cratesShunned);
+        int near = director.Follows(this, me) ? director.MateSlotOf(me) : -1;   // duos: a follower's crate lies near its team-mate
+        int id = director.CrateFor(me, _cratesShunned, near);
         if (id < 0) return;
         (_crate, _crateBegun, CrateRuns) = (id, tick, CrateRuns + 1);
         Begin(Leg.Crate, crates[id].Position, keepPath: false);

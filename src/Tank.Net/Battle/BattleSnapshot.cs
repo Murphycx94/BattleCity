@@ -99,7 +99,7 @@ public struct MatchBlock : IEquatable<MatchBlock>
     public byte BaseProgress0;         // how far team 1 has taken team 0's base, 0–100 (0 outside a standard match)
     public byte BaseProgress1;         // how far team 0 has taken team 1's base
     public MatchEndReason EndReason;   // the rules' EndReason: None while playing
-    public byte Entrants;              // a royale: MatchRules.Entrants, the seats that joined the match ("共 N 名"), at most BattleProtocol.MaxPlayers; 0 in the other modes
+    public byte Entrants;              // a royale, duos: MatchRules.Places ("共 N 名": a royale's seats that joined, duos' teams), at most BattleProtocol.MaxPlayers; 0 in the other modes
 
     public readonly bool Equals(MatchBlock o) =>
         Phase == o.Phase && TicksLeft == o.TicksLeft && Spotted == o.Spotted && WinnerTeam == o.WinnerTeam && WinnerSlot == o.WinnerSlot
@@ -122,7 +122,7 @@ public struct PlayerStats : IEquatable<PlayerStats>
     public int Kills;
     public int Deaths;
     public bool Alive;
-    public byte Rank;      // 0: none yet; 1–16 once a free-for-all or a royale has ended (5 bits on the wire, 17–31 refused both ways)
+    public byte Rank;      // 0: none yet; 1–16 once a free-for-all or a royale has ended, in duos the team's place (both of it alike) (5 bits on the wire, 17–31 refused both ways)
     public byte Capture;   // MatchRules.CaptureBest(slot): the most points the player's tank held at once this match, 0–100
     public int Damage;     // Standing.Damage: damage dealt to other sides' tanks
     public int Lasted;     // MatchRules.LastedTicks(slot) in whole seconds

@@ -126,7 +126,8 @@ public sealed class CratePickupTests
         Assert.Null(royale.Rules.Crates);
 
         Assert.True(ModeRules.HasCrates(BattleMode.Royale));
-        foreach (BattleMode mode in ModeRules.All.Where(mode => mode != BattleMode.Royale)) Assert.False(ModeRules.HasCrates(mode));
+        Assert.True(ModeRules.HasCrates(BattleMode.Duos));
+        foreach (BattleMode mode in ModeRules.All.Where(mode => mode is not (BattleMode.Royale or BattleMode.Duos))) Assert.False(ModeRules.HasCrates(mode));
     }
 
     /// <summary>Rings all centred on (20, 150), so the crates are outside the zone from ring 0.</summary>

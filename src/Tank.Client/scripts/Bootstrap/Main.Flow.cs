@@ -82,7 +82,7 @@ public partial class Main
         _session = session;
         _reconnect = new Reconnector();
         // --bots is only a request when given; 0 is also the default, and the host's own settings already carry it.
-        _auto = new AutoRoom(_options.Tank, _options.Mode, _options.Bots > 0 ? _options.Bots : null, _options.AutoStart);
+        _auto = new AutoRoom(_options.Tank, _options.Mode, _options.Bots > 0 ? _options.Bots : null, _options.AutoStart, _options.Team);
         _room.Bind(session.Client, LocalAddresses(session));
         _menu.SetStatus(status);
     }

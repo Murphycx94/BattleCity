@@ -23,9 +23,9 @@ public sealed class RoyaleWireTests
     private static readonly ZoneRing R2 = new(new Vector2(520f, 610f), 250f);
 
     [Fact]
-    public void The_protocol_is_version_6_with_sixteen_seats_and_a_zone_message()
+    public void The_protocol_has_sixteen_seats_and_a_zone_message()
     {
-        Assert.Equal(6, BattleProtocol.Version);   // v6: the crates (CrateWireTests)
+        Assert.Equal(7, BattleProtocol.Version);   // v6: the crates (CrateWireTests); v7: duos (DuoWireTests)
         Assert.Equal(26, (byte)BattleMessage.Zone);
         Assert.Equal(16, BattleProtocol.MaxPlayers);
         Assert.Equal("tank3d-v2", BattleProtocol.ConnectKey);

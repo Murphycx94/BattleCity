@@ -13,7 +13,8 @@ namespace Tank.Sim.Ai;
 /// and walls, or ends on them within <see cref="SightSlack"/> of it, and clear of wrecks, which stop shells too. The aim
 /// point is the one <see cref="Gunnery.Aim"/> lays on (the hull centre, or the turret when the gun can't reach the hull
 /// centre), worked out for the round the bot fires: AP, then HE once the AP is gone; a bot out of both has none (5C
-/// stalemate fix 2). Ranking: one that hit the bot in the last <see cref="HitMemoryTicks"/>, then the lowest share of its
+/// stalemate fix 2). Ranking: the one the caller prefers (in duos the enemy the bot's team-mate fights: stage 6C plan,
+/// task 5), then one that hit the bot in the last <see cref="HitMemoryTicks"/>, then the lowest share of its
 /// health, then the nearest on the ground, then the lower tank id. A pick is held for <see cref="HoldTicks"/>; after that
 /// it is reviewed every <see cref="VisionTracker.UpdateInterval"/> ticks and changed only for one that ranks ahead. One
 /// that stops being a candidate is kept, <see cref="TargetLost"/> (never fired at), for
@@ -92,9 +93,10 @@ public sealed class TargetPicker
     /// The target for <paramref name="tick"/>: the one held, unless the hold is over or it was lost (and kept a moment
     /// no longer); otherwise the best candidate (0 when there is none), looked for at most every
     /// <see cref="VisionTracker.UpdateInterval"/> ticks without a target. Returns <see cref="TargetId"/>. A bot that is
-    /// gone, wrecked or out of both AP and HE has none.
+    /// gone, wrecked or out of both AP and HE has none. <paramref name="prefer"/> (0: none) ranks first when it is a
+    /// candidate; the hold and the review are as ever, so a bot turns to it at the next review at the latest.
     /// </summary>
-    public int Pick(Simulation sim, VisionTracker vision, int tick)
+    public int Pick(Simulation sim, VisionTracker vision, int tick, int prefer = 0)
     {
         int slot = sim.SlotOf(TankId);
         if (slot < 0) return Drop();
@@ -118,7 +120,7 @@ public sealed class TargetPicker
             }
         }
         else if (tick < _reviewAt) return 0;   // nothing at the last look, and what the team sees hasn't changed since
-        int best = Best(looker, sim.Tanks, vision, tick);
+        int best = Best(looker, sim.Tanks, vision, tick, prefer);
         if (best == TargetId)
         {
             _reviewAt = tick + VisionTracker.UpdateInterval;   // still the best (or still nothing): look again later
@@ -221,7 +223,7 @@ public sealed class TargetPicker
     }
 
     /// <summary>The best candidate's id, or 0; <see cref="TooClose"/> set for none.</summary>
-    private int Best(in Looker looker, ReadOnlySpan<TankState> tanks, VisionTracker vision, int tick)
+    private int Best(in Looker looker, ReadOnlySpan<TankState> tanks, VisionTracker vision, int tick, int prefer)
     {
         int best = -1, close = -1;
         bool bestHit = false;
@@ -239,15 +241,16 @@ public sealed class TargetPicker
             }
             if (fit != Fitness.Candidate) continue;
             bool hit = HitLately(enemy.Id, tick);
-            if (best < 0 || Outranks(looker.Me, enemy, hit, tanks[best], bestHit)) (best, bestHit) = (i, hit);
+            if (best < 0 || Outranks(looker.Me, enemy, hit, tanks[best], bestHit, prefer)) (best, bestHit) = (i, hit);
         }
         TooClose = best < 0 && close >= 0 ? tanks[close].Id : 0;
         return best < 0 ? 0 : tanks[best].Id;
     }
 
-    /// <summary>Whether <paramref name="a"/> ranks ahead of <paramref name="b"/>: hit me lately, weaker share, nearer, lower id.</summary>
-    private static bool Outranks(in TankState me, in TankState a, bool aHit, in TankState b, bool bHit)
+    /// <summary>Whether <paramref name="a"/> ranks ahead of <paramref name="b"/>: the one preferred (0: none), hit me lately, weaker share, nearer, lower id.</summary>
+    private static bool Outranks(in TankState me, in TankState a, bool aHit, in TankState b, bool bHit, int prefer)
     {
+        if (prefer != 0 && (a.Id == prefer) != (b.Id == prefer)) return a.Id == prefer;
         if (aHit != bHit) return aHit;
         long aShare = (long)a.Health * b.Spec.MaxHealth, bShare = (long)b.Health * a.Spec.MaxHealth;   // exact, in integers
         if (aShare != bShare) return aShare < bShare;

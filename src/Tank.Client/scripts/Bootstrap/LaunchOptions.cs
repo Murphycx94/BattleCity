@@ -8,7 +8,8 @@ namespace Tank.Client.Bootstrap;
 
 /// <summary>
 /// Command-line switches (pass after "--"), used for quick testing and automated screenshots:
-/// --name N  --host  --join IP[:PORT]  --port N  --mode teambattle|annihilation|ffa|standard|royale  --bots N（最多 15）  --autostart  --players N（房主等够 N 个真人才自动开局，N 大于 1 时人齐后再等约半秒；默认 1，最多一个房间的人数 16）
+/// --name N  --host  --join IP[:PORT]  --port N  --mode teambattle|annihilation|ffa|standard|royale|duos  --bots N（最多 15）
+/// --team N（1～8：进了房间后选这一队，房主、客人都行；双人吃鸡 1～8 有效，两队模式 1、2 有效，其余服务器不理）  --autostart  --players N（房主等够 N 个真人才自动开局，N 大于 1 时人齐后再等约半秒；默认 1，最多一个房间的人数 16）
 /// --seed N（对局种子，可复现）  --match-seconds S（对局时长，覆盖模式默认值）  --loopback（房主用虚拟网络和固定步长，没有套接字和线程，用于确定性冒烟）
 /// --sandbox（启动后直接进试驾场）  --hud-demo NAME（对局 HUD 画廊：用预制帧在纯色底上画 HUD 的每种状态，用于验收排版）
 /// --netgraph（F3 网络面板一开始就打开）  --screenshot FILE（一次运行只截一张）  --screenshot-at SECONDS（还没进过对局时从启动起算，在菜单、房间或 HUD 画廊里截；
@@ -40,6 +41,9 @@ public sealed record LaunchOptions
     /// <summary>The mode to host (and the host's auto-room to set); null leaves the server's default.</summary>
     public BattleMode? Mode { get; init; }
     public int Bots { get; init; }
+
+    /// <summary>The team to pick once in the room (<c>--team N</c>, 1–8, kept 0-based); null when not given or out of range.</summary>
+    public byte? Team { get; init; }
     public bool AutoStart { get; init; }
 
     /// <summary>How many connected people the host waits for before starting by itself (<c>--players</c>); at least 1.</summary>
@@ -117,6 +121,7 @@ public sealed record LaunchOptions
                 "--port" => o with { Port = ParsePort(Next(), o.Port, warnings) },
                 "--mode" => ParseMode(o, Next(), warnings),
                 "--bots" => o with { Bots = ParseBots(Next(), warnings) },
+                "--team" => ParseTeam(o, Next(), warnings),
                 "--players" => o with { Players = ParsePlayers(Next(), o.Players, warnings) },
                 "--seed" => ParseSeed(o, Next(), warnings),
                 "--match-seconds" => ParseMatchSeconds(o, Next(), warnings),
@@ -195,6 +200,14 @@ public sealed record LaunchOptions
         int clamped = Math.Clamp(bots, 0, MaxBots);
         if (clamped != bots) warnings.Add($"--bots {bots} is out of range; using {clamped} (0 to {MaxBots}).");
         return clamped;
+    }
+
+    private static LaunchOptions ParseTeam(LaunchOptions o, string value, List<string> warnings)
+    {
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int team) && team is >= 1 and <= ModeRules.DuoTeams)
+            return o with { Team = (byte)(team - 1) };
+        warnings.Add($"Bad --team '{value}'; use 1 to {ModeRules.DuoTeams}. It is ignored.");
+        return o;
     }
 
     private static int ParsePort(string value, int fallback, List<string> warnings)

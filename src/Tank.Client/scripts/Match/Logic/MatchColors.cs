@@ -16,8 +16,9 @@ public enum CaptureFill : byte { Danger, DangerDim, Ally }
 
 /// <summary>
 /// Relative colours in a match (blueprint §4.1): the player's own tank is toy orange, teammates blue-grey like the
-/// practice targets, everyone else red. Which side a tank is on depends on the mode: in a free-for-all everyone else is
-/// an enemy even if the server's team numbers happen to coincide.
+/// practice targets, everyone else red. Which side a tank is on depends on the mode: the two-team modes and duos have
+/// team-mates (<see cref="ModeRules.HasAllies"/>); in a free-for-all or a royale everyone else is an enemy even if the
+/// server's team numbers happen to coincide.
 /// </summary>
 public static class MatchColors
 {
@@ -27,7 +28,7 @@ public static class MatchColors
     public static Side SideOf(BattleMode mode, byte ownTeam, byte team, bool isOwn)
     {
         if (isOwn) return Side.Own;
-        return ModeRules.HasTeams(mode) && team == ownTeam ? Side.Ally : Side.Enemy;
+        return ModeRules.HasAllies(mode) && team == ownTeam ? Side.Ally : Side.Enemy;
     }
 
     /// <summary>The hull, turret and gun colour of a tank on <paramref name="side"/>.</summary>

@@ -11,17 +11,17 @@ namespace Tank.Server;
 
 /// <summary>
 /// Headless dedicated server: a room that runs <see cref="BattleServer"/> matches at 30 Hz.
-/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa|standard|royale] [--map sandbox|riverland] [--bots N] [--name "Room"]
-/// With no --mode, team battle; with no --map, the riverland; the last of each given wins. A royale is played on the riverland
-/// only (exit code 2 for --mode royale --map sandbox). The map is generated in the
+/// Usage: Tank.Server [--port 27015] [--mode teambattle|annihilation|ffa|standard|royale|duos] [--map sandbox|riverland] [--bots N] [--name "Room"]
+/// With no --mode, team battle; with no --map, the riverland; the last of each given wins. A royale and duos are played on the
+/// riverland only (exit code 2 for --mode royale --map sandbox or --mode duos --map sandbox). The map is generated in the
 /// background: the room takes players at once and starts a match once the map is ready. If that first map can't be
 /// generated (a bug), the server says so and exits with code 3.
 /// </summary>
 public static class Program
 {
-    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa|standard|royale] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
-        "  no --mode: teambattle; no --map: riverland (the last of each given wins); royale: riverland only;\n" +
-        "  --bots: 0 to 15, added when a match starts (at most 9 outside a royale)";
+    private const string Usage = "usage: Tank.Server [--port N] [--mode teambattle|annihilation|ffa|standard|royale|duos] [--map sandbox|riverland] [--bots N] [--name ROOM]\n" +
+        "  no --mode: teambattle; no --map: riverland (the last of each given wins); royale, duos: riverland only;\n" +
+        "  --bots: 0 to 15, added when a match starts (at most 9 outside a royale or duos)";
 
     private const int MapFailedExitCode = 3;
     private static readonly TimeSpan StopPollInterval = TimeSpan.FromMilliseconds(250);

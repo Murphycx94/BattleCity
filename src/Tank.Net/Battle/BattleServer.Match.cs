@@ -15,13 +15,14 @@ public sealed partial class BattleServer
 {
     /// <summary>
     /// Starts a match in the room's mode on the room's map with everyone seated, plus the bots asked for (named, given
-    /// random tanks, put on the thinner team: <see cref="BotSeating"/>), if the map is ready and may hold the mode (a royale:
-    /// the riverland only) and, for a standard battle, has bases, there are at least two tanks and, in a team mode, both teams
-    /// have one. The match is built whole — battlefield, a royale's rings (drawn from the match seed on the map's navigation
-    /// grid, which <see cref="ServerMaps"/> built before calling the map ready) and its crates (laid from the seed on the same
-    /// grid: <see cref="PlaceCrates"/>), rules, tanks, the bots' director — before any of it becomes the server's: if the grid
-    /// copy, the rings, the crates, the rules (which check the rings) or the bots fail (a bug), that is logged, the bot seats
-    /// are taken away again and the room stays as it was.
+    /// random tanks, put on the thinner team: <see cref="BotSeating"/>; in duos, in slot order, partnering whoever is alone
+    /// on a team first, then pairing up on the empty teams: <see cref="DuoSeating.ForBot"/>), if the map is ready and may hold
+    /// the mode (a royale or duos: the riverland only) and, for a standard battle, has bases, there are at least two tanks
+    /// and, in a team mode, both teams have one (in duos, at least two teams). The match is built whole — battlefield, a
+    /// royale's rings (drawn from the match seed on the map's navigation grid, which <see cref="ServerMaps"/> built before
+    /// calling the map ready) and its crates (laid from the seed on the same grid: <see cref="PlaceCrates"/>), rules, tanks,
+    /// the bots' director — before any of it becomes the server's: if the grid copy, the rings, the crates, the rules (which
+    /// check the rings) or the bots fail (a bug), that is logged, the bot seats are taken away again and the room stays as it was.
     /// </summary>
     public bool TryStartMatch(out string? reason)
     {
@@ -51,19 +52,28 @@ public sealed partial class BattleServer
         }
         var seating = new BotSeating(_options.Seed ?? (uint)Random.Shared.Next(1, int.MaxValue));
         int humans = _seats.Count(s => s is { IsBot: false });
+        bool duos = ModeRules.IsDuos(_mode);
+        Span<int> duoCounts = stackalloc int[ModeRules.DuoTeams];
         for (int i = 0; i < _bots && humans + i < ModeRules.MaxPlayersFor(_mode); i++)
         {
             byte slot = (byte)Array.FindIndex(_seats, s => s is null);
             var bot = new BattleSeat(slot, 0, isBot: true) { Name = $"机器人 {i + 1}", TankIndex = (byte)seating.NextTankIndex() };
-            bot.Team = ThinnerTeam(slot);
+            if (duos)
+            {
+                CountDuoTeams(duoCounts);   // before the bot takes its seat; 16 seats at most, so a team always has room
+                bot.Team = DuoSeating.ForBot(duoCounts);
+            }
+            else bot.Team = ThinnerTeam(slot);
             _seats[slot] = bot;
         }
         int seated = _seats.Count(s => s is not null);
-        bool teamsManned = !ModeRules.HasTeams(_mode) || (_seats.Any(s => s is { Team: 0 }) && _seats.Any(s => s is { Team: 1 }));
+        if (duos) CountDuoTeams(duoCounts);
+        bool teamsManned = duos ? DuoSeating.Manned(duoCounts) >= 2
+            : !ModeRules.HasTeams(_mode) || (_seats.Any(s => s is { Team: 0 }) && _seats.Any(s => s is { Team: 1 }));
         if (seated < ModeRules.MinPlayers || !teamsManned)
         {
             RemoveBots();
-            reason = seated < ModeRules.MinPlayers ? "fewer than two tanks" : "a team is empty";
+            reason = seated < ModeRules.MinPlayers ? "fewer than two tanks" : duos ? "fewer than two teams" : "a team is empty";
             return false;
         }
 
@@ -91,6 +101,9 @@ public sealed partial class BattleServer
             step = zone ? "the zone" : "the rules";   // in a royale the rules check the rings: a refusal there is the zone's
             rules = new MatchRules(_mode, sim, map.Definition.Spawns, _options.MatchSeconds is { } seconds ? System.Math.Max(1, (int)(seconds * SimConstants.TickRate)) : null,
                 bases: map.Definition.Bases, seed: seating.MatchSeed, zone: rings, crates: crates);
+            step = "the seats";   // a room that put three on one duos team (or one past team 7) would throw here: the bots go again
+            foreach (BattleSeat? seat in _seats)
+                if (seat is not null) rules.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
         }
         catch (Exception ex)
         {
@@ -99,8 +112,6 @@ public sealed partial class BattleServer
             reason = $"{step} failed to start";
             return false;
         }
-        foreach (BattleSeat? seat in _seats)
-            if (seat is not null) rules.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
         BotDirector? director;
         try
         {
@@ -127,6 +138,7 @@ public sealed partial class BattleServer
             if (!seat.IsBot) seat.ResetForMatch();
         }
         _log($"match started: {ModeRules.Id(_mode)}, map {map.Definition.Id}, {humans} players, {seated - humans} bots, seed {seating.MatchSeed}");
+        if (duos) _log($"teams: {DescribeDuoTeams()}");
         if (director is not null) _log($"bots: {director.Describe()}");
         if (rules.ZoneRings.Count > 0) _log($"zone: {DescribeRings(rules.ZoneRings)}");
         if (rules.Crates is { } set) LogCratesPlaced(set, sim.Field, map.Definition.Id);
@@ -156,6 +168,21 @@ public sealed partial class BattleServer
         return director;
     }
 
+    /// <summary>
+    /// "0+1 2+3 - 4 …": each duos team's seat slots joined by '+', teams 0–7 in order, "-" for a team nobody is on; for the
+    /// server's log at the start (allocates: once a match).
+    /// </summary>
+    private string DescribeDuoTeams()
+    {
+        var teams = new string[ModeRules.DuoTeams];
+        for (byte team = 0; team < teams.Length; team++)
+        {
+            IEnumerable<string> slots = _seats.Where(s => s is not null && s.Team == team).Select(s => s!.Slot.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            teams[team] = string.Join('+', slots) is { Length: > 0 } joined ? joined : "-";
+        }
+        return string.Join(' ', teams);
+    }
+
     /// <summary>"ring 1 (x, z) r 420, ring 2 …": rings 1–5 of a royale in whole metres, for the server's log.</summary>
     private static string DescribeRings(IReadOnlyList<ZoneRing> rings) =>
         string.Join(", ", Enumerable.Range(1, rings.Count - 1).Select(k => $"ring {k} {Describe(rings[k])}"));
@@ -175,10 +202,24 @@ public sealed partial class BattleServer
     private ZoneRing[] PickZone(Battlefield field, NavGrid grid, IReadOnlyList<SpawnPoint> spawns, uint seed) =>
         ZonePickerOverride is { } pick ? pick(field, grid, spawns, seed) : ZonePicker.Pick(field, grid, spawns, seed);
 
-    /// <summary>A player who comes into the running match: a tank in it, at once.</summary>
+    /// <summary>
+    /// A player who comes into the running match: a tank in it, at once — unless the rules have no spot for the seat on its team
+    /// (<see cref="MatchRules.HasSpot"/>, which <see cref="MatchRules.Join"/> checks too: in duos a team with its two already in
+    /// this match, those that have left included, or no team at all): then it waits in the room for the next, logged. The room
+    /// seats a newcomer on a team it counts as having room (<see cref="DuoSeating.ForPerson"/>), and nothing frees a seat between
+    /// the start and the start tick's step (the only tick duos takes joins), so that shouldn't happen; but Join would throw.
+    /// </summary>
     private void PutIntoMatch(BattleSeat seat)
     {
-        _rules!.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
+        MatchRules rules = _rules!;
+        if (!rules.HasSpot(seat.Slot, seat.Team))
+        {
+            _log(seat.Team >= ModeRules.DuoTeams
+                ? $"slot {seat.Slot}: has no team in this match; waiting for the next"
+                : $"slot {seat.Slot}: team {seat.Team} is full in this match; waiting for the next");
+            return;
+        }
+        rules.Join(seat.Slot, TankCatalog.All[seat.TankIndex], seat.Team);
         MarkInMatch(seat);
     }
 
@@ -307,9 +348,9 @@ public sealed partial class BattleServer
         }
     }
 
-    /// <summary>The winner for the log: "team N", "slot N" (a free-for-all) or "draw".</summary>
+    /// <summary>The winner for the log: "team N" (the two-team modes, duos), "slot N" (a free-for-all, a royale) or "draw".</summary>
     private static string WinnerText(MatchRules rules) =>
-        rules.WinnerTeam != MatchRules.NoTeam && ModeRules.HasTeams(rules.Mode) ? $"team {rules.WinnerTeam}"
+        rules.WinnerTeam != MatchRules.NoTeam && ModeRules.HasAllies(rules.Mode) ? $"team {rules.WinnerTeam}"
         : rules.WinnerSlot != MatchRules.NoSlot ? $"slot {rules.WinnerSlot}"
         : "draw";
 
@@ -339,12 +380,19 @@ public sealed partial class BattleServer
         return null;
     }
 
+    /// <summary>
+    /// What the seat may see (<see cref="Viewer"/>): through its team's eyes; once its tank is gone, everything in a mode
+    /// without team-mates (a free-for-all, a royale), and in duos once nobody of its team is left alive (stage 6 design §5.2:
+    /// till then the dead watch through a live team-mate's eyes, which the team's sight already is). No allocation.
+    /// </summary>
     private Viewer ViewerOf(BattleSeat seat, Simulation sim)
     {
-        ref readonly Standing standing = ref _rules!.Of(seat.Slot);
+        MatchRules rules = _rules!;
+        ref readonly Standing standing = ref rules.Of(seat.Slot);
         int slot = sim.SlotOf(standing.TankId);
         bool destroyed = slot < 0 || sim.Tanks[slot].IsDestroyed;
-        return new Viewer(standing.Team, standing.Active ? standing.TankId : 0, destroyed, !ModeRules.HasTeams(_mode));   // free-for-all and royale
+        bool seesAllWhenDead = !ModeRules.HasAllies(_mode) || (ModeRules.IsDuos(_mode) && rules.AliveCount(standing.Team) == 0);
+        return new Viewer(standing.Team, standing.Active ? standing.TankId : 0, destroyed, seesAllWhenDead);
     }
 
     /// <summary>The hit points, quantised, of every prop this tick's events touched, each once.</summary>
@@ -432,8 +480,8 @@ public sealed partial class BattleServer
             BaseProgress0 = rules.Capture?.Progress(0) ?? 0,
             BaseProgress1 = rules.Capture?.Progress(1) ?? 0,
             EndReason = rules.EndReason,
-            // the field's size only where it means something (a royale's "共 N 名"); never past the seats, which the reader refuses
-            Entrants = ModeRules.HasZone(rules.Mode) ? (byte)System.Math.Min(rules.Entrants, BattleProtocol.MaxPlayers) : (byte)0,
+            // the places only where they mean something ("共 N 名": a royale's seats, duos' teams); never past the seats, which the reader refuses
+            Entrants = ModeRules.HasZone(rules.Mode) ? (byte)System.Math.Min(rules.Places, BattleProtocol.MaxPlayers) : (byte)0,
         };
         bool playing = rules.Phase == MatchPhase.Playing;
         for (byte slot = 0; slot < s.Players.Length; slot++)

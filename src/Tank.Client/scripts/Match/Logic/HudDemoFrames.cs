@@ -39,6 +39,7 @@ public static class HudDemoFrames
         "timer", "feed", "respawn", "spectate", "spectate-team", "spectate-ffa", "annihilation", "ffa", "net", "scoreboard", "results-win", "results-lose", "results-draw", "results-ffa", "standard", "capture", "minimap", "map-full",
         "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale",
         "royale-crates",
+        "duos", "scoreboard-duos", "results-duos-win", "results-duos",
     };
 
     /// <summary>The gallery's screen names, in a fixed order.</summary>
@@ -72,6 +73,10 @@ public static class HudDemoFrames
             "results-royale-win" => ResultsRoyale("results-royale-win", RoyaleWinRanks, winnerSlot: 0, isHost: true),
             "results-royale" => ResultsRoyale("results-royale", RoyaleSeventhRanks, winnerSlot: 4, isHost: false),
             "royale-crates" => RoyaleCrates(),
+            "duos" => Duos(),
+            "scoreboard-duos" => Make("scoreboard-duos", DuosFrame()) with { ScoreboardOpen = true },
+            "results-duos-win" => ResultsDuos("results-duos-win", DuoWinRanks, isHost: true),
+            "results-duos" => ResultsDuos("results-duos", DuoThirdRanks, isHost: false),
             _ => null!,
         };
         return demo is not null;
@@ -360,12 +365,84 @@ public static class HudDemoFrames
     /// <summary>Seconds a tank of rank <paramref name="rank"/> lasted: 552 (9:12) for the first, 33.6 fewer a place, 48 (0:48) for the sixteenth.</summary>
     private static int RoyaleLasted(int rank) => 552 - (rank - 1) * 336 / 10;
 
+    // The duos screens (stage 6 design §5.2): eight teams of two, the player in seat 0 on team 0.
+
+    /// <summary>
+    /// The team of each seat as a duos room seats four people and twelve bots (<c>DuoSeating</c>): the people on teams 0–3,
+    /// the first four bots beside them, the other eight two to a team — the player (seat 0) with 机器人 1 (seat 4).
+    /// </summary>
+    private static readonly byte[] DuoTeamOf = { 0, 1, 2, 3, 0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 7, 7 };
+
+    /// <summary>Who is down on the duos screen: 小雨 and 机器人 4 (team 3), 机器人 6 (team 4's half), 机器人 9 and 机器人 10 (team 6) — 6 of 8 teams left.</summary>
+    private static bool DuoAlive(int slot) => slot is not (3 or 7 or 9 or 12 or 13);
+
+    private static readonly int[] DuoKills = { 2, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };   // the five down, by shells; the own team's 3
+
+    /// <summary>The team ranks (by team) on the two results screens: the player's team first, or third with team 2 (老周 and 机器人 3) first.</summary>
+    private static readonly byte[] DuoWinRanks = { 1, 4, 2, 7, 5, 3, 8, 6 };
+    private static readonly byte[] DuoThirdRanks = { 3, 4, 1, 7, 5, 2, 8, 6 };
+
+    private static readonly int[] DuoEndKills = { 4, 1, 2, 0, 2, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0 };   // 14 down, by shells
+
+    /// <summary>
+    /// Duos at 6:15 with 6 of 8 teams left and the own team on 3 kills (the player 2, 机器人 1 one), the zone as the royale
+    /// screen's: the feed has the team-mate's kill, the player's and one between enemies; the corner map has the player's
+    /// arrow with the team-mate 43 m off in the ally blue-grey, the royale screen's three enemies and three crates. (No
+    /// "an enemy destroyed the team-mate" line: the mate stands on the map, and a dead one would be a grey wreck there.)
+    /// </summary>
+    private static HudDemo Duos()
+    {
+        FeedLine[] kills =
+        {
+            Line("机器人 1", Side.Ally, "小雨", Side.Enemy),
+            Line("机器人 3", Side.Enemy, "机器人 9", Side.Enemy),
+            Line("阿成", Side.Own, "机器人 4", Side.Enemy),
+        };
+        var zone = new MinimapZone(new Vector2(560, 640), 420, true, new Vector2(520, 610), 250);
+        MinimapFrame map = RoyaleMap(zone, eye: new Vector2(870, 700), new Vector2(480, 700), new Vector2(640, 520), new Vector2(700, 760));
+        map.AddTank(new MinimapTank(new Vector2(835, 725), Side.Ally, MinimapShape.Light, Destroyed: false));   // seat 4's light (spec 0)
+        for (int i = 0; i < 3; i++) map.AddCrate(GalleryCrates[i]);
+        return new HudDemo("duos", DuosFrame(), kills, NetPanelOpen: false, Minimap: new MinimapDemo(RiverlandMap.Id, map, FullOpen: false));
+    }
+
+    private static MatchHudFrame DuosFrame()
+    {
+        PlayerStats[] players = Players(RoyaleSeats, i => DuoTeamOf[i], DuoAlive, kills: i => DuoKills[i], deaths: i => DuoAlive(i) ? 0 : 1);
+        players[0].Damage = 860;   // the own team's damage shows during the match; an enemy's comes as 0 until the end
+        players[4].Damage = 420;   // 机器人 1, the team-mate: its one kill
+        MatchHudFrame frame = Frame(BattleMode.Duos, Ticks(6, 15), players, RoyaleSeats, entrants: ModeRules.DuoTeams);
+        return frame with { Zone = new ZoneHud(true, 2, ZonePhase.Waiting, 45, false, 1) };
+    }
+
+    /// <summary>
+    /// Duos over: the eight teams ranked by <paramref name="teamRanks"/> (by team), both of the winning team standing; each
+    /// row's damage and the time it lasted, 9:12 for the winners down to 1:30 for the last team's last tank (its other
+    /// half 30 s before). 吃鸡！ when the player's team won, 第 3 名 otherwise.
+    /// </summary>
+    private static HudDemo ResultsDuos(string name, byte[] teamRanks, bool isHost)
+    {
+        PlayerStats[] players = Players(RoyaleSeats, i => DuoTeamOf[i], i => teamRanks[DuoTeamOf[i]] == 1, kills: i => DuoEndKills[i], deaths: i => teamRanks[DuoTeamOf[i]] == 1 ? 0 : 1);
+        for (int i = 0; i < RoyaleSeats; i++)
+        {
+            byte rank = teamRanks[DuoTeamOf[i]];
+            bool second = Array.IndexOf(DuoTeamOf, DuoTeamOf[i]) != i;   // the team's higher seat went down first
+            players[i].Rank = rank;
+            players[i].Damage = DuoEndKills[i] * 380 + (ModeRules.DuoTeams - rank) * 25;
+            players[i].Lasted = rank == 1 ? DuoLastedFirst : DuoLastedFirst - (rank - 1) * 66 - (second ? 30 : 0);
+        }
+        byte winner = (byte)Array.IndexOf(teamRanks, (byte)1);
+        var info = new ResultsInfo(winner, MatchRules.NoSlot, 6 * SimConstants.TickRate, isHost, MatchEndReason.Eliminated, Entrants: ModeRules.DuoTeams);
+        return Make(name, Ended(BattleMode.Duos, players, RoyaleSeats, 0, 0, info));
+    }
+
+    private const int DuoLastedFirst = 552;   // 9:12
+
     private static FeedLine ZoneLine(string victim) => new(null, Side.Enemy, victim, Side.Enemy, Friendly: false, ExpiresAt: 0, Zone: true);
 
     /// <summary>The match over: the plate and the results banner for <paramref name="info"/>, the clock at 0.</summary>
     private static MatchHudFrame Ended(BattleMode mode, PlayerStats[] players, int count, int score0, int score1, ResultsInfo info, byte progress0 = 0, byte progress1 = 0)
     {
-        var match = new MatchBlock { Phase = MatchPhase.Ended, TeamScore0 = score0, TeamScore1 = score1 };
+        var match = new MatchBlock { Phase = MatchPhase.Ended, TeamScore0 = score0, TeamScore1 = score1, Entrants = (byte)info.Entrants };
         MatchHudFrame frame = Frame(mode, ticksLeft: 0, players, count, progress0, progress1);
         return frame with { Phase = MatchPhase.Ended, Plate = HudText.Plate(mode, 0, 0, match, players), Banner = BannerKind.Results, Results = info };
     }
@@ -380,10 +457,13 @@ public static class HudDemoFrames
         return frame with { Plate = HudText.Plate(BattleMode.TeamBattle, 0, 0, match, players) };
     }
 
-    /// <summary>A playing frame for the player in slot 0, team 0; <paramref name="progress0"/> and <paramref name="progress1"/> are the bases' points (standard only), which give the capture bars as the scene's frame would.</summary>
-    private static MatchHudFrame Frame(BattleMode mode, int ticksLeft, PlayerStats[] players, int count, byte progress0 = 0, byte progress1 = 0)
+    /// <summary>
+    /// A playing frame for the player in slot 0, team 0; <paramref name="progress0"/> and <paramref name="progress1"/> are the bases' points (standard only),
+    /// which give the capture bars as the scene's frame would; <paramref name="entrants"/> the server's <see cref="MatchBlock.Entrants"/> (duos' plate counts the teams left of it).
+    /// </summary>
+    private static MatchHudFrame Frame(BattleMode mode, int ticksLeft, PlayerStats[] players, int count, byte progress0 = 0, byte progress1 = 0, int entrants = 0)
     {
-        var match = new MatchBlock { TicksLeft = ticksLeft, BaseProgress0 = progress0, BaseProgress1 = progress1 };
+        var match = new MatchBlock { TicksLeft = ticksLeft, BaseProgress0 = progress0, BaseProgress1 = progress1, Entrants = (byte)entrants };
         PlateValues plate = HudText.Plate(mode, 0, 0, match, players);
         var names = new string?[BattleProtocol.MaxPlayers];
         Array.Copy(Roster, names, count);

@@ -11,13 +11,13 @@ public struct Standing
 {
     public bool Active;        // in the match (joined, not left)
     public int TankId;
-    public byte Team;
+    public byte Team;          // 0/1 in the two-team modes, 0–7 in duos, the seat in a free-for-all or a royale
     public int Kills;
     public int Deaths;
     public bool Alive;         // false while a wreck, or once eliminated
     public int RespawnAt;      // tick the tank comes back (team battle), or -1
     public int EliminatedAt;   // tick the player went out of a no-respawn match (or left it), or -1
-    public byte Rank;          // final place in a free-for-all or a royale, 1 best; 0 until the match ends
+    public byte Rank;          // final place in a free-for-all or a royale (in duos the team's, both seats alike), 1 best; 0 until the match ends
     public int Damage;         // damage dealt to other sides' tanks, each hit counted up to the health its target had left (every mode)
 }
 
@@ -27,7 +27,7 @@ public struct Standing
 /// the fallen, keeps the clock and calls the result and why. Players are known by room slot. Call <see cref="Update"/>
 /// after every <see cref="Simulation.Step"/>.
 /// </summary>
-public sealed class MatchRules
+public sealed partial class MatchRules
 {
     public const byte NoTeam = byte.MaxValue;
     public const byte NoSlot = byte.MaxValue;
@@ -39,7 +39,7 @@ public sealed class MatchRules
     private const float SpawnShunt = 6f;
     private const int SpawnShunts = 3;
 
-    /// <summary><c>XorShift(seed ^ SpawnSalt)</c> shuffles a royale's spawn order.</summary>
+    /// <summary><c>XorShift(seed ^ SpawnSalt)</c> shuffles the spawn order of the modes with a zone (a royale, duos).</summary>
     public const uint SpawnSalt = 0x5A17_0C5Eu;
 
     private readonly Simulation _sim;
@@ -60,36 +60,60 @@ public sealed class MatchRules
     /// <summary>Bit <c>slot</c> set once that seat has joined this match: <see cref="Entrants"/>.</summary>
     private uint _joinedSeats;
 
+    /// <summary>
+    /// Duos: bit <c>team</c> set while a seat of that team is in this match or has left it for good (a seat that leaves on the start tick
+    /// and joins again gives its team back: <see cref="Join"/>).
+    /// </summary>
+    private uint _joinedTeams;
+
+    /// <summary>A duos team whose two member spots (<see cref="_teamMembers"/>) are both taken.</summary>
+    private const byte FullTeam = (1 << ModeRules.DuoTeamSize) - 1;
+
+    /// <summary>
+    /// Duos: per team, bit <c>m</c> set while member spot m (0 left, 1 right: <see cref="DuoSpawns"/>) is taken, by a seat in the
+    /// match or one that has left it for good. A joiner takes the lowest free spot, so never a partner's who stayed.
+    /// </summary>
+    private readonly byte[] _teamMembers = new byte[ModeRules.DuoTeams];
+
+    /// <summary>Duos: the member spot each seat took on its team when it joined.</summary>
+    private readonly byte[] _memberOf = new byte[ModeRules.MaxPlayers];
+
     /// <summary>The last whole second of the match (since the start) the zone has hurt on: each one is hurt on exactly once.</summary>
     private int _lastZoneSecond;
 
-    /// <summary>A royale's six rings (ring 0, then rings 1–5), or empty.</summary>
+    /// <summary>The six rings of a mode with a zone (a royale, duos): ring 0, then rings 1–5; or empty.</summary>
     private readonly ZoneRing[] _zoneRings = Array.Empty<ZoneRing>();
 
-    /// <summary>The order a royale tries its solo points in (indices into <see cref="SpawnLayout.Solo"/>); null in the other modes, which take them in list order.</summary>
+    /// <summary>
+    /// The order the modes with a zone take the solo points in (indices into <see cref="SpawnLayout.Solo"/>): a royale tries them in
+    /// it, duos team k takes entry k. Null in the other modes, which take them in list order.
+    /// </summary>
     private readonly int[]? _spawnOrder;
 
     /// <param name="durationTicks">A match length other than the mode's (tests), positive; null for the mode's own.</param>
     /// <param name="bases">The map's bases: required (<see cref="TeamBase.Check"/>, not empty) in a standard match, ignored in the others.</param>
-    /// <param name="seed">The match seed: in a royale the solo spawn points are taken in an order drawn from it; ignored otherwise.</param>
+    /// <param name="seed">The match seed: in a royale and duos the solo spawn points are taken in an order drawn from it; ignored otherwise.</param>
     /// <param name="zone">
-    /// A royale's six rings (<see cref="ZoneSchedule.Check"/>: ArgumentException, param "zone"): ring 0, then rings 1–5. Null: no zone
-    /// (unit tests; the server always passes one). Ignored outside a royale.
+    /// The zone's six rings (<see cref="ZoneSchedule.Check"/>: ArgumentException, param "zone"): ring 0, then rings 1–5. Null: no zone
+    /// (unit tests; the server always passes one). Ignored outside the modes with a zone (<see cref="ModeRules.HasZone"/>: a royale, duos).
     /// </param>
     /// <param name="crates">
     /// The match's supply crates (<see cref="CrateSet"/>'s checks: ArgumentException, param "crates"). Null: none (unit tests; the
     /// server always places them). Ignored outside the modes with crates (<see cref="ModeRules.HasCrates"/>).
     /// </param>
+    /// <exception cref="InvalidOperationException">Duos on a layout with fewer than <see cref="ModeRules.DuoTeams"/> solo points: each team needs its own.</exception>
     public MatchRules(BattleMode mode, Simulation sim, SpawnLayout spawns, int? durationTicks = null, IReadOnlyList<TeamBase>? bases = null,
         uint seed = 0, IReadOnlyList<ZoneRing>? zone = null, IReadOnlyList<Crate>? crates = null)
     {
         if (durationTicks is <= 0) throw new ArgumentOutOfRangeException(nameof(durationTicks), durationTicks, "A match lasts at least one tick.");
+        if (ModeRules.IsDuos(mode) && spawns.Solo.Count < ModeRules.DuoTeams)
+            throw new InvalidOperationException($"Duos needs {ModeRules.DuoTeams} solo spawn points, one per team; the layout has {spawns.Solo.Count}.");
         if (ModeRules.HasBases(mode)) Capture = new BaseCapture(bases ?? Array.Empty<TeamBase>());   // checks them: ArgumentException, param "bases"
         (Mode, _sim, _spawns) = (mode, sim, spawns);
         StartTick = sim.Tick;
         EndTick = sim.Tick + (durationTicks ?? ModeRules.DurationTicks(mode));
         for (int i = 0; i < _players.Length; i++) _players[i] = new Standing { RespawnAt = -1, EliminatedAt = -1 };
-        if (mode == BattleMode.Royale) _spawnOrder = ShuffledSpawns(spawns.Solo.Count, seed);
+        if (ModeRules.HasZone(mode)) _spawnOrder = ShuffledSpawns(spawns.Solo.Count, seed);
         if (ModeRules.HasZone(mode) && zone is not null) _zoneRings = ZoneSchedule.Check(zone, nameof(zone));   // a copy already
         ZoneRings = Array.AsReadOnly(_zoneRings);
         if (ModeRules.HasCrates(mode) && crates is not null) Crates = new CrateSet(crates);
@@ -116,11 +140,30 @@ public sealed class MatchRules
     public int StartTick { get; }
 
     /// <summary>
-    /// The seats that have joined this match, those who have since left included (a royale: those it started with): each seat
+    /// The seats that have joined this match, those who have since left included (a royale, duos: those it started with): each seat
     /// once however often it leaves and comes back (a team battle takes players mid-match), so never more than
-    /// <see cref="ModeRules.MaxPlayers"/>. A royale's "共 N 名".
+    /// <see cref="ModeRules.MaxPlayers"/>. A royale's "共 N 名"; in duos that is <see cref="Places"/> (teams), and this stays the seats.
     /// </summary>
     public int Entrants => BitOperations.PopCount(_joinedSeats);
+
+    /// <summary>
+    /// How many places the results run to (stage 6 design §2.3: "共 N 名"): in duos the teams that joined this match (a team whose
+    /// two have both left included; not one whose only seat left on the start tick for another team), in every other mode <see cref="Entrants"/>.
+    /// </summary>
+    public int Places => ModeRules.IsDuos(Mode) ? BitOperations.PopCount(_joinedTeams) : Entrants;
+
+    /// <summary>Duos: the teams with a live tank (0 outside duos).</summary>
+    public int AliveTeams
+    {
+        get
+        {
+            if (!ModeRules.IsDuos(Mode)) return 0;
+            uint teams = 0;
+            foreach (ref readonly Standing p in _players.AsSpan()) if (p.Active && p.Alive) teams |= 1u << p.Team;
+            return BitOperations.PopCount(teams);
+        }
+    }
+
     public MatchPhase Phase { get; private set; } = MatchPhase.Playing;
 
     /// <summary>The tick the clock runs out.</summary>
@@ -131,10 +174,10 @@ public sealed class MatchRules
 
     public int TicksLeft => Math.Max(0, EndTick - _sim.Tick);
 
-    /// <summary>The winning team (two-team modes), or <see cref="NoTeam"/> for a draw or while the match is on.</summary>
+    /// <summary>The winning team (two-team modes, duos), or <see cref="NoTeam"/> for a draw or while the match is on.</summary>
     public byte WinnerTeam { get; private set; } = NoTeam;
 
-    /// <summary>The winning player's slot (free-for-all, royale), or <see cref="NoSlot"/>.</summary>
+    /// <summary>The winning player's slot (free-for-all, royale), or <see cref="NoSlot"/> (always in duos, which a team wins).</summary>
     public byte WinnerSlot { get; private set; } = NoSlot;
 
     /// <summary>Why the match ended, in every mode; <see cref="MatchEndReason.None"/> while it is on.</summary>
@@ -154,7 +197,7 @@ public sealed class MatchRules
 
     /// <summary>
     /// How long <paramref name="slot"/>'s tank lasted: to its going out, or to the end (or now) if still in; 0 for an empty seat. Meaningful
-    /// only without respawns or mid-match joins (a royale, a free-for-all): a team battle's respawned tank reads as in from the start,
+    /// only without respawns or mid-match joins (a royale, duos, a free-for-all): a team battle's respawned tank reads as in from the start,
     /// and a seat that joined late reads from the start too.
     /// </summary>
     public int LastedTicks(byte slot)
@@ -165,7 +208,7 @@ public sealed class MatchRules
         return (EndedAt >= 0 ? EndedAt : _sim.Tick) - StartTick;
     }
 
-    /// <summary>A royale's six rings (ring 0, then rings 1–5), as the server picked them; empty without a zone.</summary>
+    /// <summary>The zone's six rings (ring 0, then rings 1–5) in the modes with a zone (a royale, duos), as the server picked them; empty without a zone.</summary>
     public IReadOnlyList<ZoneRing> ZoneRings { get; }
 
     /// <summary>The zone at the current tick as of the last <see cref="Update"/> (or the start); Phase None without a zone. Stays put once the match has ended.</summary>
@@ -197,24 +240,74 @@ public sealed class MatchRules
     }
 
     /// <summary>
-    /// Puts <paramref name="slot"/>'s tank into the battle on a free spawn point of <paramref name="team"/> (ignored in
-    /// a free-for-all or a royale, where each player is their own team), under protection.
+    /// Puts <paramref name="slot"/>'s tank into the battle under protection: on a free spawn point of <paramref name="team"/> (0 or 1)
+    /// in the two-team modes; in duos beside its team-mate on the team's point (<paramref name="team"/> 0–7, two seats to a team);
+    /// in a free-for-all or a royale on a free solo point, <paramref name="team"/> ignored and each player their own team.
     /// </summary>
     /// <returns>The tank's id.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">A team past 1 in the two-team modes, past 7 in duos.</exception>
+    /// <exception cref="InvalidOperationException">Joins closed, the seat already in, or (duos) no spot on the team: <see cref="HasSpot"/>.</exception>
+    /// <remarks>
+    /// Duos: a seat that has left and joins again (which only the start tick allows) first gives back its old team spot, so its old
+    /// team doesn't count among the <see cref="Places"/> with nobody in it and it never takes a spot twice.
+    /// </remarks>
     public int Join(byte slot, TankSpec spec, byte team)
     {
         if (!AcceptsJoins) throw new InvalidOperationException("The match takes no more players now.");
         if (_players[slot].Active) throw new InvalidOperationException($"Slot {slot} is already in the match.");
         if (ModeRules.HasTeams(Mode) && team > 1) throw new ArgumentOutOfRangeException(nameof(team), team, "Teams are 0 and 1.");
-        byte actual = ModeRules.HasTeams(Mode) ? team : slot;
-        SpawnPoint spawn = PickSpawn(actual, except: 0);
+        bool duos = ModeRules.IsDuos(Mode);
+        if (duos && team >= ModeRules.DuoTeams) throw new ArgumentOutOfRangeException(nameof(team), team, $"Duos teams are 0 … {ModeRules.DuoTeams - 1}.");
+        if (!HasSpot(slot, team)) throw new InvalidOperationException($"Team {team} is full.");
+        if (duos && _players[slot].TankId != 0) ReleaseSpot(slot);   // it left: it gives its old spot back
+        byte actual = ModeRules.HasAllies(Mode) ? team : slot;
+        int member = duos ? BitOperations.TrailingZeroCount(~(uint)_teamMembers[team]) : 0;
+        SpawnPoint spawn = duos ? DuoSpawn(team, member) : PickSpawn(actual, except: 0);
         int id = _sim.AddTank(spec, spawn.Position, spawn.Yaw, actual);
         _sim.Protect(id, ModeRules.ProtectionTicks);
         _players[slot] = new Standing { Active = true, TankId = id, Team = actual, Alive = true, RespawnAt = -1, EliminatedAt = -1 };
         _health[slot] = _hitRoom[slot] = spec.MaxHealth;
         _healthBeforeFall[slot] = 0;
         _joinedSeats |= 1u << slot;
+        if (duos)
+        {
+            _memberOf[slot] = (byte)member;
+            _teamMembers[team] |= (byte)(1 << member);
+            _joinedTeams |= 1u << team;
+        }
         return id;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="slot"/> may join <paramref name="team"/> as far as the team's member spots go: the one check behind
+    /// <see cref="Join"/>'s "Team N is full." (the server asks it before putting a newcomer in). Duos: <paramref name="team"/> is
+    /// 0–7 and has a member spot free — the spots of seats that have left stay taken, except the one <paramref name="slot"/> itself
+    /// still holds there when it has left and is joining again. Every other mode: true (no spots to run out of; <see cref="Join"/>'s
+    /// own checks of the team, the phase and the seat still apply). No allocation.
+    /// </summary>
+    public bool HasSpot(byte slot, byte team)
+    {
+        if (!ModeRules.IsDuos(Mode)) return true;
+        if (team >= ModeRules.DuoTeams) return false;
+        ref readonly Standing p = ref _players[slot];
+        bool rejoining = !p.Active && p.TankId != 0;
+        return TakenSpots(team, rejoining ? slot : NoSlot) != FullTeam;
+    }
+
+    /// <summary>Duos: <paramref name="team"/>'s taken member spots, less the one <paramref name="leaver"/> (a seat that has left, or <see cref="NoSlot"/>) holds there.</summary>
+    private byte TakenSpots(byte team, byte leaver)
+    {
+        byte taken = _teamMembers[team];
+        if (leaver != NoSlot && _players[leaver].Team == team) taken &= (byte)~(1 << _memberOf[leaver]);
+        return taken;
+    }
+
+    /// <summary>Duos: frees the member spot <paramref name="slot"/> (which has left) held on its team, and the team itself once it has none taken.</summary>
+    private void ReleaseSpot(byte slot)
+    {
+        byte team = _players[slot].Team;
+        _teamMembers[team] = TakenSpots(team, slot);
+        if (_teamMembers[team] == 0) _joinedTeams &= ~(1u << team);
     }
 
     /// <summary>Takes <paramref name="slot"/>'s tank out of the battle; in a no-respawn mode that counts as going out.</summary>
@@ -235,7 +328,7 @@ public sealed class MatchRules
 
     /// <summary>
     /// After each step: the crates the live hulls touch are eaten first (so a repair comes before the zone's bite on the same
-    /// second); in a royale the zone then hurts the tanks outside it on each whole second of the match; then this tick's
+    /// second); in the modes with a zone (a royale, duos) the zone then hurts the tanks outside it on each whole second of the match; then this tick's
     /// kills (the zone's included, credited to no one) and damage are scored, base capture counted, the due respawned, and
     /// the result called when it is decided; last, each seat's health is noted for the next tick's damage. The room sees
     /// to it that a match starts with at least two players, one per team: with fewer, a no-respawn match is decided on
@@ -371,6 +464,10 @@ public sealed class MatchRules
                 if (AliveCount() <= 1) EndSolo(MatchEndReason.Eliminated);
                 else if (timeUp) EndSolo(MatchEndReason.TimeUp);
                 break;
+            case BattleMode.Duos:
+                if (AliveTeams <= 1) EndDuos(MatchEndReason.Eliminated);
+                else if (timeUp) EndDuos(MatchEndReason.TimeUp);
+                break;
             case BattleMode.Standard:
                 JudgeStandard(timeUp);
                 break;
@@ -460,9 +557,16 @@ public sealed class MatchRules
     }
 
     /// <summary>
+    /// Duos: member <paramref name="member"/>'s spot (<see cref="DuoSpawns"/>) beside <paramref name="team"/>'s own point, entry
+    /// <paramref name="team"/> of the seeded order (the constructor sees there are enough), with no looking for room: the two stand
+    /// apart, and the riverland's solo points lie at least 268 m from one another.
+    /// </summary>
+    private SpawnPoint DuoSpawn(byte team, int member) => DuoSpawns.Member(_spawns.Solo[_spawnOrder![team]], member, _sim.Field);
+
+    /// <summary>
     /// The first spawn point of <paramref name="team"/> (any, in a free-for-all or a royale; a royale tries them in its
     /// seeded order) with no tank or wreck on it; when all are taken, the roomiest one, shunted to the side it has most
-    /// room on, so a tank is never put on top of another.
+    /// room on, so a tank is never put on top of another. Not for duos (<see cref="DuoSpawn"/>).
     /// </summary>
     /// <param name="except">A tank that doesn't count as occupying (the one about to respawn), or 0.</param>
     private SpawnPoint PickSpawn(byte team, int except)

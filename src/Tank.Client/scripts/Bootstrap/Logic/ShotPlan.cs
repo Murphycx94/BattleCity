@@ -23,9 +23,9 @@ public enum ShotMoment
     Death,
     /// <summary>The results came up (a match only).</summary>
     Ended,
-    /// <summary>The player's own live tank was first outside the zone's safe circle (a royale match only).</summary>
+    /// <summary>The player's own live tank was first outside the zone's safe circle (a royale or duos match only).</summary>
     Outside,
-    /// <summary>The player first ate a supply crate (its own Crate message; a royale match only).</summary>
+    /// <summary>The player first ate a supply crate (its own Crate message; a royale or duos match only).</summary>
     Pickup,
 }
 

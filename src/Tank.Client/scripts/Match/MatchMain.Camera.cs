@@ -5,7 +5,6 @@ using Tank.Client.Driving;
 using Tank.Client.World;
 using Tank.Net.Battle;
 using Tank.Sim.Maps;
-using Tank.Sim.Modes;
 using Tank.Sim.Vehicles;
 using SN = System.Numerics;
 
@@ -178,18 +177,21 @@ public partial class MatchMain
 
     /// <summary>
     /// One spectating frame (blueprint §5 T8): Q, E and a click step through the living candidates, F frees the camera
-    /// (free-for-all only), and <see cref="SpectateState"/> runs the close-up and the fallbacks. Returns what the world
+    /// (free-for-all and royale; duos once no team-mate is left, <see cref="SpectateCandidates.MayRoam"/>), and
+    /// <see cref="SpectateState"/> runs the close-up and the fallbacks. Returns what the world
     /// should treat as the followed tank.
     /// </summary>
     private (TankState?, TankPose?) UpdateSpectate(in TankState own, TankPose ownPose, Battlefield field, float fdt)
     {
-        FillCandidates();
+        byte ownTeam = OwnTeam(_client.Own);
+        SpectateCandidates.Fill(Mode, ownTeam, _client.Others, _candidates);
         ReadOnlySpan<int> candidates = CollectionsMarshal.AsSpan(_candidates);
         int step = _input.TakeSpectateStep() + (_input.TakeSpectateClick() ? 1 : 0);
         if (step != 0) _spectate.Step(step, candidates);
-        bool teamless = !ModeRules.HasTeams(Mode);   // free-for-all and royale: the dead may roam, and do when nobody is left to follow
-        if (_input.TakeSpectateFree() && teamless) _spectate.GoFree();
-        _spectate.Update(fdt, candidates, freeWhenNone: teamless);
+        // Free-for-all and royale, or duos with the team-mate gone: the dead may roam, and do when nobody is left to follow.
+        bool mayRoam = SpectateCandidates.MayRoam(Mode, ownTeam, _client.Others);
+        if (_input.TakeSpectateFree() && mayRoam) _spectate.GoFree();
+        _spectate.Update(fdt, candidates, freeWhenNone: mayRoam);
 
         (_spectateName, _spectateFree) = (null, false);
         if (_spectate.Current == SpectateState.Mode.Follow && TryFindRemote(_spectate.TargetId, out RemoteTank remote))
@@ -215,21 +217,6 @@ public partial class MatchMain
         }
         UpdateCamera(own, ownPose, field);   // the wreck close-up (and the odd frame a followed tank just vanished)
         return (own, ownPose);
-    }
-
-    /// <summary>The tanks a dead player may watch, in the interpolator's order: living teammates in a team mode, everyone alive in a free-for-all.</summary>
-    private void FillCandidates()
-    {
-        _candidates.Clear();
-        bool teams = ModeRules.HasTeams(Mode);
-        byte ownTeam = OwnTeam(_client.Own);
-        IReadOnlyList<RemoteTank> others = _client.Others;
-        for (int i = 0; i < others.Count; i++)
-        {
-            BattleEntity entity = others[i].Entity;
-            if (entity.Has(TankFlags.Destroyed) || (teams && entity.Team != ownTeam)) continue;
-            _candidates.Add(entity.Id);
-        }
     }
 
     private bool TryFindRemote(int tankId, out RemoteTank remote)

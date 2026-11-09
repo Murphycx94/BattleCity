@@ -10,10 +10,12 @@ namespace Tank.Client.Match;
 /// <summary>
 /// The scoreboard (blueprint §4.2): a header (名次 / 名字 / 车型 / 击毁 / 阵亡 / 状态, and in a standard battle 占领 before
 /// 状态, stage 5 design §3.4, with the kills and deaths moved left to make room; in a royale 伤害 in place of 阵亡, stage 6
-/// design §3.3, and once it has ended 存活 — how long each tank lasted — in place of 状态), in the team modes a banner per team
-/// (我方 first, then 敌方, in the sides' colours) and one line per player, the player's own tinted in the accent colour
-/// and the fallen dimmed. An enemy's 占领 cell stays blank until the match has ended (the server hides it till then), and so does
-/// another player's 伤害. A board of more than ten lines (a royale's sixteen) uses <see cref="ScoreboardMetrics.Compact"/>'s row height and
+/// design §3.3, and once it has ended 存活 — how long each tank lasted — in place of 状态; duos the same, stage 6 design §5.2),
+/// in the two-team modes a banner per team (我方 first, then 敌方, in the sides' colours) and one line per player, the
+/// player's own tinted in the accent colour and the fallen dimmed. Duos has no banners: its teams of two are set apart by a
+/// thin rule that takes no height (sixteen lines still fit 550 px), the own name in the accent colour, the team-mate's in
+/// the ally blue-grey and everyone else's white (a column of red would not read). An enemy's 占领 cell stays blank until the
+/// match has ended (the server hides it till then), and so does an enemy's 伤害 (a duos team-mate's shows). A board of more than ten lines (a royale's sixteen) uses <see cref="ScoreboardMetrics.Compact"/>'s row height and
 /// type sizes so it fits the same box; the ten-seat modes are drawn exactly as before. It shows while Tab is held and, in the same shape at the results position, once the match has
 /// ended. The lines are rebuilt only when the scoreboard's numbers, the names or the own respawn second change, and the
 /// view redraws only then (or when shown or resized): nothing here allocates on a quiet frame.
@@ -33,6 +35,7 @@ public partial class ScoreboardView : HudPanel
     private const float NameWidth = TankX - NameX - 12f;
     private const int PanelRadius = 24, RowRadius = 12;
     private const float PanelAlpha = 0.88f, TeamAlpha = 0.3f, OwnAlpha = 0.3f, DeadAlpha = 0.5f, DividerInset = 18f;
+    private const float GroupRuleWidth = 2f, GroupRuleAlpha = 0.45f;
 
     private static readonly string[] Headers = { "名次", "名字", "车型", "击毁", "阵亡", "状态" };
     private const string CaptureHeader = "占领", DamageHeader = "伤害", LastedHeader = "存活";
@@ -43,7 +46,7 @@ public partial class ScoreboardView : HudPanel
     {
         public string Rank, Name, Tank, Kills, Deaths, Capture, Damage, Lasted, Status;
         public Color NameColor;
-        public bool Own, Dim, TeamStart, FirstGroup;
+        public bool Own, Dim, TeamStart, FirstGroup, GroupRule;
     }
 
     private readonly ScoreRow[] _rows = new ScoreRow[BattleProtocol.MaxPlayers];
@@ -57,7 +60,7 @@ public partial class ScoreboardView : HudPanel
     private readonly StyleBoxFlat _enemyBanner = HudStyle.RoundedBox(new Color(MatchColors.Ui(Side.Enemy).ToColor(), TeamAlpha), RowRadius, 6);
     private string?[] _names = Array.Empty<string?>();
     private int _count, _groups;
-    private bool _hasLines, _teams, _results, _capture, _royale;
+    private bool _hasLines, _teams, _results, _capture, _zoneColumns;
     private ScoreboardMetrics _metrics = ScoreboardMetrics.Regular;
     private BattleMode _mode;
     private byte _ownSlot, _ownTeam;
@@ -108,7 +111,7 @@ public partial class ScoreboardView : HudPanel
         _names = frame.Names;
         _teams = ModeRules.HasTeams(frame.Mode);
         _capture = frame.Mode == BattleMode.Standard;
-        _royale = frame.Mode == BattleMode.Royale;
+        _zoneColumns = ModeRules.HasZone(frame.Mode);   // a royale's columns, duos too
         _count = ScoreboardModel.Build(frame.Mode, frame.OwnSlot, frame.OwnTeam, frame.Players, _nameOf, ended, frame.RespawnIn, _rows);
         _metrics = ScoreboardMetrics.For(_count);
         Func<string, float> measure = _metrics == ScoreboardMetrics.Compact ? MeasureCompact : MeasureRegular;
@@ -122,22 +125,32 @@ public partial class ScoreboardView : HudPanel
             {
                 Rank = Number(row.Rank), Name = Fit(row.Name, measure), Tank = row.TankName, Kills = Number(row.Kills), Deaths = Number(row.Deaths),
                 Capture = _capture ? ScoreboardModel.CaptureCell(row, ended) : string.Empty,
-                Damage = _royale ? ScoreboardModel.DamageCell(row, ended) : string.Empty,
-                Lasted = _royale && ended ? ScoreboardModel.LastedCell(row) : string.Empty,
+                Damage = _zoneColumns ? ScoreboardModel.DamageCell(row, ended) : string.Empty,
+                Lasted = _zoneColumns && ended ? ScoreboardModel.LastedCell(row) : string.Empty,
                 Status = row.Status, NameColor = NameColor(row), Own = row.Slot == frame.OwnSlot, Dim = !row.Alive,
-                TeamStart = start, FirstGroup = _groups == 1,
+                TeamStart = start, FirstGroup = _groups == 1, GroupRule = ScoreboardModel.StartsGroup(frame.Mode, _rows.AsSpan(0, _count), i),
             };
         }
     }
 
-    private Color NameColor(in ScoreRow row) => _teams ? MatchColors.Ui(row.Side).ToColor() : row.Side == Side.Own ? HudStyle.Accent : HudStyle.Text;
+    /// <summary>The two-team modes: the side's colour. Otherwise the own name in the accent colour, a duos team-mate's blue-grey, the rest white.</summary>
+    private Color NameColor(in ScoreRow row)
+    {
+        if (_teams) return MatchColors.Ui(row.Side).ToColor();
+        return row.Side switch
+        {
+            Side.Own => HudStyle.Accent,
+            Side.Ally => MatchColors.Ui(Side.Ally).ToColor(),
+            _ => HudStyle.Text,
+        };
+    }
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>The name cut to the name column, with an ellipsis where it was cut.</summary>
     private static string Fit(string name, Func<string, float> measure) => HudText.Fit(name, NameWidth, measure);
 
-    private Columns At => _royale ? Royale : _capture ? WithCapture : Plain;
+    private Columns At => _zoneColumns ? Royale : _capture ? WithCapture : Plain;
 
     public override void _Draw()
     {
@@ -154,6 +167,7 @@ public partial class ScoreboardView : HudPanel
                 DrawTeamBanner(table, y, line.FirstGroup);
                 y += ScoreboardMetrics.TeamBannerHeight;
             }
+            if (line.GroupRule) DrawGroupRule(table, y);
             DrawPlayerLine(table, y, line);
             y += _metrics.RowHeight;
         }
@@ -168,10 +182,10 @@ public partial class ScoreboardView : HudPanel
         HudStyle.DrawOutlined(this, new Vector2(table.X + NameX, baseline), Headers[1], HeaderSize, dim, TextOutline);
         HudStyle.DrawOutlined(this, new Vector2(table.X + TankX, baseline), Headers[2], HeaderSize, dim, TextOutline);
         HudStyle.DrawOutlinedCentered(this, table.X + at.Kill, baseline, Headers[3], HeaderSize, dim, TextOutline);
-        if (_royale) HudStyle.DrawOutlinedCentered(this, table.X + DamageX, baseline, DamageHeader, HeaderSize, dim, TextOutline);
+        if (_zoneColumns) HudStyle.DrawOutlinedCentered(this, table.X + DamageX, baseline, DamageHeader, HeaderSize, dim, TextOutline);
         else HudStyle.DrawOutlinedCentered(this, table.X + at.Death, baseline, Headers[4], HeaderSize, dim, TextOutline);
         if (_capture) HudStyle.DrawOutlinedCentered(this, table.X + at.Capture, baseline, CaptureHeader, HeaderSize, dim, TextOutline);
-        HudStyle.DrawOutlined(this, new Vector2(table.X + at.Status, baseline), _royale && _results ? LastedHeader : Headers[5], HeaderSize, dim, TextOutline);
+        HudStyle.DrawOutlined(this, new Vector2(table.X + at.Status, baseline), _zoneColumns && _results ? LastedHeader : Headers[5], HeaderSize, dim, TextOutline);
         float rule = table.Y + ScoreboardMetrics.HeaderHeight - 2;
         DrawLine(new Vector2(table.X + DividerInset, rule), new Vector2(table.Right - DividerInset, rule), new Color(HudStyle.OutlineColor, 0.8f), 2f);
     }
@@ -183,6 +197,10 @@ public partial class ScoreboardView : HudPanel
         Color color = MatchColors.Ui(own ? Side.Ally : Side.Enemy).ToColor();
         HudStyle.DrawOutlined(this, new Vector2(box.Position.X + 16, y + HudStyle.Baseline(ScoreboardMetrics.TeamBannerHeight / 2, TeamSize)), own ? "我方" : "敌方", TeamSize, color, TextOutline);
     }
+
+    /// <summary>Duos: the rule between two teams, on the boundary between their lines (it takes no height of its own).</summary>
+    private void DrawGroupRule(HudRect table, float y) =>
+        DrawLine(new Vector2(table.X + DividerInset, y), new Vector2(table.Right - DividerInset, y), new Color(Palette.UiDim.ToColor(), GroupRuleAlpha), GroupRuleWidth);
 
     private void DrawPlayerLine(HudRect table, float y, in Line line)
     {
@@ -198,7 +216,7 @@ public partial class ScoreboardView : HudPanel
         HudStyle.DrawOutlined(this, new Vector2(table.X + NameX, baseline), line.Name, bodySize, name, TextOutline);
         HudStyle.DrawOutlined(this, new Vector2(table.X + TankX, baseline), line.Tank, bodySize, dim, TextOutline);
         HudStyle.DrawOutlinedCentered(this, table.X + at.Kill, baseline, line.Kills, bodySize, text, TextOutline);
-        if (_royale)
+        if (_zoneColumns)
         {
             if (line.Damage.Length > 0) HudStyle.DrawOutlinedCentered(this, table.X + DamageX, baseline, line.Damage, bodySize, text, TextOutline);
         }

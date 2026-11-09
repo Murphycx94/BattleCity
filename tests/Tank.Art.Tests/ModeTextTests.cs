@@ -54,6 +54,15 @@ public class ModeTextTests
     }
 
     [Fact]
+    public void Duos_is_called_duo_chicken_dinner_and_its_rule_names_the_pairs_and_the_numbers()
+    {
+        Assert.Equal("双人吃鸡", ModeText.Name(BattleMode.Duos));
+        Assert.Equal("最多 16 辆车，两人一队共 8 队，队友共享视野；毒圈缩小 5 次，圈外掉血；一队两人都被击毁才出局，最后留下的一队吃鸡，10 分钟后按剩余血量定名次。",
+            ModeText.Rule(BattleMode.Duos));
+        Assert.Contains("两人一队", ModeText.Rule(BattleMode.Duos));
+    }
+
+    [Fact]
     public void A_mode_from_another_version_has_a_name_and_no_rule()
     {
         var unknown = (BattleMode)200;

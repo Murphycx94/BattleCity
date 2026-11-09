@@ -5,6 +5,7 @@ using Tank.Sim;
 using Tank.Sim.Maps;
 using Tank.Sim.Modes;
 using Tank.Sim.Navigation;
+using Tank.Sim.Vehicles;
 using Tank.Sim.Vision;
 
 namespace Tank.Net.Battle;
@@ -19,8 +20,8 @@ namespace Tank.Net.Battle;
 public sealed partial class BattleServer
 {
     /// <summary>
-    /// In a crate mode (stage 6 design §4.4), per seat slot: bit <c>id</c> set for each crate the seat's tank saw at the last sight
-    /// pass (<see cref="RefreshCrateSight"/>; its snapshot's rows), for each it has seen at any pass this match, and for each it has
+    /// In a crate mode (stage 6 design §4.4), per seat slot: bit <c>id</c> set for each crate the seat's tank (in duos, its team's live
+    /// tanks) saw at the last sight pass (<see cref="RefreshCrateSight"/>; its snapshot's rows), for each it has seen at any pass this match, and for each it has
     /// been told is gone: a row of it down in a snapshot built for the seat (<see cref="Build"/>), or its own pickup (<see cref="TellPickups"/>).
     /// A resync hands back the known ones not told gone (<see cref="KnownStanding"/>): what the client believes still stands, so a
     /// crate eaten out of the seat's sight isn't given away by the resync either. Cleared when a match starts and ends, and with a
@@ -30,6 +31,9 @@ public sealed partial class BattleServer
     private readonly ulong[] _crateVisible = new ulong[BattleProtocol.MaxPlayers];
     private readonly ulong[] _crateKnown = new ulong[BattleProtocol.MaxPlayers];
     private readonly ulong[] _crateGone = new ulong[BattleProtocol.MaxPlayers];
+    /// <summary>Duos, during a sight pass: each team's crates in sight, its live tanks' looks or'd together (valid where <see cref="_teamCrateSightDone"/> has the team's bit).</summary>
+    private readonly ulong[] _teamCrateSight = new ulong[ModeRules.DuoTeams];
+    private uint _teamCrateSightDone;   // duos, during a sight pass: bit per team whose sight is worked out already
     private int _crateSightTick = -1;   // the tick of the last sight pass (none again on that tick); -1 before the first of the match
     private int _crateSightPasses;      // the sight passes made since this server was made
     private long _crateSightTicks;      // Stopwatch ticks the passes took, in all
@@ -97,26 +101,53 @@ public sealed partial class BattleServer
 
     /// <summary>
     /// What each human seat in the match sees of the crates right now (stage 6 design §4.4): with a live tank, <see cref="CrateSet.VisibleTo"/>
-    /// from it (a wreck sees none), and that is added to what the seat knows; without a tank, nothing in sight (what it knows
-    /// stays). Called after the vision update on the ticks it works, the match's first and then every <see cref="VisionTracker.UpdateInterval"/>-th
-    /// (<see cref="_crateSightTick"/> keeps it to once a tick, as the tracker does): a seat's snapshot rows between passes are the last
-    /// pass's crates, standing as of each tick. Bots' slots are left alone. No allocation.
+    /// from it (a wreck sees none) — in duos (§5.2) its team's, every live tank of the team looking, a bot team-mate's too, the
+    /// seat's own tank dead or alive (worked out once a team a pass: <see cref="TeamCrateSight"/>) — and that is added to what the
+    /// seat knows; without a tank, nothing in sight (what it knows stays). Called after the vision update on the ticks it works, the
+    /// match's first and then every <see cref="VisionTracker.UpdateInterval"/>-th (<see cref="_crateSightTick"/> keeps it to once a
+    /// tick, as the tracker does): a seat's snapshot rows between passes are the last pass's crates, standing as of each tick. Bots'
+    /// slots are left alone. No allocation.
     /// </summary>
     private void RefreshCrateSight(Simulation sim, MatchRules rules, CrateSet crates)
     {
         long started = Stopwatch.GetTimestamp();
+        bool duos = ModeRules.IsDuos(rules.Mode);
+        _teamCrateSightDone = 0;
         foreach (BattleSeat? seat in _seats)
         {
             if (seat is not { IsBot: false, InMatch: true }) continue;
             ref readonly Standing standing = ref rules.Of(seat.Slot);
-            int slot = standing.Active ? sim.SlotOf(standing.TankId) : -1;
-            ulong seen = slot < 0 ? 0 : crates.VisibleTo(sim.Tanks[slot], sim.Field);
+            ulong seen;
+            if (!standing.Active) seen = 0;
+            else if (duos) seen = TeamCrateSight(sim, crates, standing.Team);
+            else
+            {
+                int slot = sim.SlotOf(standing.TankId);
+                seen = slot < 0 ? 0 : crates.VisibleTo(sim.Tanks[slot], sim.Field);
+            }
             _crateVisible[seat.Slot] = seen;
             _crateKnown[seat.Slot] |= seen;
         }
         _crateSightTick = sim.Tick;
         _crateSightPasses++;
         _crateSightTicks += Stopwatch.GetTimestamp() - started;
+    }
+
+    /// <summary>
+    /// Duos: the crates <paramref name="team"/> sees in this sight pass, every live tank of it looking (<see cref="CrateSet.VisibleTo"/>,
+    /// or'd); worked out on the first ask of the pass and kept in <see cref="_teamCrateSight"/> for the team-mate's. No allocation.
+    /// </summary>
+    private ulong TeamCrateSight(Simulation sim, CrateSet crates, byte team)
+    {
+        if (team >= _teamCrateSight.Length) return 0;
+        uint bit = 1u << team;
+        if ((_teamCrateSightDone & bit) != 0) return _teamCrateSight[team];
+        ulong seen = 0;
+        foreach (ref readonly TankState t in sim.Tanks)
+            if (t.Team == team && !t.IsDestroyed) seen |= crates.VisibleTo(t, sim.Field);
+        _teamCrateSight[team] = seen;
+        _teamCrateSightDone |= bit;
+        return seen;
     }
 
     /// <summary>
@@ -185,7 +216,7 @@ public sealed partial class BattleServer
     private static Vector2 OnTheWire(Vector2 position) =>
         new(BattleProtocol.FromCm(BattleProtocol.ToCm(position.X)), BattleProtocol.FromCm(BattleProtocol.ToCm(position.Y)));
 
-    /// <summary>Tests: the crates seat <paramref name="slot"/>'s tank saw at the last sight pass, bit per id (its snapshot's rows); 0 outside a crate match, for a bot, a wreck.</summary>
+    /// <summary>Tests: the crates seat <paramref name="slot"/>'s tank (in duos, its team's) saw at the last sight pass, bit per id (its snapshot's rows); 0 outside a crate match, for a bot, a wreck (in duos, a team with none alive).</summary>
     internal ulong CrateVisibleOf(byte slot) => _crateVisible[slot];
 
     /// <summary>Tests: every crate seat <paramref name="slot"/> has seen this match, bit per id.</summary>

@@ -72,7 +72,9 @@ public enum BotActivity : byte
 /// it, dropping the fight only when time is short (Bot.Zone.cs); everyone being an enemy there, it keeps off every tank,
 /// makes room when holding, and handles getting stuck in its own ways (Bot.Crowd.cs). Wandering there with nothing to
 /// fight, it fetches a useful supply crate it sees within <see cref="BotDirector.CrateRange"/> when the zone's timing
-/// allows, stopping to fight on the way (stage 6B: Bot.Crates.cs).</para>
+/// allows, stopping to fight on the way (stage 6B: Bot.Crates.cs). In duos it plays as in a royale and keeps with its
+/// team-mate: one of the two follows the other and heads for it once too far off; they run for one point of the ring; and
+/// each prefers the enemy the other fights (stage 6C: Bot.Duo.cs).</para>
 /// <para>Allocation-free after construction; deterministic (its own random numbers and the simulation's state).</para>
 /// </remarks>
 public sealed partial class Bot
@@ -101,6 +103,8 @@ public sealed partial class Bot
         Zone,
         /// <summary>A royale: driving to supply crate <see cref="_crate"/>, to stop on it (Bot.Crates.cs).</summary>
         Crate,
+        /// <summary>Duos: driving to its team-mate, the goal moved on as it moves, to stop near it (Bot.Duo.cs).</summary>
+        Mate,
     }
 
     private readonly BotDirector _director;
@@ -314,7 +318,7 @@ public sealed partial class Bot
             return;
         }
         if (_leg == Leg.Arrived) _leg = Leg.End;
-        _needPath = _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
+        _needPath = _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Mate;
     }
 
     /// <summary>After ticks went unheard: a wreck whose tank is alive again was revived meanwhile.</summary>
@@ -352,9 +356,10 @@ public sealed partial class Bot
         WatchHealth(director, me, tick);
         if (_leg == Leg.Paused && tick >= _retryAt) Begin(RunningToZone ? Leg.Zone : Leg.End, Goal, keepPath: false);
         if (director.ZoneOn) WatchZone(director, me, tick);
+        if (director.Duos) WatchMate(director, me, tick);
         CheckArrival(me, tick);
         WatchCrates(director, me, tick);
-        int target = Picker.Pick(sim, director.Vision, tick);
+        int target = Picker.Pick(sim, director.Vision, tick, director.MateTarget(me, tick));
         HeightField terrain = sim.Field.Terrain;
         bool onTheWay = (FallingBack || Retreating || ZoneUrgent) && _leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone;
         InputCmd cmd;
@@ -528,6 +533,9 @@ public sealed partial class Bot
             case Leg.Via when Reached(me, BotDirector.ViaRadius):
                 NextVia(keepPath: true);
                 break;
+            case Leg.Mate when Reached(me, BotDirector.WaypointRadius):
+                MateGoalReached(me, tick);
+                break;
             case Leg.End when Steering.StoppedAt(me, Goal) || (WholePath && Steering.StoppedAt(me, _path[_pathCount - 1])):
                 if (OutsideItsCircle(me)) EndMissed(me, pause: false, tick: 0);
                 else
@@ -559,9 +567,17 @@ public sealed partial class Bot
     /// <summary>The path held runs all the way to the current goal.</summary>
     private bool WholePath => _pathCount > 0 && !_pathCut && _pathGoal == Goal;
 
-    /// <summary>The next waypoint: another one drawn (never the same twice running); a royale's are drawn inside the zone's ring (Bot.Zone.cs).</summary>
+    /// <summary>
+    /// The next waypoint: another one drawn (never the same twice running); a royale's are drawn inside the zone's ring
+    /// (Bot.Zone.cs). A follower in duos doesn't wander: it holds where it is (Bot.Duo.cs).
+    /// </summary>
     private void NextWaypoint(in TankState me)
     {
+        if (_director.Follows(this, me))
+        {
+            HoldForMate(me);
+            return;
+        }
         if (_director.ZoneOn)
         {
             NextWaypointInZone(me);
@@ -589,7 +605,8 @@ public sealed partial class Bot
     private void Begin(Leg leg, Vector2 goal, bool keepPath)
     {
         (_leg, Goal, _legStucks, _askAfter) = (leg, goal, 0, 0);
-        _needPath = leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Crate;
+        (_heldForMate, _waitingForMate) = (false, false);
+        _needPath = leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Crate or Leg.Mate;
         if (!keepPath) _pathCount = 0;
     }
 
@@ -622,6 +639,9 @@ public sealed partial class Bot
                 break;
             case Leg.Zone:
                 NextWaypoint(me);
+                break;
+            case Leg.Mate:
+                RegroupMissed(me, tick);
                 break;
             case Leg.End when FallingBack || (Role == BotRole.Attack && !Retreating):
                 EndMissed(me, pause: true, tick);
@@ -684,12 +704,13 @@ public sealed partial class Bot
                 (_pathGoal, _pathFrom) = (_askedGoal, _askedFrom);
                 _pathCut = _pathCount == BotDirector.MaxPathPoints && _path[_pathCount - 1] != _askedGoal;
                 _asked = false;
-                if (WanderLeavesRing()) WanderElsewhere(me, tick);
-                else _wanderOut = 0;
+                if (!PathLeavesRing()) _wanderOut = 0;
+                else if (_leg == Leg.Mate) RegroupMissed(me, tick);   // duos: not out of the ring for the team-mate (Bot.Duo.cs)
+                else WanderElsewhere(me, tick);
                 break;
             case PathStatus.NoPath:
                 _asked = false;
-                if (_leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Crate) NotFound(me, tick);
+                if (_leg is Leg.Waypoint or Leg.Via or Leg.End or Leg.Zone or Leg.Crate or Leg.Mate) NotFound(me, tick);
                 break;
         }
     }

@@ -5,8 +5,11 @@ using Tank.Sim.Modes;
 
 namespace Tank.Client.Match;
 
-/// <summary>What the score plate's two side blocks count (blueprint §4.2): kills per team, tanks left per team, or the player's own kills and the field.</summary>
-public enum PlateKind : byte { TeamKills, TeamAlive, SoloKills }
+/// <summary>
+/// What the score plate's two side blocks count (blueprint §4.2): kills per team, tanks left per team, the player's own
+/// kills and the field, or (duos, stage 6 design §5.2) the own team's kills and the teams left of those that started.
+/// </summary>
+public enum PlateKind : byte { TeamKills, TeamAlive, SoloKills, DuoTeams }
 
 /// <summary>
 /// The numbers behind the score plate's side blocks. <c>Left</c> is the player's side (own team, or the player's own
@@ -33,6 +36,7 @@ public static class HudText
     private const string TeamKillsLeft = "我方", TeamKillsRight = "敌方";
     private const string TeamAliveLeft = "我方存活", TeamAliveRight = "敌方存活";
     private const string SoloKills = "击毁", SoloAlive = "存活";
+    private const string DuoKills = "本队击毁", DuoTeamsLeft = "存活队伍";
 
     /// <summary>What a name cut by <see cref="Fit"/> ends with.</summary>
     public const string Ellipsis = "…";
@@ -93,8 +97,9 @@ public static class HudText
     /// <summary>
     /// What the plate shows for <paramref name="mode"/>. Team battle: the team kills from <paramref name="match"/>, own
     /// team first. Annihilation and standard: tanks alive of all each side has had in the match (those who joined
-    /// midway included). Free-for-all: the player's own kills and the tanks still alive of the field.
-    /// <paramref name="players"/> is indexed by room slot.
+    /// midway included). Free-for-all and royale: the player's own kills and the tanks still alive of the field. Duos: the
+    /// own team's kills (its two seats' summed) and the teams with a live tank of the teams that started
+    /// (<see cref="MatchBlock.Entrants"/>). <paramref name="players"/> is indexed by room slot. Allocates nothing.
     /// </summary>
     public static PlateValues Plate(BattleMode mode, byte ownSlot, byte ownTeam, in MatchBlock match, ReadOnlySpan<PlayerStats> players)
     {
@@ -108,6 +113,8 @@ public static class HudText
                 Count(players, ownTeam, out int mine, out int mineOf);
                 Count(players, (byte)(1 - ownTeam), out int theirs, out int theirsOf);
                 return new PlateValues(PlateKind.TeamAlive, mine, mineOf, theirs, theirsOf);
+            case BattleMode.Duos:
+                return new PlateValues(PlateKind.DuoTeams, TeamKills(players, ownTeam), 0, TeamsAlive(players), match.Entrants);
             default:
                 int kills = ownSlot < players.Length ? players[ownSlot].Kills : 0;
                 CountAll(players, out int alive, out int total);
@@ -120,6 +127,7 @@ public static class HudText
     {
         PlateKind.TeamKills => new PlateParts(TeamKillsLeft, Number(plate.Left), TeamKillsRight, Number(plate.Right)),
         PlateKind.TeamAlive => new PlateParts(TeamAliveLeft, Fraction(plate.Left, plate.LeftOf), TeamAliveRight, Fraction(plate.Right, plate.RightOf)),
+        PlateKind.DuoTeams => new PlateParts(DuoKills, Number(plate.Left), DuoTeamsLeft, Fraction(plate.Right, plate.RightOf)),
         _ => new PlateParts(SoloKills, Number(plate.Left), SoloAlive, Fraction(plate.Right, plate.RightOf)),
     };
 
@@ -127,13 +135,14 @@ public static class HudText
     /// The results screen's words (allocates: call it when its inputs change). Team modes: 胜利 / 失败 / 平局 from the
     /// winning team against <paramref name="ownTeam"/>, with the kills, the wipe-out or (standard) why the match ended
     /// (<see cref="ResultsInfo.Reason"/>) under it. Free-for-all: the player's
-    /// place ("第 N 名", from the server's rank) and who was left. Royale: <see cref="RoyaleWinTitle"/> for the first place,
-    /// "第 N 名" otherwise, over "共 N 名" from <see cref="ResultsInfo.Entrants"/>. <paramref name="plate"/> and <paramref name="players"/>
+    /// place ("第 N 名", from the server's rank) and who was left. Royale and duos (<see cref="ModeRules.HasZone"/>):
+    /// <see cref="RoyaleWinTitle"/> for the first place, "第 N 名" otherwise — in duos the team's place, which the server
+    /// gives both of its seats — over "共 N 名" from <see cref="ResultsInfo.Entrants"/> (seats, or duos' teams). <paramref name="plate"/> and <paramref name="players"/>
     /// are the frame's; <paramref name="names"/> is by slot.
     /// </summary>
     public static ResultsParts Results(BattleMode mode, byte ownSlot, byte ownTeam, in ResultsInfo info, in PlateValues plate, ReadOnlySpan<PlayerStats> players, string?[] names)
     {
-        if (mode == BattleMode.Royale) return RoyaleResults(ownSlot, info, players);
+        if (ModeRules.HasZone(mode)) return RoyaleResults(ownSlot, info, players);
         if (!ModeRules.HasTeams(mode)) return SoloResults(ownSlot, info, players, names);
         ResultTone tone = info.WinnerTeam == MatchRules.NoTeam ? ResultTone.Neutral : info.WinnerTeam == ownTeam ? ResultTone.Win : ResultTone.Lose;
         string title = tone switch { ResultTone.Win => "胜利", ResultTone.Lose => "失败", _ => "平局" };
@@ -164,12 +173,15 @@ public static class HudText
         _ => "时间到，平局",
     };
 
-    /// <summary>Rank 1: 吃鸡！ (a win); rank n: 第 n 名; none: 对局结束 — each over "共 N 名" (the entrants, plan deviation 8).</summary>
+    /// <summary>
+    /// Rank 1: 吃鸡！ (a win); rank n: 第 n 名; none: 对局结束 — each over "共 N 名" (the entrants, plan deviation 8), or
+    /// nothing under it when the server sent no entrants (never "共 0 名").
+    /// </summary>
     private static ResultsParts RoyaleResults(byte ownSlot, in ResultsInfo info, ReadOnlySpan<PlayerStats> players)
     {
         int rank = ownSlot < players.Length ? players[ownSlot].Rank : 0;
         string title = rank == 1 ? RoyaleWinTitle : rank > 1 ? Place(rank) : MatchOverTitle;
-        string subtitle = string.Create(CultureInfo.InvariantCulture, $"共 {info.Entrants} 名");
+        string subtitle = info.Entrants > 0 ? string.Create(CultureInfo.InvariantCulture, $"共 {info.Entrants} 名") : string.Empty;
         return new ResultsParts(title, subtitle, rank == 1 ? ResultTone.Win : ResultTone.Neutral);
     }
 
@@ -207,6 +219,23 @@ public static class HudText
             total++;
             if (p.Alive) alive++;
         }
+    }
+
+    private static int TeamKills(ReadOnlySpan<PlayerStats> players, byte team)
+    {
+        int kills = 0;
+        foreach (PlayerStats p in players)
+            if (p.Active && p.Team == team) kills += p.Kills;
+        return kills;
+    }
+
+    /// <summary>Duos: the teams (0 to <see cref="ModeRules.DuoTeams"/> − 1) with a live tank; a team number past them counts for none.</summary>
+    private static int TeamsAlive(ReadOnlySpan<PlayerStats> players)
+    {
+        uint alive = 0;
+        foreach (PlayerStats p in players)
+            if (p.Active && p.Alive && p.Team < ModeRules.DuoTeams) alive |= 1u << p.Team;
+        return System.Numerics.BitOperations.PopCount(alive);
     }
 
     private static void CountAll(ReadOnlySpan<PlayerStats> players, out int alive, out int total)

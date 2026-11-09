@@ -54,6 +54,7 @@ public class HudDemoFramesTests
             if (frame.Phase == MatchPhase.Playing) Assert.Equal(0, p.Rank);   // nobody is ranked while the match runs
             Assert.True(p.TankId > 0);
             if (ModeRules.HasTeams(frame.Mode)) Assert.InRange(p.Team, 0, 1);
+            if (ModeRules.IsDuos(frame.Mode)) Assert.InRange(p.Team, 0, ModeRules.DuoTeams - 1);
         }
         Assert.Equal(active, frame.Players.Where(p => p.Active).Select(p => p.TankId).Distinct().Count());
         Assert.True(frame.Players[frame.OwnSlot].Active);
@@ -80,7 +81,12 @@ public class HudDemoFramesTests
     {
         HudDemoFrames.TryGet(name, out HudDemo demo);
         MatchHudFrame f = demo.Frame;
-        var match = new MatchBlock { TeamScore0 = f.Plate.Kind == PlateKind.TeamKills ? f.Plate.Left : 0, TeamScore1 = f.Plate.Kind == PlateKind.TeamKills ? f.Plate.Right : 0 };
+        var match = new MatchBlock
+        {
+            TeamScore0 = f.Plate.Kind == PlateKind.TeamKills ? f.Plate.Left : 0,
+            TeamScore1 = f.Plate.Kind == PlateKind.TeamKills ? f.Plate.Right : 0,
+            Entrants = (byte)(f.Plate.Kind == PlateKind.DuoTeams ? f.Plate.RightOf : 0),
+        };
         Assert.Equal(f.Plate, HudText.Plate(f.Mode, f.OwnSlot, f.OwnTeam, match, f.Players));
     }
 
@@ -224,10 +230,12 @@ public class HudDemoFramesTests
 
     private static readonly string[] RoyaleScreens = { "royale", "royale-outside", "royale-map", "results-royale-win", "results-royale", "royale-crates" };
 
+    private static readonly string[] DuoScreens = { "duos", "scoreboard-duos", "results-duos-win", "results-duos" };
+
     [Fact]
     public void The_map_screens_come_last_and_leave_the_others_as_they_were()
     {
-        Assert.Equal(ScreensBeforeTheMap.Append("minimap").Append("map-full").Concat(RoyaleScreens), HudDemoFrames.Names);
+        Assert.Equal(ScreensBeforeTheMap.Append("minimap").Append("map-full").Concat(RoyaleScreens).Concat(DuoScreens), HudDemoFrames.Names);
         foreach (string name in ScreensBeforeTheMap)
         {
             HudDemoFrames.TryGet(name, out HudDemo demo);
@@ -235,7 +243,7 @@ public class HudDemoFramesTests
             Assert.False(demo.Frame.Zone.On);   // the zone is a royale's alone
             Assert.Equal(0, demo.Frame.Results.Entrants);
         }
-        foreach (string name in HudDemoFrames.Names.Where(n => n != "royale-crates"))
+        foreach (string name in HudDemoFrames.Names.Where(n => n is not ("royale-crates" or "duos")))
         {
             HudDemoFrames.TryGet(name, out HudDemo demo);
             Assert.Null(demo.Pickups);                 // the crates' screen alone shows toasts, buffs and crate squares:
@@ -405,6 +413,7 @@ public class HudDemoFramesTests
     [InlineData("royale-outside")]
     [InlineData("royale-map")]
     [InlineData("royale-crates")]
+    [InlineData("duos")]
     public void Every_point_of_the_royale_map_frames_is_in_the_drivable_square(string name)
     {
         HudDemoFrames.TryGet(name, out HudDemo demo);
@@ -491,5 +500,111 @@ public class HudDemoFramesTests
         for (int i = 0; i < crates.Length; i++)
             for (int j = i + 1; j < crates.Length; j++)
                 Assert.True(Vector2.Distance(crates[i].Position, crates[j].Position) >= CratePlacer.Spacing, "the gallery's crates keep the placer's spacing");
+    }
+
+    // The duos screens (stage 6 design §5.2): eight teams of two as a room seats four people and twelve bots, the player in seat 0 on team 0 with 机器人 1 (seat 4).
+
+    [Theory]
+    [InlineData("duos")]
+    [InlineData("scoreboard-duos")]
+    [InlineData("results-duos-win")]
+    [InlineData("results-duos")]
+    public void Every_duos_screen_is_eight_teams_of_two_with_the_player_and_robot_one_on_team_zero(string name)
+    {
+        Assert.True(HudDemoFrames.TryGet(name, out HudDemo demo));
+        MatchHudFrame f = demo.Frame;
+        PlayerStats[] active = f.Players.Where(p => p.Active).ToArray();
+
+        Assert.Equal(BattleMode.Duos, f.Mode);
+        Assert.Equal((0, 0), (f.OwnSlot, f.OwnTeam));
+        Assert.Equal(16, active.Length);
+        Assert.All(active.GroupBy(p => p.Team), g => Assert.Equal(2, g.Count()));
+        Assert.Equal(8, active.Select(p => p.Team).Distinct().Count());
+        Assert.Equal(0, f.Players[4].Team);
+        Assert.Equal("机器人 1", f.Names[4]);
+        Assert.Equal(PlateKind.DuoTeams, f.Plate.Kind);
+        Assert.Equal(8, f.Plate.RightOf);
+        Assert.Equal(f.Phase == MatchPhase.Ended ? 8 : 0, f.Results.Entrants);
+        Assert.Equal(f.Phase == MatchPhase.Playing, f.Zone.On);
+        Assert.Null(demo.Pickups);
+        Assert.False(f.Buffs.Any);
+    }
+
+    [Fact]
+    public void The_duos_screen_has_the_team_mate_on_the_map_in_the_ally_colours_and_on_the_feed()
+    {
+        HudDemoFrames.TryGet("duos", out HudDemo demo);
+        HudDemoFrames.TryGet("royale", out HudDemo royale);
+        MatchHudFrame f = demo.Frame;
+
+        Assert.Equal(MatchPhase.Playing, f.Phase);
+        Assert.Equal("6:15", HudText.Timer(f.TicksLeft));
+        Assert.Equal(royale.Frame.Zone, f.Zone);
+        Assert.Equal(new PlateParts("本队击毁", "3", "存活队伍", "6/8"), HudText.Parts(f.Plate));
+        Assert.True(f.Players[0].Alive && f.Players[4].Alive);
+        Assert.False(demo.ScoreboardOpen);
+
+        Assert.Contains(demo.Kills, l => l.KillerSide == Side.Ally && l.VictimSide == Side.Enemy);
+        Assert.Contains(demo.Kills, l => l.KillerSide == Side.Own);
+        Assert.All(demo.Kills, l => Assert.False(l.Friendly));
+
+        MinimapDemo map = Assert.IsType<MinimapDemo>(demo.Minimap);
+        Assert.Equal(RiverlandMap.Id, map.MapId);
+        Assert.False(map.FullOpen);
+        Assert.Equal(royale.Minimap!.Frame.Zone, map.Frame.Zone);
+        MinimapTank[] tanks = map.Frame.Tanks.ToArray();
+        MinimapTank mate = Assert.Single(tanks, t => t.Side == Side.Ally);
+        Assert.False(mate.Destroyed);
+        Assert.InRange(Vector2.Distance(mate.Position, map.Frame.Eye.Position), 20f, BotDirectorMateRange);   // beside the player, as a bot that keeps up would be
+        Assert.True(tanks.Count(t => t.Side == Side.Enemy && !t.Destroyed) >= 3);
+        Assert.InRange(map.Frame.Crates.Length, 2, 6);
+    }
+
+    /// <summary>The bots' <c>BotDirector.MateRange</c> (internal to the server's side): past it a bot heads back to its team-mate.</summary>
+    private const float BotDirectorMateRange = 60f;
+
+    [Fact]
+    public void The_duos_scoreboard_screen_lists_sixteen_rows_in_eight_groups_with_the_living_teams_first()
+    {
+        HudDemoFrames.TryGet("scoreboard-duos", out HudDemo demo);
+        HudDemoFrames.TryGet("duos", out HudDemo duos);
+        var rows = ScoreboardRows(demo.Frame);
+
+        Assert.True(demo.ScoreboardOpen);
+        Assert.Equal(duos.Frame.Players, demo.Frame.Players);
+        Assert.Equal(16, rows.Count);
+        for (int i = 0; i < 16; i += 2) Assert.Equal(rows[i].Team, rows[i + 1].Team);   // the two of a team together
+        Assert.Equal(8, rows.Select(r => r.Team).Distinct().Count());
+        Assert.Equal(Enumerable.Range(1, 8).SelectMany(n => new[] { n, n }), rows.Select(r => r.Rank));
+        int firstOut = rows.ToList().FindIndex(r => !rows.Any(o => o.Team == r.Team && o.Alive));
+        Assert.True(firstOut > 0 && rows.Skip(firstOut).All(r => !r.Alive), "the teams that are out come last");
+        Assert.Equal(new[] { Side.Own, Side.Ally }, rows.Where(r => r.Team == 0).Select(r => r.Side).Order());
+        Assert.Equal(("860", "420"), (ScoreboardModel.DamageCell(rows.Single(r => r.Side == Side.Own), ended: false), ScoreboardModel.DamageCell(rows.Single(r => r.Side == Side.Ally), ended: false)));
+        Assert.All(rows.Where(r => r.Side == Side.Enemy), r => Assert.Equal("", ScoreboardModel.DamageCell(r, ended: false)));   // the team-mate's damage shows, an enemy's not
+    }
+
+    [Theory]
+    [InlineData("results-duos-win", 1, "吃鸡！", ResultTone.Win)]
+    [InlineData("results-duos", 3, "第 3 名", ResultTone.Neutral)]
+    public void The_duos_results_rank_the_eight_teams_with_damage_and_time_lasted(string name, int ownRank, string title, ResultTone tone)
+    {
+        HudDemoFrames.TryGet(name, out HudDemo demo);
+        MatchHudFrame f = demo.Frame;
+        var rows = ScoreboardRows(f);
+        ResultsParts words = HudText.Results(f.Mode, f.OwnSlot, f.OwnTeam, f.Results, f.Plate, f.Players, f.Names);
+
+        Assert.Equal(MatchPhase.Ended, f.Phase);
+        Assert.Equal(BannerKind.Results, f.Banner);
+        Assert.Equal((title, "共 8 名", tone), (words.Title, words.Subtitle, words.Tone));
+        Assert.Equal(16, rows.Count);
+        Assert.Equal(Enumerable.Range(1, 8).SelectMany(n => new[] { n, n }), rows.Select(r => r.Rank));
+        Assert.Equal(ownRank, rows.Single(r => r.Side == Side.Own).Rank);
+        Assert.Equal(rows[0].Team, f.Results.WinnerTeam);
+        Assert.Equal(MatchRules.NoSlot, f.Results.WinnerSlot);
+        Assert.True(rows.Take(2).Any(r => r.Alive) && rows.Skip(2).All(r => !r.Alive), "only the winning team has anyone standing");
+        for (int i = 2; i < rows.Count; i += 2) Assert.True(Math.Max(rows[i].Lasted, rows[i + 1].Lasted) < Math.Max(rows[i - 2].Lasted, rows[i - 1].Lasted), "a better place lasted longer");
+        Assert.All(rows, r => Assert.True(r.Damage > 0 || r.Kills == 0));
+        Assert.InRange(f.Results.TicksLeft, 1, ModeRules.ResultsTicks);
+        Assert.Null(demo.Minimap);
     }
 }

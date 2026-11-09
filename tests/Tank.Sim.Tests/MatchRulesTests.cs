@@ -281,7 +281,7 @@ public sealed class MatchRulesTests
             if (mode is BattleMode.TeamBattle or BattleMode.Standard) Assert.Equal(3, m.Join(2, 1) > 0 ? m.Sim.TankCount : 0);
             else Assert.Throws<InvalidOperationException>(() => m.Join(2, 1));
         }
-        Assert.Equal(new[] { "teambattle", "annihilation", "ffa", "standard", "royale" }, ModeRules.All.Select(ModeRules.Id));
+        Assert.Equal(new[] { "teambattle", "annihilation", "ffa", "standard", "royale", "duos" }, ModeRules.All.Select(ModeRules.Id));
         Assert.True(ModeRules.TryParse("FFA", out BattleMode ffa) && ffa == BattleMode.FreeForAll);
         Assert.False(ModeRules.TryParse("coop", out _));
     }
@@ -381,7 +381,8 @@ public sealed class MatchRulesTests
     {
         Assert.Equal(16, ModeRules.MaxPlayers);
         Assert.Equal(16, ModeRules.MaxPlayersFor(BattleMode.Royale));
-        foreach (BattleMode mode in ModeRules.All.Where(m => m != BattleMode.Royale)) Assert.Equal(10, ModeRules.MaxPlayersFor(mode));
+        Assert.Equal(16, ModeRules.MaxPlayersFor(BattleMode.Duos));
+        foreach (BattleMode mode in ModeRules.All.Where(m => !ModeRules.HasZone(m))) Assert.Equal(10, ModeRules.MaxPlayersFor(mode));
         Assert.Equal(2, ModeRules.MinPlayers);
         Assert.Equal(5 * Tps, ModeRules.ProtectionTicks);
         Assert.Equal(10 * Tps, ModeRules.RespawnTicks);

@@ -87,13 +87,13 @@ public class ScoreboardModelTests
     }
 
     [Fact]
-    public void The_damage_cell_leaves_others_blank_until_the_match_has_ended()
+    public void The_damage_cell_leaves_an_enemys_blank_until_the_match_has_ended()
     {
         var own = new ScoreRow(0, "阿成", 0, "中坦", 3, 0, true, 1, Side.Own, "存活", Damage: 1240, Lasted: 552);
         var enemy = own with { Slot = 1, Team = 1, Side = Side.Enemy, Damage = 0 };
         var ally = own with { Slot = 2, Side = Side.Ally, Damage = 0 };
 
-        Assert.Equal(("1240", "", ""), (ScoreboardModel.DamageCell(own, ended: false), ScoreboardModel.DamageCell(enemy, false), ScoreboardModel.DamageCell(ally, false)));
+        Assert.Equal(("1240", "", "0"), (ScoreboardModel.DamageCell(own, ended: false), ScoreboardModel.DamageCell(enemy, false), ScoreboardModel.DamageCell(ally, false)));
         Assert.Equal(("1240", "0", "870"), (ScoreboardModel.DamageCell(own, ended: true), ScoreboardModel.DamageCell(enemy, true), ScoreboardModel.DamageCell(ally with { Damage = 870 }, true)));
         Assert.Equal("0", ScoreboardModel.DamageCell(own with { Damage = 0 }, false));
     }

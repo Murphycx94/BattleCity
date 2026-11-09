@@ -12,7 +12,7 @@ namespace Tank.Sim.Ai;
 /// radius, <see cref="BotDirector.ZoneArriveRadius"/> at least) or at the point: in a ring smaller than
 /// <see cref="BotDirector.ZoneWanderRadius"/> it then holds where it is, otherwise it wanders on between the waypoints well
 /// inside the ring (a random point in it when none is; a path there that leaves the ring is dropped for another point:
-/// <see cref="WanderLeavesRing"/>). A point it can't reach is given up for the next (with no way to
+/// <see cref="PathLeavesRing"/>). A point it can't reach is given up for the next (with no way to
 /// it, after holding <see cref="BotDirector.ZoneRetryTicks"/>), and after <see cref="BotDirector.ZoneTries"/> it starts
 /// over, holding first. A new
 /// ring sends a running bot to its point in the new one, a wandering bot whose waypoint lies outside it to another, and
@@ -143,15 +143,16 @@ public sealed partial class Bot
     }
 
     /// <summary>
-    /// Wandering in a royale, whether the path just come leaves the ring (<see cref="BotDirector.InRing"/>) it wanders in:
-    /// a waypoint well inside it may be reached only the long way round, outside (round a cliff), and the ring may be
-    /// shrinking (batch C review follow-up). The ring being convex, the points are all there is to look at. A crate run
+    /// Wandering in a royale, or heading for its team-mate in duos (<see cref="Leg.Mate"/>: 6C batch C review follow-up),
+    /// whether the path just come leaves the ring (<see cref="BotDirector.InRing"/>) it is in: a waypoint well inside it,
+    /// or the team-mate, may be reached only the long way round, outside (round a cliff), and the ring may be shrinking
+    /// (batch C review follow-up). The ring being convex, the points are all there is to look at. A crate run
     /// (<see cref="Leg.Crate"/>) isn't looked at: the crate lies in the ring and the way is short, and the run's own timing
     /// (<see cref="BotDirector.CrateFor"/>, <see cref="BotDirector.CrateGiveUpTicks"/>) bounds it.
     /// </summary>
-    private bool WanderLeavesRing()
+    private bool PathLeavesRing()
     {
-        if (!_director.ZoneOn || RunningToZone || _leg is not (Leg.Waypoint or Leg.Zone)) return false;
+        if (!_director.ZoneOn || RunningToZone || _leg is not (Leg.Waypoint or Leg.Zone or Leg.Mate)) return false;
         ZoneRing target = _director.Zone.Target;
         for (int k = 0; k < _pathCount; k++)
             if (!BotDirector.InRing(_path[k], target)) return true;

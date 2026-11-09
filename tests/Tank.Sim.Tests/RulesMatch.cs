@@ -30,8 +30,9 @@ internal sealed class RulesMatch
     public readonly MatchRules Rules;
     private readonly Dictionary<int, InputCmd> _orders = new();
 
-    public RulesMatch(BattleMode mode, uint seed = 0, IReadOnlyList<ZoneRing>? zone = null, IReadOnlyList<Crate>? crates = null) =>
-        Rules = new MatchRules(mode, Sim, Layout, bases: Bases, seed: seed, zone: zone, crates: crates);
+    /// <param name="durationTicks">A match length other than the mode's, or null for the mode's own.</param>
+    public RulesMatch(BattleMode mode, uint seed = 0, IReadOnlyList<ZoneRing>? zone = null, IReadOnlyList<Crate>? crates = null, int? durationTicks = null) =>
+        Rules = new MatchRules(mode, Sim, Layout, durationTicks, Bases, seed, zone, crates);
 
     public int Join(byte slot, byte team = 0, TankSpec? spec = null) => Rules.Join(slot, spec ?? TankCatalog.Medium, team);
 

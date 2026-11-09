@@ -80,7 +80,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
         _log = log ?? (_ => { });
         CheckMaps(_options);
         _mode = _options.Mode;
-        _bots = System.Math.Clamp(_options.Bots, 0, ModeRules.MaxBotsFor(_mode));   // 9 in the 10-seat modes, 15 in a royale
+        _bots = System.Math.Clamp(_options.Bots, 0, ModeRules.MaxBotsFor(_mode));   // 9 in the 10-seat modes, 15 in a royale or duos
         _roomMap = _options.Map;
         _maps = new ServerMaps(_options.PrepareMapsInBackground, _log);
         _maps.Prepare(_roomMap);
@@ -312,4 +312,7 @@ public sealed partial class BattleServer : ITransportHandler, ITickServer
         _crateKnown[slot] = 0;
         _crateGone[slot] = 0;
     }
+
+    /// <summary>Tests: <see cref="FreeSeat"/>, as a reconnect grace running out does.</summary>
+    internal void FreeSeatForTests(byte slot) => FreeSeat(slot);
 }

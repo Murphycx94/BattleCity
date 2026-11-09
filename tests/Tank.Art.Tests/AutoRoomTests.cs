@@ -206,4 +206,90 @@ public class AutoRoomTests
         for (int i = 0; i < AutoRoom.SettleCalls && step.Kind == AutoStepKind.Wait; i++) step = auto.Next(room, Me, true, humansWanted);
         return step;
     }
+    [Fact]
+    public void A_host_sends_its_team_after_the_mode_and_before_the_bots()
+    {
+        var auto = new AutoRoom(null, BattleMode.Duos, 4, autoStart: false, team: 1);
+
+        Assert.Equal(new AutoStep(AutoStepKind.SetMode, Mode: BattleMode.Duos), auto.Next(Room(), Me, true, 1));
+        Assert.Equal(new AutoStep(AutoStepKind.SetTeam, Team: 1), auto.Next(Room(BattleMode.Duos), Me, true, 1));
+        Assert.Equal(new AutoStep(AutoStepKind.SetBots, Bots: 4), auto.Next(Room(BattleMode.Duos), Me, true, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Duos, 4), Me, true, 1).Kind);
+    }
+
+    [Fact]
+    public void A_guest_sends_its_team_once_after_its_tank_and_only_outside_a_match()
+    {
+        var auto = new AutoRoom("heavy", null, null, autoStart: false, team: 1);
+
+        Assert.Equal(AutoStepKind.SetTank, auto.Next(Room(running: true, players: Human(1)), 1, isHost: false, 1).Kind);
+        Assert.Equal(AutoStepKind.Wait, auto.Next(Room(running: true, players: Human(1, "heavy")), 1, isHost: false, 1).Kind);
+        Assert.Equal(new AutoStep(AutoStepKind.SetTeam, Team: 1), auto.Next(Room(players: Human(1, "heavy")), 1, isHost: false, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(players: Human(1, "heavy")), 1, isHost: false, 1).Kind);
+        auto.Reset();
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(players: Human(1, "heavy")), 1, isHost: false, 1).Kind);   // sent once a session
+    }
+
+    [Fact]
+    public void A_team_the_room_already_shows_is_not_sent()
+    {
+        var auto = new AutoRoom(null, null, null, autoStart: false, team: 0);
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(players: Human(1)), 1, isHost: false, 1).Kind);
+    }
+
+    private static RoomPlayer OnTeam(byte slot, byte team) => Human(slot) with { Team = team };
+
+    [Fact]
+    public void A_guest_waits_for_a_mode_that_has_its_team_before_sending_it_once()
+    {
+        var auto = new AutoRoom(null, null, null, autoStart: false, team: 5);
+
+        for (int i = 0; i < 3; i++)
+            Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.TeamBattle, players: OnTeam(1, 0)), 1, isHost: false, 1).Kind);   // a team room has no team 6
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Royale, players: OnTeam(1, 0)), 1, isHost: false, 1).Kind);
+        Assert.Equal(new AutoStep(AutoStepKind.SetTeam, Team: 5), auto.Next(Room(BattleMode.Duos, players: OnTeam(1, 1)), 1, isHost: false, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Duos, players: OnTeam(1, 1)), 1, isHost: false, 1).Kind);   // sent once
+    }
+
+    [Fact]
+    public void A_team_shown_before_the_switch_to_duos_does_not_count_and_is_asked_for_once_the_room_re_teams_the_seat()
+    {
+        var auto = new AutoRoom(null, null, null, autoStart: false, team: 0);
+
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.TeamBattle, players: OnTeam(1, 0)), 1, isHost: false, 1).Kind);   // already team 0: nothing to send yet
+        Assert.Equal(new AutoStep(AutoStepKind.SetTeam, Team: 0), auto.Next(Room(BattleMode.Duos, players: OnTeam(1, 2)), 1, isHost: false, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Duos, players: OnTeam(1, 2)), 1, isHost: false, 1).Kind);
+    }
+
+    [Fact]
+    public void A_host_whose_team_the_pre_switch_room_shows_sends_its_bots_and_asks_for_the_team_after_the_switch()
+    {
+        var auto = new AutoRoom(null, BattleMode.Duos, 4, autoStart: false, team: 0);
+
+        Assert.Equal(new AutoStep(AutoStepKind.SetMode, Mode: BattleMode.Duos), auto.Next(Room(), Me, true, 1));
+        Assert.Equal(new AutoStep(AutoStepKind.SetBots, Bots: 4), auto.Next(Room(BattleMode.TeamBattle, players: OnTeam(Me, 0)), Me, true, 1));
+        Assert.Equal(new AutoStep(AutoStepKind.SetTeam, Team: 0), auto.Next(Room(BattleMode.Duos, 4, players: OnTeam(Me, 3)), Me, true, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Duos, 4, players: OnTeam(Me, 0)), Me, true, 1).Kind);
+    }
+
+    [Fact]
+    public void A_host_already_on_its_team_sends_none()
+    {
+        var auto = new AutoRoom(null, BattleMode.Duos, 4, autoStart: false, team: 2);
+
+        Assert.Equal(AutoStepKind.SetMode, auto.Next(Room(BattleMode.Duos, players: OnTeam(Me, 2)), Me, true, 1).Kind);
+        Assert.Equal(new AutoStep(AutoStepKind.SetBots, Bots: 4), auto.Next(Room(BattleMode.Duos, players: OnTeam(Me, 2)), Me, true, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Duos, 4, players: OnTeam(Me, 2)), Me, true, 1).Kind);
+    }
+
+    [Fact]
+    public void A_host_waits_out_a_running_match_before_sending_its_team()
+    {
+        var auto = new AutoRoom(null, null, null, autoStart: false, team: 1);
+
+        Assert.Equal(AutoStepKind.Wait, auto.Next(Room(BattleMode.Duos, running: true, players: OnTeam(Me, 0)), Me, true, 1).Kind);
+        Assert.Equal(AutoStepKind.Wait, auto.Next(Room(BattleMode.Duos, running: true, players: OnTeam(Me, 0)), Me, true, 1).Kind);
+        Assert.Equal(new AutoStep(AutoStepKind.SetTeam, Team: 1), auto.Next(Room(BattleMode.Duos, players: OnTeam(Me, 0)), Me, true, 1));
+        Assert.Equal(AutoStepKind.Done, auto.Next(Room(BattleMode.Duos, players: OnTeam(Me, 0)), Me, true, 1).Kind);
+    }
 }

@@ -97,13 +97,19 @@ public class RoomRulesTests
             yield return new object[] { mode, 1, 2, null!, map };
             yield return new object[] { mode, 2, 0, split, map };
             yield return new object[] { mode, 2, 2, split, map };
-            yield return new object[] { mode, 2, 0, together, map };
+            yield return new object[] { mode, 2, 0, together, map };   // duos: one team, refused ("fewer than two teams")
             yield return new object[] { mode, 2, 1, together, map };
         }
         yield return new object[] { BattleMode.TeamBattle, 1, 1, null!, SandboxMap.Id };
         yield return new object[] { BattleMode.FreeForAll, 1, 1, null!, SandboxMap.Id };
         yield return new object[] { BattleMode.TeamBattle, 2, 9, split, SandboxMap.Id };
         yield return new object[] { BattleMode.Royale, 2, 14, null!, RiverlandMap.Id };
+        // Duos: one person and one bot make one team (refused); a third tank opens a second; people spread and partnered.
+        yield return new object[] { BattleMode.Duos, 1, 1, null!, RiverlandMap.Id };
+        yield return new object[] { BattleMode.Duos, 1, 15, null!, RiverlandMap.Id };
+        yield return new object[] { BattleMode.Duos, 3, 3, new byte[] { 0, 0, 5 }, RiverlandMap.Id };
+        yield return new object[] { BattleMode.Duos, 3, 0, new byte[] { 4, 4, 4 }, RiverlandMap.Id };   // the third can't join a full team: two teams
+        yield return new object[] { BattleMode.Duos, 2, 0, new byte[] { 7, 7 }, RiverlandMap.Id };
     }
 
     [Theory]
@@ -125,7 +131,7 @@ public class RoomRulesTests
             var onSandbox = new RoomStateMessage(mode, 0, 0, false, two, SandboxMap.Id, MapState.Ready);
             var onRiverland = onSandbox with { Map = RiverlandMap.Id };
             Assert.Null(RoomRules.StartBlockReason(onRiverland));
-            if (mode == BattleMode.Royale) Assert.Equal("吃鸡只在河谷开：换到河谷。", RoomRules.StartBlockReason(onSandbox));
+            if (ModeRules.HasZone(mode)) Assert.Equal("吃鸡只在河谷开：换到河谷。", RoomRules.StartBlockReason(onSandbox));   // a royale, duos
             else Assert.Null(RoomRules.StartBlockReason(onSandbox));
         }
     }
@@ -238,6 +244,80 @@ public class RoomRulesTests
         var seated = Enumerable.Range(0, BattleProtocol.MaxPlayers).Select(i => room.Server.Rules!.Of((byte)i)).Where(p => p.Active).ToList();
         Assert.Equal(plan.Team0, seated.Count(p => p.Team == 0));
         Assert.Equal(plan.Team1, seated.Count(p => p.Team == 1));
+    }
+
+    [Theory]
+    [InlineData(1, 15, new byte[] { 0 })]
+    [InlineData(3, 3, new byte[] { 0, 0, 5 })]
+    [InlineData(2, 5, new byte[] { 6, 1 })]
+    [InlineData(4, 15, new byte[] { 0, 1, 2, 2 })]   // only twelve places left: the plan caps the bots as the server does
+    public void Duos_bots_go_to_the_teams_the_plan_says(int humans, int bots, byte[] teams)
+    {
+        var room = new Room(humans, MapCatalog.Riverland, MapCatalog.All);
+        room.Host.SetMode(BattleMode.Duos);
+        room.Host.SetBots(bots);
+        room.Run(0.5);
+        for (int i = 0; i < humans; i++) room.Clients[i].SetTeam(teams[i]);
+        room.Run(0.5);
+
+        RoomStateMessage state = room.Host.Room!;
+        Assert.Equal(teams, state.Players.OrderBy(p => p.Slot).Select(p => p.Team));
+        int[] planned = RoomRules.DuoBots(state);
+        StartPlan plan = RoomRules.PlanFor(state);
+        room.Host.StartMatch();
+        room.Run(0.5);
+
+        Assert.True(room.Server.MatchRunning);
+        var seated = Enumerable.Range(0, BattleProtocol.MaxPlayers).Select(i => room.Server.Rules!.Of((byte)i)).Where(p => p.Active).ToList();
+        int[] botsByTeam = new int[ModeRules.DuoTeams];
+        foreach (RoomPlayer bot in room.Host.Room!.Players.Where(p => p.IsBot)) botsByTeam[room.Server.Rules!.Of(bot.Slot).Team]++;
+        Assert.Equal(planned, botsByTeam);
+        Assert.Equal(plan.Bots, botsByTeam.Sum());
+        Assert.Equal(plan.TeamsManned, seated.Select(p => p.Team).Distinct().Count());
+        Assert.Equal((0, 0, 0, 0), (plan.Team0, plan.Team1, plan.BotsToTeam0, plan.BotsToTeam1));
+    }
+
+    [Fact]
+    public void Duos_needs_two_teams_with_tanks_and_says_so_after_the_tank_count()
+    {
+        RoomPlayer[] one = { new(0, "P0", 0, 1, false, true, false) };
+        RoomPlayer[] pair = { new(0, "P0", 3, 1, false, true, false), new(1, "P1", 3, 1, false, true, false) };
+
+        Assert.Equal("至少要有两辆坦克：等朋友加入，或加几个机器人。", RoomRules.StartBlockReason(Duos(0, one)));
+        Assert.Equal("至少要有两队有车：让朋友选别的队，或加几个机器人。", RoomRules.StartBlockReason(Duos(1, one)));
+        Assert.Null(RoomRules.StartBlockReason(Duos(2, one)));
+        Assert.Equal("至少要有两队有车：让朋友选别的队，或加几个机器人。", RoomRules.StartBlockReason(Duos(0, pair)));
+        Assert.Null(RoomRules.StartBlockReason(Duos(1, pair)));
+        Assert.Equal(new[] { 1, 0, 0, 0, 0, 0, 0, 0 }, RoomRules.DuoBots(Duos(1, one)));
+        Assert.Equal(new[] { 1, 1, 0, 0, 0, 0, 0, 0 }, RoomRules.DuoBots(Duos(2, one)));
+        Assert.Equal(new[] { 1, 0, 0, 0, 0, 0, 0, 0 }, RoomRules.DuoBots(Duos(1, pair)));
+        Assert.Equal(new StartPlan(2, 1, 0, 0, 0, 0, 2), RoomRules.PlanFor(Duos(1, pair)));
+
+        static RoomStateMessage Duos(int bots, RoomPlayer[] players) => new(BattleMode.Duos, 0, (byte)bots, false, players, RiverlandMap.Id, MapState.Ready);
+    }
+
+    [Fact]
+    public void A_duos_seat_on_a_team_past_the_eight_is_on_no_team_for_the_bots_and_the_count()
+    {
+        // The server re-teams every seat on a switch to duos, so it can't happen today; the 4-bit wire team allows 8–15.
+        RoomPlayer[] players = { new(0, "P0", 0, 1, false, true, false), new(1, "P1", 12, 1, false, true, false) };
+        var room = new RoomStateMessage(BattleMode.Duos, 0, 2, false, players, RiverlandMap.Id, MapState.Ready);
+
+        Assert.Equal(new[] { 1, 1, 0, 0, 0, 0, 0, 0 }, RoomRules.DuoBots(room));   // the first bot partners P0, the second opens team 1
+        Assert.Equal(new StartPlan(2, 2, 0, 0, 0, 0, 2), RoomRules.PlanFor(room));     // teams 0 and 1; the stray seat counts as a person only
+        Assert.Null(RoomRules.StartBlockReason(room));
+    }
+
+    [Fact]
+    public void Outside_duos_no_teams_are_counted_and_no_duo_bots_planned()
+    {
+        RoomPlayer[] two = { new(0, "P0", 0, 1, false, true, false), new(1, "P1", 1, 1, false, true, false) };
+        foreach (BattleMode mode in ModeRules.All.Where(m => !ModeRules.IsDuos(m)))
+        {
+            var room = new RoomStateMessage(mode, 0, 3, false, two, RiverlandMap.Id, MapState.Ready);
+            Assert.Equal(0, RoomRules.PlanFor(room).TeamsManned);
+            Assert.All(RoomRules.DuoBots(room), n => Assert.Equal(0, n));
+        }
     }
 
     [Fact]

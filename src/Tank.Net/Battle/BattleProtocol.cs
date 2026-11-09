@@ -38,6 +38,9 @@ public enum BattleMessage : byte
 public static class BattleProtocol
 {
     /// <summary>
+    /// 7: duos (stage 6 design §5) — not a bit of the layout changes: the mode byte takes <see cref="BattleMode.Duos"/> (5), a
+    /// room roster's team is 0–7 in duos, and in a duos match the match block's winner is a team (no slot), its entrants
+    /// the teams that joined (<c>MatchRules.Places</c>) and each scoreboard line's rank its team's place.
     /// 6: the supply crates (stage 6 design §4.4) — the crates a viewer sees in its snapshot (never the crate table), its
     /// own buff layers in its own tank, the pickup message (<see cref="BattleMessage.Crate"/>) to the one player who ate a
     /// crate, the crates a seat knows in the match start (a resync). 5: the royale (stage 6 design §3.5) — 16 seats on the
@@ -47,7 +50,7 @@ public static class BattleProtocol
     /// ended, the scoreboard each player's capture, the match start the bases. 3: maps carry their ground kinds and water
     /// level, houses and trees, up to 16384 props (riverland design §5.1).
     /// </summary>
-    public const int Version = 6;
+    public const int Version = 7;
 
     /// <summary>The UDP port a room listens on unless told otherwise; discovery broadcasts only reach rooms on it.</summary>
     public const int DefaultPort = 27015;

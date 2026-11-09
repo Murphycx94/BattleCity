@@ -100,8 +100,8 @@ public sealed class StandardRulesTests
     public void The_standard_mode_is_the_designs()
     {
         Assert.Equal(3, (byte)BattleMode.Standard);
-        Assert.Equal(new[] { BattleMode.TeamBattle, BattleMode.Annihilation, BattleMode.FreeForAll, BattleMode.Standard, BattleMode.Royale }, ModeRules.All);
-        Assert.Equal(new[] { "teambattle", "annihilation", "ffa", "standard", "royale" }, ModeRules.All.Select(ModeRules.Id));
+        Assert.Equal(new[] { BattleMode.TeamBattle, BattleMode.Annihilation, BattleMode.FreeForAll, BattleMode.Standard, BattleMode.Royale, BattleMode.Duos }, ModeRules.All);
+        Assert.Equal(new[] { "teambattle", "annihilation", "ffa", "standard", "royale", "duos" }, ModeRules.All.Select(ModeRules.Id));
         Assert.True(ModeRules.TryParse("STANDARD", out BattleMode standard) && standard == BattleMode.Standard);
         Assert.Equal(10 * 60 * Tps, ModeRules.DurationTicks(BattleMode.Standard));
         Assert.Equal(18000, ModeRules.DurationTicks(BattleMode.Standard));
@@ -110,7 +110,7 @@ public sealed class StandardRulesTests
         Assert.True(ModeRules.JoinsMidMatch(BattleMode.Standard));
         foreach (BattleMode mode in ModeRules.All)
             Assert.Equal(mode == BattleMode.Standard, ModeRules.HasBases(mode));
-        Assert.Equal(BattleMode.Royale, ModeRules.LastMode);
+        Assert.Equal(BattleMode.Duos, ModeRules.LastMode);
     }
 
     [Fact]

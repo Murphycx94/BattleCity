@@ -17,6 +17,7 @@ public static class ModeText
         BattleMode.FreeForAll => "各自为战",
         BattleMode.Standard => "标准战",
         BattleMode.Royale => "吃鸡",
+        BattleMode.Duos => "双人吃鸡",
         _ => mode.ToString(),
     };
 
@@ -31,6 +32,7 @@ public static class ModeText
             BattleMode.FreeForAll => $"人人为敌，被击毁就出局；最后留下的一辆获胜，{minutes} 分钟后按剩余血量定胜负。",
             BattleMode.Standard => $"两队对抗，被击毁就出局；全歼对方或占满对方基地（{BaseCapture.PointsToWin} 分）获胜，{minutes} 分钟内没分出胜负算平局。",
             BattleMode.Royale => $"最多 {ModeRules.RoyaleMaxPlayers} 辆车，人人为敌，被击毁就出局；毒圈缩小 {ZoneSchedule.Rings} 次，圈外掉血；最后留下的一辆吃鸡，{minutes} 分钟后按剩余血量定名次。",
+            BattleMode.Duos => $"最多 {ModeRules.RoyaleMaxPlayers} 辆车，两人一队共 {ModeRules.DuoTeams} 队，队友共享视野；毒圈缩小 {ZoneSchedule.Rings} 次，圈外掉血；一队两人都被击毁才出局，最后留下的一队吃鸡，{minutes} 分钟后按剩余血量定名次。",
             _ => string.Empty,
         };
     }

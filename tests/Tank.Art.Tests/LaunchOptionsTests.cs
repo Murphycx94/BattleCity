@@ -373,4 +373,34 @@ public class LaunchOptionsTests
         Assert.Equal(("pickup", 2.0), (options.ShotAfterEvent, options.ShotAfterDelay));
         Assert.Empty(options.Warnings);
     }
+    [Theory]
+    [InlineData("1", 0)]
+    [InlineData("3", 2)]
+    [InlineData("8", 7)]
+    public void Team_counts_from_one_and_is_kept_from_zero(string value, byte expected)
+    {
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--team", value });
+        Assert.Equal(expected, options.Team);
+        Assert.Empty(options.Warnings);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("9")]
+    [InlineData("x")]
+    [InlineData("-1")]
+    public void A_team_out_of_range_is_ignored_with_a_warning(string value)
+    {
+        LaunchOptions options = LaunchOptions.Parse(new[] { "--team", value });
+        Assert.Null(options.Team);
+        string warning = Assert.Single(options.Warnings);
+        Assert.Contains($"'{value}'", warning);
+        Assert.Contains("1 to 8", warning);
+    }
+
+    [Fact]
+    public void No_team_unless_asked_for()
+    {
+        Assert.Null(LaunchOptions.Parse(Array.Empty<string>()).Team);
+    }
 }

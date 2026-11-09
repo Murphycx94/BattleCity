@@ -107,6 +107,22 @@ internal static class TestMaps
     public static MapDefinition RoyaleStandIn() =>
         new(RiverlandMap.Id, "河谷（测试）", WalledField, new SpawnLayout(TeamSpawns, RoyaleSoloSpawns), Waypoints);
 
+    /// <summary>
+    /// Duos' eight team points on the walled map (a duos match needs one per team): four west of the wall at x 40 facing east,
+    /// four east of it at x 170 facing west, 40 m apart north–south, so a team's two (10 m apart across the heading) stand clear
+    /// of the next team's. Which team gets which is the match seed's; the tests put the tanks where they need them.
+    /// </summary>
+    public static readonly IReadOnlyList<SpawnPoint> DuoSoloSpawns = new[] { 40f, 80f, 120f, 160f }
+        .SelectMany(z => new[] { new SpawnPoint(new Vector2(40, z), Angles.YawOf(Vector2.UnitX), 0), new SpawnPoint(new Vector2(170, z), Angles.YawOf(-Vector2.UnitX), 0) })
+        .ToArray();
+
+    /// <summary>
+    /// A stand-in for the riverland in the server's duos tests: <see cref="RoyaleStandIn"/>'s walled map with <see cref="DuoSoloSpawns"/>,
+    /// under the riverland's id (duos is held there only).
+    /// </summary>
+    public static MapDefinition DuoStandIn() =>
+        new(RiverlandMap.Id, "河谷（双人测试）", WalledField, new SpawnLayout(TeamSpawns, DuoSoloSpawns), Waypoints);
+
     private static Battlefield WalledField()
     {
         HeightField terrain = TestWorld.Flat();

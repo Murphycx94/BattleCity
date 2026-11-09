@@ -6,10 +6,18 @@ using Tank.Sim.Vision;
 namespace Tank.Net.Battle;
 
 /// <summary>Which tanks one client is told about (design §5.5), decided on the server only.</summary>
-public readonly record struct Viewer(byte Team, int OwnTankId, bool OwnDestroyed, bool FreeForAll)
+/// <param name="Team">The viewer's team: whose shared sight it sees through (in duos 0–7, each player's own in a free-for-all or a royale).</param>
+/// <param name="SeesAllWhenDead">
+/// Whether the viewer sees everything once dead (or without a tank yet): in a free-for-all and a royale always; in duos only once
+/// nobody of its team is left alive (stage 6 design §5.2); never in the two-team modes. While its own tank lives it never does.
+/// </param>
+public readonly record struct Viewer(byte Team, int OwnTankId, bool OwnDestroyed, bool SeesAllWhenDead)
 {
-    /// <summary>A dead player in a free-for-all watches everything; everyone else sees through their team's eyes.</summary>
-    public bool SeesAll => FreeForAll && (OwnTankId == 0 || OwnDestroyed);
+    /// <summary>
+    /// A dead player who may watch everything (<see cref="SeesAllWhenDead"/>: a free-for-all, a royale, duos with the whole team out) does;
+    /// everyone else, a dead duos player whose team-mate lives included, sees through their team's eyes.
+    /// </summary>
+    public bool SeesAll => SeesAllWhenDead && (OwnTankId == 0 || OwnDestroyed);
 
     public bool Sees(in TankState tank, VisionTracker vision)
     {
